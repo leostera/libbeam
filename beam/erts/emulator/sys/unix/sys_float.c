@@ -28,14 +28,6 @@
 #include "global.h"
 #include "erl_process.h"
 
-void
-erts_sys_init_float(void)
-{
-# ifdef SIGFPE
-    sys_signal(SIGFPE, SIG_IGN); /* Ignore so we can test for NaN and Inf */
-# endif
-}
-
 /* The following check is incorporated from the Vee machine */
     
 #define ISDIGIT(d) ((d) >= '0' && (d) <= '9')

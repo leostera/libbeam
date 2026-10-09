@@ -520,8 +520,10 @@ and [initial engine-seam findings](0002-engine-seams.md).
   phase split is retained directly in `beam/erts/emulator/beam/erl_init.c` on the clean
   upstream base. A new experimental POSIX entry genuinely starts the global emulator
   and returns to its C++ caller; bytecode runs in that same PID. It is process-lifetime
-  only, takes global signal ownership and retains fatal startup/exit behavior.
-  No engine shutdown or isolates: [evidence](0002-engine-start-evidence.md).
+  only and retains fatal startup/exit behavior. The mode switch, standalone signal
+  administration, spawn/forker drivers and node bootstrap services have since been
+  deleted: [current evidence](0002-single-runtime.md). No engine shutdown or isolates;
+  [historical first-return evidence](0002-engine-start-evidence.md).
   P0-03 remains open until creation and destruction both return safely.
 - [ ] **P0-04 — Isolate context and fresh bootstrap.** Introduce explicit owned state,
   staged initialization/unwind and pre-publication membership. Reuse engine scheduler

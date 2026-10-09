@@ -19,7 +19,11 @@ but they do not define the embedded runtime's supported surface. The six-houseke
 process startup fixture is also temporary bring-up scaffolding, not a mandate to
 retain six workers forever.
 
-## First cut: no executable-port helper in embedded startup
+## Historical first cut: no executable-port helper in embedded startup
+
+The implementation and evidence below describe `f72ac87c`. The mode switch and
+native failure stubs have since been deleted, along with node startup services;
+see [the current single-runtime contract and evidence](0002-single-runtime.md).
 
 The previous real-runtime witness needed BINDIR because ordinary OTP startup launches
 `erl_child_setup` for executable ports. That dependency is not needed for libbeam.

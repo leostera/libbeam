@@ -10,10 +10,17 @@ import run_engine_start_probe as probe
 
 
 class EngineStartProbeTests(unittest.TestCase):
+    def test_removed_symbols_must_have_neither_definitions_nor_callers(self):
+        self.assertEqual(probe.removed_symbols('000 T _erts_set_signal\n U _forker_driver'),
+                         {'erts_set_signal', 'forker_driver'})
+        self.assertEqual(probe.removed_symbols('000 T os_set_signal_2'), {'os_set_signal_2'})
+        self.assertFalse(probe.removed_symbols('archive.o:\n000 T _erl_start_embedded'))
+
     def test_requires_host_bytecode_and_denial_markers(self):
         host = 'HOST_STARTUP_RETURNED pid=123 second_start=rejected\n'
         beam = ('BEAM_STARTUP_OK pid=123\n'
-                'EXECUTABLE_PORTS_DENIED checks=7 forker_port=false\n')
+                'EXECUTABLE_PORTS_DENIED checks=11 forker_port=false\n'
+                'SIGNAL_ADMIN_REMOVED checks=6 signal_server=false\n')
         self.assertTrue(probe.host_markers(host + beam, 123))
         self.assertTrue(probe.host_markers(beam + host, 123))
         for text in (host, beam, host + beam + beam, host + beam.replace('123', '124'),
@@ -26,9 +33,11 @@ class EngineStartProbeTests(unittest.TestCase):
 pid=os.getpid()
 print(f"HOST_STARTUP_RETURNED pid={pid} second_start=rejected", flush=True)
 print(f"BEAM_STARTUP_OK pid={pid}", flush=True)
-print("EXECUTABLE_PORTS_DENIED checks=7 forker_port=false", flush=True)
+print("EXECUTABLE_PORTS_DENIED checks=11 forker_port=false", flush=True)
+print("SIGNAL_ADMIN_REMOVED checks=6 signal_server=false", flush=True)
 assert os.read(int(os.environ['LIBBEAM_PROBE_CONTROL_FD']),1)==b'X'
 print("HOST_NO_CHILDREN sigchld_preserved=true", flush=True)
+print("HOST_SIGNALS_OK dispositions=9 altstack=true mask=true usr1_delivered=true", flush=True)
 print("HOST_CONTROL_OK engine_shutdown=false isolates_created=0 process_exit=true", flush=True)
 '''
         with tempfile.TemporaryDirectory() as temp:

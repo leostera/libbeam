@@ -1022,9 +1022,6 @@ extern Uint erts_dump_num_lit_areas;
 ErtsLiteralArea *erts_get_next_lambda_lit_area(ErtsLiteralArea *prev);
 
 /* break.c */
-void init_break_handler(void);
-void erts_set_ignore_break(void);
-void erts_replace_intr(void);
 void process_info(fmtfn_t, void *);
 void print_process_info(fmtfn_t, void *, Process*, ErtsProcLocks);
 void info(fmtfn_t, void *);
@@ -1032,7 +1029,6 @@ void loaded(fmtfn_t, void *);
 void erts_print_base64(fmtfn_t to, void *to_arg, const byte* src, Uint size);
 
 /* sighandler sys.c */
-int erts_set_signal(Eterm signal, Eterm type);
 
 /* erl_arith.c */
 
@@ -1652,8 +1648,6 @@ extern void erts_match_prog_foreach_offheap(Binary *b,
 #define MATCH_SET_EXCEPTION_TRACE (0x4) /* exception trace requested */
 #define MATCH_SET_RX_TRACE (MATCH_SET_RETURN_TRACE|MATCH_SET_EXCEPTION_TRACE)
 
-extern erts_driver_t spawn_driver;
-extern erts_driver_t forker_driver;
 extern erts_driver_t fd_driver;
 
 int erts_beam_jump_table(void);

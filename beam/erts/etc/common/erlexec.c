@@ -668,7 +668,6 @@ int main(int argc, char **argv)
 			 */
 			add_args("-noshell", "-noinput", "-s", "c", "lc_batch",
 				 NULL);
-			add_Eargs("-B");
 			haltAfterwards = 0;
 		    }
 #ifdef __WIN32__
@@ -749,7 +748,6 @@ int main(int argc, char **argv)
 		     */
 		    if (strcmp(argv[i], "-make") == 0) {
 			add_args("-noshell", "-noinput", "-s", "make", "all_or_nothing", NULL);
-			add_Eargs("-B");
 			haltAfterwards = 1;
 			i = argc; /* Skip rest of command line */
 		    } else if (strcmp(argv[i], "-man") == 0) {

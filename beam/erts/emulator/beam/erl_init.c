@@ -103,17 +103,9 @@ static void erl_init(int ncpu,
 /* Internal startup phases, not reentrant embedding APIs. */
 static void start_otp_world(char *init, int boot_argc, char **boot_argv);
 static void start_runtime_threads(void);
-static void erl_start_common(int argc, char **argv, int return_to_host);
+static void erl_start_common(int argc, char **argv);
 /* Startup is restricted to one host control thread and one attempt per process. */
 static int start_claimed;
-static int embedded_mode;
-
-/* Selected before initialization, immutable after startup on the host thread. */
-int
-erts_is_embedded(void)
-{
-    return embedded_mode;
-}
 
 static erts_atomic_t exiting;
 
@@ -190,8 +182,6 @@ ErtsModifiedTimings erts_modified_timings[] = {
 
 Export *erts_delay_trap = NULL;
 
-int ignore_break;
-int replace_intr;
 
 static ERTS_INLINE int
 has_prefix(const char *prefix, const char *string)
@@ -342,7 +332,6 @@ erl_init(int ncpu,
     erts_mseg_late_init(); /* Must be after timer (erts_init_time()) and thread
 			      initializations */
 #endif
-    erl_sys_late_init();
     packet_parser_init();
     erl_nif_init();
     erts_msacc_init();
@@ -567,12 +556,6 @@ __decl_noreturn void __noreturn  erts_usage(void)
     erts_fprintf(stderr, "-A number      set number of threads in async thread pool;\n");
     erts_fprintf(stderr, "               valid range is [1-%d]\n",
 		 ERTS_MAX_NO_OF_ASYNC_THREADS);
-    erts_fprintf(stderr, "\n");
-
-    erts_fprintf(stderr, "-B[c|d|i]      set break (Ctrl+C) behavior; valid letters are:\n");
-    erts_fprintf(stderr, "                  'c' to have Ctrl+C interrupt the Erlang shell;\n");
-    erts_fprintf(stderr, "                  'd' (or no extra option) to disable the break handler;\n");
-    erts_fprintf(stderr, "                  'i' to ignore break signals\n");
     erts_fprintf(stderr, "\n");
 
     erts_fprintf(stderr, "-c bool        enable or disable time correction\n");
@@ -841,8 +824,6 @@ early_init(int *argc, char **argv) /*
 				     &ncpuavail,
 				     &ncpuquota);
 
-    ignore_break = 0;
-    replace_intr = 0;
     program = argv[0];
 
     erts_modified_timing_level = -1;
@@ -1315,7 +1296,10 @@ void
 erl_start(int argc, char **argv)
 {
     start_claimed = 1;
-    erl_start_common(argc, argv, 0);
+    erl_start_common(argc, argv);
+    /* Temporary command-line tool host: keep the process alive until halt.
+     * This is the same runtime contract, not an unrestricted legacy mode. */
+    erts_sys_main_thread();
 }
 
 #ifndef __WIN32__
@@ -1326,19 +1310,16 @@ erl_start_embedded(int argc, char **argv)
     if (start_claimed)
         return 1;
     start_claimed = 1;
-    embedded_mode = 1;
-    sys_init_signal_stack();
-    erl_start_common(argc, argv, 1);
+    erl_start_common(argc, argv);
     return 0;
 }
 #endif
 
 static void
-erl_start_common(int argc, char **argv, int return_to_host)
+erl_start_common(int argc, char **argv)
 {
     int i = 1;
     char* arg=NULL;
-    int have_break_handler = 1;
     char envbuf[21]; /* enough for any 64-bit integer */
     size_t envbufsz;
     int ncpu = early_init(&argc, argv);
@@ -1857,29 +1838,6 @@ erl_start_common(int argc, char **argv, int return_to_host)
         erts_usage();
 #endif
         break;
-
-	case 'B':
-	  if (argv[i][2] == 'i')          /* +Bi */
-	    ignore_break = 1;
-	  else if (argv[i][2] == 'c')     /* +Bc */
-	    replace_intr = 1;
-	  else if (argv[i][2] == 'd')     /* +Bd */
-	    have_break_handler = 0;
-	  else if (argv[i+1][0] == 'i') { /* +B i */
-	    get_arg(argv[i]+2, argv[i+1], &i);
-	    ignore_break = 1;
-	  }
-	  else if (argv[i+1][0] == 'c') { /* +B c */
-	    get_arg(argv[i]+2, argv[i+1], &i);
-	    replace_intr = 1;
-	  }
-	  else if (argv[i+1][0] == 'd') { /* +B d */
-	    get_arg(argv[i]+2, argv[i+1], &i);
-	    have_break_handler = 0;
-	  }
-	  else			          /* +B */
-	    have_break_handler = 0;
-	  break;
 
 	case 'n':
 	    arg = get_arg(argv[i]+2, argv[i+1], &i);
@@ -2562,23 +2520,6 @@ erl_start_common(int argc, char **argv, int return_to_host)
     _set_output_format(_TWO_DIGIT_EXPONENT);
 #endif
 
-   /* Restart will not reinstall the break handler */
-#ifdef __WIN32__
-    if (ignore_break)
-	erts_set_ignore_break();
-    else if (replace_intr)
-	erts_replace_intr();
-    else
-	init_break_handler();
-#else
-    if (ignore_break)
-	erts_set_ignore_break();
-    else if (have_break_handler)
-	init_break_handler();
-    if (replace_intr)
-	erts_replace_intr();
-#endif
-
     boot_argc = argc - i;  /* Number of arguments to init */
     boot_argv = &argv[i];
 
@@ -2606,17 +2547,8 @@ erl_start_common(int argc, char **argv, int return_to_host)
     start_otp_world(init, boot_argc, boot_argv);
     start_runtime_threads();
 
-    /* Returning startup still takes process-wide signal ownership. It is not
-     * an engine destructor or an empty-world initialization contract. */
-#ifndef __WIN32__
-    if (return_to_host) {
-        erts_sys_prepare_start_return();
-        return;
-    }
-#else
-    (void) return_to_host;
-#endif
-    erts_sys_main_thread(); /* Standalone frontend owns the calling thread. */
+    /* The runtime always returns to its host. No node signal dispatcher or
+     * main-thread driver pump is part of this fork's execution contract. */
 }
 
 /* Populate the conventional, global OTP world before any scheduler runs.

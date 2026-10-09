@@ -54,9 +54,11 @@ Its two-isolate CMake commands are proposed interfaces, not supported targets ye
 The [build/link probes](libbeam/README.md#build-and-link-probes) and
 [real-runtime startup-return experiment](docs/rfds/0002-engine-start-evidence.md)
 are implemented starting points; they do not initialize independent isolates.
-Embedded startup now omits the native forker and rejects executable ports; see
-[the first runtime reduction](docs/rfds/0002-minimal-runtime.md). Other native effects
-remain, so this is not yet an enforced bytecode-only profile.
+There is now one runtime contract, with no embedding-mode switch. Native spawn/forker
+and signal-administration implementations, Darwin driver takeover, and node/network
+bootstrap services have been deleted; see
+[the runtime reduction and evidence](docs/rfds/0002-single-runtime.md). Other native
+effects remain, so this is not yet an enforced bytecode-only profile.
 
 [RFD 0001](docs/rfds/0001-beam-realms.md) documents the earlier Realm experiment.
 Its implementation has been removed from the active emulator. The complete previous

@@ -3182,12 +3182,6 @@ BIF_RETTYPE system_info_1(BIF_ALIST_1)
         erts_bld_uint(NULL, &hsz, erts_this_node->creation);
         hp = hsz ? HAlloc(BIF_P, hsz) : NULL;
         BIF_RET(erts_bld_uint(&hp, NULL, erts_this_node->creation));
-    } else if (BIF_ARG_1 == am_break_ignored) {
-      extern int ignore_break;
-      if (ignore_break) 
-	return am_true; 
-      else
-	return am_false;
     }
     /* Arguments that are unusual follow ... */
     else if (ERTS_IS_ATOM_STR("logical_processors", BIF_ARG_1)) {

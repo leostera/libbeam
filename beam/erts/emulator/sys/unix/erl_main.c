@@ -29,9 +29,6 @@
 int
 main(int argc, char **argv)
 {
-    /* Must be done before we have a chance to spawn any scheduler threads. */
-    sys_init_signal_stack();
-
     erl_start(argc, argv);
     return 0;
 }

@@ -798,7 +798,6 @@ extern void sys_init_time(ErtsSysInitTimeResult *);
 extern void erts_late_sys_init_time(void);
 extern void erts_deliver_time(void);
 extern void erts_time_remaining(SysTimeval *);
-extern void erts_sys_init_float(void);
 
 /* Dynamic library/driver loading */
 typedef struct {
@@ -826,12 +825,7 @@ extern char *erts_sys_ddll_error(int code);
 /*
  * System interfaces for startup.
  */
-/* Internal process-lifetime embedding mode; not tenant authority. */
-int erts_is_embedded(void);
 void erts_sys_main_thread(void);
-#ifndef __WIN32__
-void erts_sys_prepare_start_return(void);
-#endif
 
 extern int erts_sys_prepare_crash_dump(int secs);
 extern void erts_sys_pre_init(void);
@@ -840,7 +834,6 @@ extern void erts_sys_pre_init(void);
 extern void erts_sys_scheduler_init(void);
 
 extern void erl_sys_init(void);
-extern void erl_sys_late_init(void);
 extern void erl_sys_args(int *argc, char **argv);
 extern void erl_sys_schedule(int);
 void sys_tty_reset(int);

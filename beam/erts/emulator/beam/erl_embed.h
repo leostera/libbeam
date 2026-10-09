@@ -23,10 +23,13 @@ extern "C" {
  * Return does not acknowledge completion of asynchronous OTP boot/application
  * execution. There are no tenant isolates and no local code/atom namespaces.
  *
- * Takes process-wide signal/alternate-stack ownership, except that startup
- * leaves the host's SIGCHLD disposition unchanged. CLI errors, boot failure,
+ * Normal startup does not install standalone signal handlers, a signal dispatcher,
+ * a Darwin main-thread pump, or a host alternate signal stack. os:set_signal/2
+ * is unsupported. Runtime-owned threads still prepare their own signal stacks.
+ * Only default untrapped floating-point environments have been tested. Fatal
+ * crash dumping retains legacy signal behavior. CLI errors, boot failure,
  * halt and fatal runtime errors can still terminate the host. No engine shutdown,
- * signal restoration, restart, unload or physical reclamation is implemented.
+ * restart, unload or physical reclamation is implemented.
  * Runtime threads remain live until PROCESS EXIT. Darwin wx/Cocoa main-thread
  * callbacks are unsupported. Trusted standalone bring-up fixtures only.
  *

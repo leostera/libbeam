@@ -63,7 +63,7 @@ preloads, rebuilds, then runs a toolchain startup smoke profile (three fresh VMs
 Use `--legacy-diagnostics` to additionally run 84 focused upstream cases and 35
 resource cases when useful. Those suites are opt-in diagnostics, not compatibility
 requirements. There are no Realm suites or patch-application steps. The baseline
-alone does not exercise the embedded reduced-runtime behavior. It shares the user-wide validation lock and records source/tool
+alone does not test host control or the reduced-operation boundaries. It shares the user-wide validation lock and records source/tool
 identity, commands, logs, timeouts and child summaries. The lock does not coordinate
 arbitrary unrelated user processes or other users.
 
@@ -88,10 +88,11 @@ python3 -B libbeam/tools/run_engine_start_probe.py \
 ```
 
 The native contract is in `beam/erts/emulator/beam/erl_embed.h`. Call once on the host
-main thread. It still takes most process-wide signal ownership and retains fatal
-error handling, but leaves the host's SIGCHLD disposition unchanged. Embedded startup
-no longer creates the native forker; standard executable-port APIs are denied before
-effects, and BINDIR is not required. Other port/native capabilities remain.
+main thread. Normal startup preserves the host's tested signal state, but fatal
+crash-dump/exit behavior remains unsafe. There is no embedding-mode switch: the
+forker/spawn drivers, standalone signal dispatcher and Darwin driver-pump APIs have
+been deleted. Spawn-port forms fail before effects; BINDIR is not required.
+Other port/native capabilities remain.
 Asynchronous boot is not acknowledged
 by the native return itself; the test waits for a bytecode witness through stdout.
 A private inherited FD controls only the test host. No tenant transport is implemented.
@@ -99,11 +100,13 @@ A private inherited FD controls only the test host. No tenant transport is imple
 **There is no engine destructor, restart or isolate creation.** The experiment ends
 with explicit OS process exit, not engine shutdown. Darwin wx/Cocoa main-thread
 callbacks are unsupported. Trusted fixtures only; not a reduced-profile runtime.
-The probe also checks seven executable-port denial paths, absence of the forker port,
-no children at the acknowledgement checkpoint, and preserved SIGCHLD disposition.
+The probe checks nine spawn-port denials, deleted command/signal APIs, absence of
+node bootstrap services and forbidden native symbols, no children at acknowledgement,
+and preserved host signal dispositions, mask and alternate stack. Retained FD
+EOF/close and float operations are exercised too.
 Its three BINDIR cases are absent, nonexistent, and a sentinel-writing canary helper;
 none should execute a helper or command. See the
-[current reduction evidence](../docs/rfds/0002-minimal-runtime.md) and
+[current reduction evidence](../docs/rfds/0002-single-runtime.md) and
 [historical first-start evidence](../docs/rfds/0002-engine-start-evidence.md).
 
 Tests: `python3 -B -m unittest discover -s libbeam/tools -p 'test_*.py' -v`.

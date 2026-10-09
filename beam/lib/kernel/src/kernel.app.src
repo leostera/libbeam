@@ -41,7 +41,6 @@
              erl_erts_errors,
 	     erl_reply,
              erl_kernel_errors,
-             erl_signal_handler,
 	     erpc,
 	     error_handler,
 	     error_logger,

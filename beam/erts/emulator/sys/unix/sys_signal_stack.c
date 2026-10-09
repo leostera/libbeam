@@ -112,47 +112,9 @@ void sys_thread_init_signal_stack(void) {
     }
 }
 
-/*
- * 1. Set up alternate signal stack for the main thread.
- * 2. Add SA_ONSTACK to existing user-defined signal handlers.
- */
-void sys_init_signal_stack(void) {
-    struct sigaction sa;
-    int i;
-
-    sys_thread_init_signal_stack();
-
-    for (i = 1; i < HIGHEST_SIGNAL; ++i) {
-        if (sigaction(i, NULL, &sa)) {
-            /* This will fail with EINVAL on Solaris if 'i' is one of the
-               thread library's private signals. We DO catch the initial
-               setup of these signals, so things MAY be OK anyway. */
-            continue;
-        }
-
-        if (sa.sa_handler == SIG_DFL || sa.sa_handler == SIG_IGN ||
-            (sa.sa_flags & SA_ONSTACK)) {
-            continue;
-        }
-
-        sa.sa_flags |= SA_ONSTACK;
-
-        if (sigaction(i, &sa, NULL)) {
-#ifdef SIGCANCEL
-            /* Solaris 9 x86 refuses to let us modify SIGCANCEL. */
-            if (i == SIGCANCEL)
-                continue;
-#endif
-            ERTS_INTERNAL_ERROR("Failed to use alternate signal stack");
-        }
-    }
-}
+/* The caller's signal stack and dispositions belong to the host. */
 
 #else
-
-void sys_init_signal_stack(void) {
-    /* Not required for this configuration. */
-}
 
 void sys_thread_init_signal_stack(void) {
     /* Not required for this configuration. */

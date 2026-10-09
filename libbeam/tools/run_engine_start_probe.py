@@ -23,14 +23,30 @@ from link_archive_probe import parse_settings
 import otp_validation as runner
 
 
+REMOVED_NATIVE_SYMBOLS = {
+    'erts_is_embedded', 'erts_set_signal', 'erts_set_ignore_break',
+    'erts_replace_intr', 'init_break_handler', 'erl_sys_late_init',
+    'erts_sys_unix_later_init', 'sys_init_signal_stack', 'os_set_signal_2',
+    'erl_drv_steal_main_thread', 'erl_drv_stolen_main_thread_join',
+    'spawn_driver', 'forker_driver', 'spawn_driver_entry', 'forker_driver_entry',
+}
+
+
+def removed_symbols(text):
+    return REMOVED_NATIVE_SYMBOLS & {
+        line.split()[-1].removeprefix('_') for line in text.splitlines() if line.split()
+    }
+
+
 def host_markers(text, pid):
     host = f'HOST_STARTUP_RETURNED pid={pid} second_start=rejected'
     beam = f'BEAM_STARTUP_OK pid={pid}'
-    denied = 'EXECUTABLE_PORTS_DENIED checks=7 forker_port=false'
+    denied = 'EXECUTABLE_PORTS_DENIED checks=11 forker_port=false'
+    signal_denied = 'SIGNAL_ADMIN_REMOVED checks=6 signal_server=false'
     lines = [line for line in text.splitlines()
              if line.startswith(('HOST_STARTUP_RETURNED ', 'BEAM_STARTUP_OK ',
-                                 'EXECUTABLE_PORTS_DENIED '))]
-    return sorted(lines) == sorted([host, beam, denied])
+                                 'EXECUTABLE_PORTS_DENIED ', 'SIGNAL_ADMIN_REMOVED '))]
+    return sorted(lines) == sorted([host, beam, denied, signal_denied])
 
 
 def run_host(command, cwd, env, log, timeout=60):
@@ -64,14 +80,17 @@ def run_host(command, cwd, env, log, timeout=60):
             terminal = 'HOST_CONTROL_OK engine_shutdown=false isolates_created=0 process_exit=true'
             if (process.returncode != 0 or text.splitlines().count(terminal) != 1
                     or text.splitlines().count('HOST_NO_CHILDREN sigchld_preserved=true') != 1
+                    or text.splitlines().count('HOST_SIGNALS_OK dispositions=9 altstack=true mask=true usr1_delivered=true') != 1
                     or not host_markers(text, process.pid)):
                 raise RuntimeError('host control witness failed')
             return {'status': 'passed', 'pid': process.pid, 'returncode': process.returncode,
                     'seconds': round(time.monotonic() - start, 3),
                     'same_pid_bytecode': True, 'second_start': 'rejected',
                     'engine_shutdown': False, 'isolates_created': 0,
-                    'executable_port_denials': 7, 'forker_port': False,
-                    'no_children_at_ack': True, 'sigchld_preserved': True}
+                    'executable_port_denials': 11, 'forker_port': False,
+                    'no_children_at_ack': True, 'sigchld_preserved': True,
+                    'removed_signal_api_checks': 6, 'preserved_signal_dispositions': 9,
+                    'host_altstack_and_mask_preserved': True, 'usr1_delivered': True}
     except BaseException:
         if process is not None:
             runner.stop_group(process)
@@ -110,6 +129,18 @@ def main():
                  source / 'erts/emulator/beam/erl_embed.h',
                  source / 'erts/emulator/beam/erl_init.c', source / 'erts/emulator/beam/sys.h',
                  source / 'erts/emulator/beam/erl_bif_port.c',
+                 source / 'erts/emulator/beam/erl_bif_os.c',
+                 source / 'erts/emulator/beam/erl_drv_thread.c',
+                 source / 'erts/emulator/sys/unix/sys_float.c',
+                 source / 'erts/emulator/beam/erl_bif_info.c',
+                 source / 'erts/emulator/beam/bif.tab',
+                 source / 'erts/emulator/beam/io.c',
+                 source / 'erts/emulator/beam/global.h',
+                 source / 'erts/emulator/beam/erl_driver.h',
+                 source / 'erts/emulator/Makefile.in',
+                 source / 'erts/emulator/sys/unix/sys_signal_stack.c',
+                 source / 'lib/kernel/src/kernel.erl',
+                 source / 'lib/kernel/src/os.erl',
                  source / 'erts/emulator/sys/unix/sys_drivers.c',
                  source / 'erts/emulator/sys/unix/sys.c']:
         report['inputs'][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -131,7 +162,20 @@ def main():
         output.mkdir(parents=True)
         runner.save(output, report)
         try:
+            # Update these interdependent bootstrap modules in one compiler VM.
+            # The existing configured compiler is a build tool, not the runtime
+            # used by the native-host witness below.
+            compiler_vm = next((source / 'bin').glob('*/beam.smp'))
+            report['compiler_vm_sha256'] = hashlib.sha256(compiler_vm.read_bytes()).hexdigest()
+            kernel = source / 'lib/kernel'
+            run('compile-runtime-bootstrap', [str(source / 'bin/erlc'), '-I',
+                str(kernel / 'include'), '-o', str(kernel / 'ebin'),
+                str(kernel / 'src/kernel.erl'), str(kernel / 'src/os.erl')])
             run('build', ['make', f'-j{args.jobs}', 'TYPE=debug', 'FLAVOR=emu'])
+            report['bootstrap_beam_sha256'] = {
+                name: hashlib.sha256((kernel / 'ebin' / name).read_bytes()).hexdigest()
+                for name in ('kernel.beam', 'os.beam')
+            }
             makefiles = [m for m in (source / 'erts/emulator').glob('*/Makefile')
                          if (source / 'bin' / m.parent.name / 'libbeam.a').exists()]
             if len(makefiles) != 1:
@@ -145,14 +189,22 @@ def main():
             if archive.name != 'libbeam.a' or not archive.is_relative_to(source / 'bin'):
                 raise RuntimeError('unexpected generated archive path')
             env.pop('BINDIR', None)
-            report['native_forker'] = 'disabled_in_embedding'
+            report['native_forker'] = 'implementation_deleted'
+            report['standalone_signal_dispatcher'] = 'implementation_deleted'
             archive.unlink(missing_ok=True)
             run('archive', make + [str(archive)], cwd)
             copied = output / 'libbeam.debug.emu.a'
             shutil.copyfile(archive, copied)
+            run('removed-symbols', ['nm', '-g', str(copied)])
+            remaining = removed_symbols((output / 'removed-symbols.log').read_text())
+            if remaining:
+                raise RuntimeError(f'removed native symbols still present: {sorted(remaining)}')
+            report['removed_native_symbols_absent'] = True
             host = output / 'engine_start_probe'
             run('link', shlex.split(settings['CXX']) + ['-std=c++17', str(cpp),
-                '-I' + str(source / 'erts/emulator/beam'), '-o', str(host)] +
+                '-I' + str(source / 'erts/emulator/beam'),
+                '-I' + str(source / 'erts/include'),
+                '-I' + str(source / 'erts/include' / archive.parent.name), '-o', str(host)] +
                 shlex.split(settings['FLAGS']) + [str(copied)] + shlex.split(settings['LIBS']), cwd)
             run('compile-fixtures', [str(source / 'bin/erlc'), '-o', str(output),
                 str(fixtures / 'startup_probe.erl'), str(fixtures / 'engine_start_probe.erl')])
