@@ -22,9 +22,11 @@ limitations under the License.
 
 # RFD 0002: initial engine/library seam findings
 
-Status: **source investigation, not a complete P0-02 ownership map or implemented
-embedding lifecycle**. Source inspected at `8a9327f8788e2766fe737e79082f04c6b0f15d81`;
-none of the emulator files discussed here changed in this investigation.
+Status: **partial P0-02 investigation and internal startup refactoring, not an
+implemented embedding lifecycle**. Initial source inspection was at
+`8a9327f8788e2766fe737e79082f04c6b0f15d81`. The follow-up extracts internal startup
+phases from `erl_start`, preserving their bodies and order. It does not make global
+initialization reentrant, start an empty engine, or change shutdown semantics.
 
 ## 1. OTP already produces an emulator archive
 
@@ -67,11 +69,14 @@ sys/unix/erl_main.c:main
             scheduler/process/time/allocator support
             code indices, atoms, exports, module table, registry
             ETS, distribution, drivers, async I/O, native built-ins
-        load_preloaded()
-        publish staging code index
-        create ordinary OTP init process
-        create global system processes
-        start scheduler threads
+        start_otp_world(init, boot_argc, boot_argv)
+            load_preloaded()
+            publish staging code index
+            create ordinary OTP init process
+            create global system processes
+        start_runtime_threads()
+            erts_start_schedulers()
+            lock-count post-startup hook, when enabled
         erts_sys_main_thread()  // source explicitly says it may not return
 ```
 
@@ -91,6 +96,27 @@ termination as bringing down the whole VM. They cannot simply be copied into eac
 isolate and then terminated during eviction with unchanged failure semantics.
 Decide which housekeeping is engine-wide with retained isolate provenance and which
 is isolate-local; preserve correct code/literal reclamation in either design.
+
+The extracted functions are **file-local**, not exported embedding entry points.
+The existing `erl_init` still mixes shared support with world-specific initialization
+and may already start native support threads; `start_runtime_threads` names the late
+scheduler/auxiliary/poll launch phase, not every thread creation in the runtime.
+Skipping `start_otp_world` is not currently supported or tested.
+
+Three concrete lifecycle blockers are now tied to their implementing functions:
+
+| Source function | Existing behavior | Embedding implication |
+| --- | --- | --- |
+| `erl_process.c:erts_start_schedulers` | Sets `opts.detached = 1`; launches normal/dirty schedulers, auxiliary/poll threads and optional run-queue supervision | A host destructor cannot join these threads as currently created; lifecycle work must cover each family, not just normal schedulers |
+| `erl_process.c:erts_do_exit_process` | A process with `ERTS_STC_FLG_SYSTEM_PROC` calls `erts_exit(ERTS_DUMP_EXIT, ...)` on termination | Ordinary system-process exit cannot be used as isolate/engine cleanup |
+| `sys/unix/sys.c:erts_sys_main_thread` | Initializes Darwin main-thread pipes, notifies signal setup, then waits; Darwin also supports wx/Cocoa main-thread stealing | Returning before this call would omit signal setup, not merely remove a blocking loop; embedding needs explicit signal ownership and no wx dependency |
+
+The system-process regression fixture checks the existing six housekeeping processes:
+one high-priority code purger, one high-priority literal-area collector, three dirty
+signal handlers (normal/high/max), and one normal-priority trace cleaner. All have
+off-heap message queues and system-process flags. It separately checks OTP init and
+ordinary spawn/monitor progress. This protects standalone behavior while the startup
+boundary changes; these are not six proposed per-isolate workers.
 
 ## 3. Shutdown is process termination, not an object destructor
 
@@ -141,3 +167,55 @@ isolates**, return to host code, shut down, and return to host code again. Only 
 should it become the base for fresh context creation and conflicting-MFA execution.
 
 See [RFD 0002](0002-libbeam-isolates.md) for the still-open P0-02/P0-03 contracts.
+
+## 6. Startup-phase refactor evidence
+
+The extracted world-construction and thread-launch bodies compare byte-for-byte
+with their previous bodies after trimming boundary whitespace. Their order and the
+standalone main-thread handoff remain unchanged. No public symbol, ownership rule,
+shutdown path or reduced-profile enforcement is added.
+
+The configured detached worktree from P0-01 was advanced to
+`320a5ac3b7de5971ebaccf5dcdfd454a11b2f49b` and the `erl_init.c` patch applied before
+starting validation. This is an incremental, patch-bound development run, not a
+second clean build or hosted matrix. Generated preload changes remain uncommitted.
+Both variants were rebuilt and identity-probed by the existing validation runner:
+
+| Variant | Focused regressions | Startup fixture |
+| --- | --- | --- |
+| optimized JIT | 148 passed, 0 failed/skipped | 3 fresh VMs passed |
+| debug interpreter | 148 passed, 0 failed/skipped | 3 fresh VMs passed |
+
+The startup fixture runs 20 spawn/monitor cycles per VM in addition to its init,
+system-process membership, priority and queue assertions. Thus there are 296 focused
+test executions and 6 startup runs, not 296 distinct cases. The 53 existing tooling
+and 7 build/link-tool tests also pass. Inventory checks remain classification, not
+policy approval; the BIF inventory's moved source line is refreshed.
+
+The fixture is [`startup_probe.erl`](../../libbeam/tests/fixtures/startup_probe.erl).
+After rebuilding the configured source, it can be run separately (serialize with
+other OTP validation, and clear inherited `ERL_*` flags):
+
+```sh
+OTP=/tmp/libbeam-p0-01/source/beam
+OUT=$(mktemp -d)
+"$OTP/bin/erlc" -o "$OUT" libbeam/tests/fixtures/startup_probe.erl
+"$OTP/bin/erl" -emu_type debug -emu_flavor emu -noshell -pa "$OUT" \
+  -eval 'R=startup_probe:run(),debug=maps:get(build_type,R),emu=maps:get(flavor,R),io:format("~p~n",[R]),halt().'
+```
+
+Repeat with `opt`/`jit` in both the flags and assertions for optimized JIT. The local
+experiment used a user-wide validation lock, fresh log directory, 60-second process-
+group timeouts, strict result checks and recorded source/fixture identities. This
+fixture is not yet part of the hosted matrix's acceptance schema.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| `/tmp/libbeam-startup-seam/regressions/summary.json` | `85e51461500add7eeacf53ca12af4b7aee62295c164727d5bcd43f13171460a8` |
+| `/tmp/libbeam-startup-seam/startup/summary.json` | `0fc1571e155a47c1dc79aba3c74d27eceb1d8d372156510fbe7440531b16f4f0` |
+| Tested `erl_init.c` (matches development source) | `0a2b3be714ce900f535c8b028da049bc4b8a014c6c04ee5f0918cca4e6a6d351` |
+| Startup fixture | `a000c01a64384d9fe752a767e383751617e23595e740eadabc9db9e386711dd1` |
+
+No empty-engine, host-return, teardown, isolate, latency or security acceptance is
+inferred. In particular, launch threads are still detached and normal system-process
+termination still kills the VM; the refactor does not repair either blocker.

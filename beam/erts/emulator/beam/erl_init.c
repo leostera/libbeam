@@ -99,6 +99,10 @@ static void erl_init(int ncpu,
                      int module_tab_sz,
                      int export_tab_sz);
 
+/* Internal startup phases, not reentrant embedding APIs. */
+static void start_otp_world(char *init, int boot_argc, char **boot_argv);
+static void start_runtime_threads(void);
+
 static erts_atomic_t exiting;
 
 erts_atomic32_t erts_writing_erl_crash_dump;
@@ -2569,6 +2573,20 @@ erl_start(int argc, char **argv)
              module_tab_sz,
              export_tab_sz);
 
+    start_otp_world(init, boot_argc, boot_argv);
+    start_runtime_threads();
+
+    /* The standalone frontend still owns the calling thread. A library must
+     * provide a separate host-safe lifecycle before bypassing this handoff. */
+    erts_sys_main_thread(); /* May or may not return! */
+}
+
+/* Populate the conventional, global OTP world before any scheduler runs.
+ * This phase remains mandatory for standalone erl. It is not an isolate
+ * constructor: code indices, init and housekeeping pointers are still global. */
+static void
+start_otp_world(char *init, int boot_argc, char **boot_argv)
+{
     load_preloaded();
     erts_end_staging_code_ix();
     erts_commit_staging_code_ix();
@@ -2645,14 +2663,19 @@ erl_start(int argc, char **argv)
 
     }
 
+}
+
+/* Thread launch is separate from OTP-world construction and frontend handoff.
+ * The current scheduler/auxiliary threads are detached; no joinable engine
+ * shutdown or empty-world startup contract is implied by this extraction. */
+static void
+start_runtime_threads(void)
+{
     erts_start_schedulers();
 
 #ifdef ERTS_ENABLE_LOCK_COUNT
     erts_lcnt_post_startup();
 #endif
-
-    /* Let system specific code decide what to do with the main thread... */
-    erts_sys_main_thread(); /* May or may not return! */
 }
 
 

@@ -501,7 +501,9 @@ and [initial engine-seam findings](0002-engine-seams.md).
   engine construction, execution and shutdown. Link a minimal host, return control
   to it, and destroy an engine normally with zero isolates. One engine only initially.
   **Partial:** a C++ host links OTP's existing archive and returns normally without
-  starting it. This packaging witness does not satisfy engine create/destroy.
+  starting it. Internal OTP-world construction, late thread launch and frontend
+  main-thread handoff are now distinct phases, with standalone regressions passing.
+  Neither the packaging witness nor this refactor satisfies engine create/destroy.
 - [ ] **P0-04 — Isolate context and fresh bootstrap.** Introduce explicit owned state,
   staged initialization/unwind and pre-publication membership. Reuse engine scheduler
   infrastructure; test two live contexts and failed creation cleanup before claiming
