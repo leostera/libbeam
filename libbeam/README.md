@@ -23,16 +23,18 @@ limitations under the License.
 # C++ embedding layer (in development)
 
 This directory contains build/link probes and an
-[API-first two-isolate example](examples/two_isolates.md). The example is a typed
-design contract, not a runnable implementation. The public host interface and
-isolate runtime still need to be built.
+[API-first two-isolate example](examples/two_isolates.md). Its experimental C++
+library and CMake target now build and run, but deliberately fail at the first
+unfinished operation (`Engine::create`). No successful runtime behavior is faked.
+The [implementation plan](../docs/rfds/0002-example-implementation-plan.md) tracks
+the real engine, private worlds, execution and reclamation work ahead.
 [`../beam/`](../beam/) is a tracked OTP snapshot. Edit emulator sources directly
 and commit them alongside embedding changes; there is no submodule or patch series.
 No Realm implementation is part of the active source.
 
 [RFD 0002](../docs/rfds/0002-libbeam-isolates.md) defines the first proof and its
-acceptance criteria. No public C++ Engine/Isolate API, CMake target or runnable
-two-isolate example exists yet. The archive-link probe does not start an engine;
+acceptance criteria. The C++ API scaffold is not a functioning isolate runtime or
+stable SDK. The archive-link probe does not start an engine;
 the separate experimental native entry below does, without shutdown or isolates.
 The initial interface is intended to manage one engine and multiple freshly created
 isolates with bounded binary requests/results and explicit stop/reclamation.
@@ -44,7 +46,7 @@ budgets and suspend/resume remain explicit follow-on gates, not implemented cont
 ## Build and link probes
 
 Use a fresh detached **libbeam repository** worktree for reproducible builds.
-These commands are implemented (unlike the RFD's future CMake targets):
+These native probes are separate from the new CMake API scaffold:
 
 ```sh
 git worktree add --detach /tmp/libbeam-baseline-source HEAD

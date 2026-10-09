@@ -51,8 +51,10 @@ single-digit milliseconds to **first execution**, not application completion.
 Concurrent density, execution budgets/eviction and suspend/resume have separate
 tracked gates; 1,000 sequential proof cycles do not prove 1,000 resident isolates.
 The [two-isolate C++ example](libbeam/examples/two_isolates.md) now specifies the
-API we want, with same-module Erlang fixtures. It typechecks but does not link yet;
-its CMake commands remain proposed interfaces, not supported targets.
+API we want, with same-module Erlang fixtures. Its CMake scaffold now links and
+runs, explicitly failing at `Engine::create` until real behavior is implemented.
+The [implementation plan](docs/rfds/0002-example-implementation-plan.md) makes the
+example—not broad runtime cleanup—the development driver.
 The [build/link probes](libbeam/README.md#build-and-link-probes) and
 [real-runtime startup-return experiment](docs/rfds/0002-engine-start-evidence.md)
 are implemented starting points; they do not initialize independent isolates.

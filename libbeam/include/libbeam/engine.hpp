@@ -2,8 +2,9 @@
 // Copyright 2026 Leandro Ostera <leandro@ostera.io>
 #pragma once
 
-// DESIGN CONTRACT ONLY. No definitions, emulator adapter, or fake backend exist.
-// Kept beside the example, not in a public include/ directory, until implemented.
+// EXPERIMENTAL API: signatures express the target contract below.
+// The initial scaffold returns ErrorCode::not_implemented for every operation.
+// It does not start BEAM, create worlds, or claim a stable public ABI.
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +15,7 @@
 #include <variant>
 #include <vector>
 
-namespace libbeam::proposed {
+namespace libbeam {
 
 using Bytes = std::vector<std::uint8_t>;
 using Deadline = std::chrono::steady_clock::time_point;
@@ -25,7 +26,7 @@ struct ByteView {
 };
 
 enum class ErrorCode {
-    invalid_argument, invalid_beam, unsupported, invalid_state, full, limit,
+    not_implemented, invalid_argument, invalid_beam, unsupported, invalid_state, full, limit,
     closed, cancelled, exception, timeout, busy, internal_error
 };
 struct Error {
@@ -126,4 +127,4 @@ private:
 // reachable VM state or terminate the host. Error-path draining remains an
 // implementation obligation; the example's successful path explicitly reclaims.
 
-} // namespace libbeam::proposed
+} // namespace libbeam

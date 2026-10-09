@@ -4,9 +4,11 @@
 # Two isolates: the API we want
 
 [`two_isolates.cpp`](two_isolates.cpp) is the executable specification we will work
-toward. [`proposed_isolate_api.hpp`](proposed_isolate_api.hpp) contains declarations
-only. **The example typechecks but cannot link or run yet.** There is no fake
-backend, hard-coded result implementation, public SDK header, or working CMake target.
+toward. The [experimental API](../include/libbeam/engine.hpp) now has a
+[buildable scaffold](../src/engine.cpp). **It links and runs, then exits 1 at
+`not implemented: Engine::create`.** Every unfinished API reports an explicit
+error. No VM is linked or started, and no successful engine/isolate/result is
+simulated. See the [milestone implementation plan](../../docs/rfds/0002-example-implementation-plan.md).
 
 ## Read the example as the goal
 
@@ -64,9 +66,9 @@ or swapping one global namespace between calls count as the implementation.
   unwinding; their eventual cleanup coordination is not implemented or certified
   by this successful-path example.
 
-The header is intentionally under `examples/`, in `libbeam::proposed`. Names and
-implementation details can evolve before becoming a public API. There is no mode
-option that restores a full OTP node.
+The header is under `include/libbeam/`, in namespace `libbeam`, but remains an
+experimental, unstable API. The comments specify target semantics, not implemented
+behavior. There is no mode option that restores a full OTP node.
 
 ## Implementation order driven by this program
 
@@ -80,8 +82,9 @@ option that restores a full OTP node.
 | `shutdown` | Join engine threads and release engine-owned state without process exit. |
 
 Remove legacy machinery when it blocks one of these operations. Broad cleanup is
-not a prerequisite. Do not fill the declarations with unsupported-returning stubs
-just to make the program link.
+not a prerequisite. Explicit `not_implemented` stubs now mark the frontier for the
+new API; they must never manufacture success. This supersedes the earlier
+no-link proposal and does not restore deleted OTP compatibility functions.
 
 This is the first behavioral slice, not the entire RFD acceptance suite. Private
 atom visibility, ETS/persistent-term/timer boundaries, failure rollback, saturation,
@@ -91,11 +94,12 @@ independent physical-release measurement. Trusted bytecode only initially.
 
 ## Checks available now
 
-Syntax/type checking only:
+Build and test the scaffold (no OTP build required):
 
 ```sh
-clang++ -std=c++17 -Wall -Wextra -Werror -fsyntax-only \
-  libbeam/examples/two_isolates.cpp
+cmake -S libbeam -B /tmp/libbeam-api-build
+cmake --build /tmp/libbeam-api-build
+ctest --test-dir /tmp/libbeam-api-build --output-on-failure
 python3 -B -m unittest discover -s libbeam/tools -p 'test_*.py' -v
 ```
 
@@ -107,8 +111,9 @@ out=$(mktemp -d)
 mkdir "$out/a" "$out/b"
 erlc -Werror -o "$out/a" libbeam/tests/fixtures/two_isolates/a/probe.erl
 erlc -Werror -o "$out/b" libbeam/tests/fixtures/two_isolates/b/probe.erl
-# Future executable, NOT available today:
-# two_isolates "$out/a/probe.beam" "$out/b/probe.beam"
+/tmp/libbeam-api-build/two_isolates "$out/a/probe.beam" "$out/b/probe.beam"
+# Expected current result: exit 1, "not implemented: Engine::create".
+# A passing scaffold test asserts this failure; it is NOT isolate acceptance.
 ```
 
 Both variants have been compiled and independently smoke-tested using stock OTP:

@@ -227,10 +227,12 @@ later explicit gate, not inferred from interleaving on one thread.
 
 The concrete desired API is now written in
 [`two_isolates.cpp`](../../libbeam/examples/two_isolates.cpp), with
-[declaration-only types](../../libbeam/examples/proposed_isolate_api.hpp) and
+[experimental API types](../../libbeam/include/libbeam/engine.hpp) and
 [same-module fixtures and implementation priorities](../../libbeam/examples/two_isolates.md).
-It typechecks but **cannot link or run yet**; no API implementation or fake backend
-exists. Names may evolve before this becomes a public SDK.
+It now builds and runs against an explicit-error scaffold, stopping at
+`not implemented: Engine::create`. No actual engine or isolate is created by that
+scaffold. The [implementation plan](0002-example-implementation-plan.md) defines
+incremental runtime gates. Names may evolve before this becomes a stable SDK.
 
 The example submits both starts before waiting, exercises private code and named
 process state, reclaims A while B remains live, creates a fresh replacement, and
@@ -336,23 +338,22 @@ returns `busy`. The proof must include partial-bootstrap failure cleanup too.
 
 ## 5. The first executable proof: P0
 
-### Deliverable layout (API example and initial fixtures present; runtime planned)
+### Deliverable layout (API scaffold and initial fixtures present; runtime planned)
 
 ```text
 libbeam/
-  CMakeLists.txt                         # planned
-  include/libbeam/engine.h               # planned public SDK
-  src/engine.cpp                        # planned
-  examples/two_isolates.cpp              # declaration-only API example
-  examples/proposed_isolate_api.hpp      # not an implemented/public SDK
+  CMakeLists.txt                         # builds scaffold and example
+  include/libbeam/engine.hpp             # experimental API
+  src/engine.cpp                        # explicit not_implemented errors
+  examples/two_isolates.cpp              # runnable progress driver
   tests/fixtures/two_isolates/probe_impl.hrl
   tests/fixtures/two_isolates/a/probe.erl
   tests/fixtures/two_isolates/b/probe.erl
   tests/run_isolate_proof.py             # planned full acceptance runner
 ```
 
-The eventual example is an ordinary C++ executable linked against a **single** libbeam engine
-library. It must not exec `erl`, use Erlang distribution, call out to helper VMs or
+The current example links only the C++ scaffold. The eventual working example must
+link against a **single** libbeam engine library. It must not exec `erl`, use Erlang distribution, call out to helper VMs or
 boot several renamed copies of the runtime. Static linking is enough for P0; shared
 library packaging, symbol visibility and a stable ABI follow later.
 
@@ -448,7 +449,10 @@ acceptance gates even when every P0 assertion passes.
 
 ### Intended build/run contract
 
-These are target commands to implement, **not currently working commands**:
+These are target commands for full runtime acceptance, **not currently working
+commands**. The CMake scaffold now builds without OTP, but does not implement these
+OTP integration options or the acceptance runner. See the
+[current scaffold commands](../../libbeam/examples/two_isolates.md).
 
 ```sh
 cmake -S libbeam -B build/libbeam-proof \

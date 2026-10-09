@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Leandro Ostera <leandro@ostera.io>
 
-// API-FIRST SPECIFICATION. Syntax-checkable, intentionally not linkable yet.
-// Usage, once implemented: two_isolates /host/a/probe.beam /host/b/probe.beam
-#include "proposed_isolate_api.hpp"
+// API-first progress test. The initial scaffold links but fails at Engine::create.
+// Usage: two_isolates /host/a/probe.beam /host/b/probe.beam
+#include <libbeam/engine.hpp>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <utility>
 
-namespace beam = libbeam::proposed;
+namespace beam = libbeam;
 using namespace std::chrono_literals;
 
 static beam::Deadline deadline() {
