@@ -28,8 +28,9 @@ would manage isolate lifecycle; ordinary Erlang programs would not need isolate-
 management APIs. Tenants supply BEAM bytecode only: no native extensions, ambient
 filesystem/network access or full conventional OTP-node environment is promised.
 
-**The embedding API and isolate proof are not implemented yet. This is not a
-security boundary approved for untrusted workloads.**
+**The public C++ Engine/Isolate API and isolate proof are not implemented yet. An
+experimental native startup entry runs BEAM and returns to its host, but cannot
+shut it down safely. This is not a security boundary for untrusted workloads.**
 
 ## Layout
 
@@ -47,7 +48,8 @@ single-digit milliseconds to **first execution**, not application completion.
 Concurrent density, execution budgets/eviction and suspend/resume have separate
 tracked gates; 1,000 sequential proof cycles do not prove 1,000 resident isolates.
 Its two-isolate CMake commands are proposed interfaces, not supported targets yet.
-The [clean-baseline and archive-link probes](libbeam/README.md#build-and-link-probes)
+The [build/link probes](libbeam/README.md#build-and-link-probes) and
+[real-runtime startup-return experiment](docs/rfds/0002-engine-start-evidence.md)
 are implemented starting points; they do not initialize independent isolates.
 
 [RFD 0001](docs/rfds/0001-beam-realms.md) documents the earlier Realm experiment.
@@ -66,8 +68,9 @@ Historical Realm and copied upstream workflows have been removed, not counted as
 
 The OTP baseline is upstream commit `cca4e72510a97cfca6427602d3da8a22d5ff7a33`
 (`30.0-rc0`), imported directly from `https://github.com/erlang/otp.git`. The only
-initial libbeam-specific source change separates ordinary OTP startup phases in
-`beam/erts/emulator/beam/erl_init.c`; it provides neither engine lifecycle nor isolates.
+initial libbeam-specific source change separated ordinary OTP startup phases in
+`beam/erts/emulator/beam/erl_init.c`. Subsequent direct emulator edits add experimental
+returning startup, not complete engine lifecycle or isolates.
 See the [transition record](docs/rfds/0002-clean-upstream.md) for snapshot verification.
 This repository retains its own earlier snapshot history, without importing upstream
 Git history or maintaining a separate patch series.

@@ -27,6 +27,7 @@
 #include "sys.h"
 #include <ctype.h>
 #include "erl_vm.h"
+#include "erl_embed.h"
 #include "global.h"
 #include "erl_process.h"
 #include "error.h"
@@ -102,6 +103,9 @@ static void erl_init(int ncpu,
 /* Internal startup phases, not reentrant embedding APIs. */
 static void start_otp_world(char *init, int boot_argc, char **boot_argv);
 static void start_runtime_threads(void);
+static void erl_start_common(int argc, char **argv, int return_to_host);
+/* Startup is restricted to one host control thread and one attempt per process. */
+static int start_claimed;
 
 static erts_atomic_t exiting;
 
@@ -1301,6 +1305,27 @@ early_init(int *argc, char **argv) /*
 
 void
 erl_start(int argc, char **argv)
+{
+    start_claimed = 1;
+    erl_start_common(argc, argv, 0);
+}
+
+#ifndef __WIN32__
+/* Experimental process-lifetime bring-up only; see erl_embed.h. */
+int
+erl_start_embedded(int argc, char **argv)
+{
+    if (start_claimed)
+        return 1;
+    start_claimed = 1;
+    sys_init_signal_stack();
+    erl_start_common(argc, argv, 1);
+    return 0;
+}
+#endif
+
+static void
+erl_start_common(int argc, char **argv, int return_to_host)
 {
     int i = 1;
     char* arg=NULL;
@@ -2572,9 +2597,17 @@ erl_start(int argc, char **argv)
     start_otp_world(init, boot_argc, boot_argv);
     start_runtime_threads();
 
-    /* The standalone frontend still owns the calling thread. A library must
-     * provide a separate host-safe lifecycle before bypassing this handoff. */
-    erts_sys_main_thread(); /* May or may not return! */
+    /* Returning startup still takes process-wide signal ownership. It is not
+     * an engine destructor or an empty-world initialization contract. */
+#ifndef __WIN32__
+    if (return_to_host) {
+        erts_sys_prepare_start_return();
+        return;
+    }
+#else
+    (void) return_to_host;
+#endif
+    erts_sys_main_thread(); /* Standalone frontend owns the calling thread. */
 }
 
 /* Populate the conventional, global OTP world before any scheduler runs.

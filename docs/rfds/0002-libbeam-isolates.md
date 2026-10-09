@@ -479,14 +479,15 @@ implementation slice needs tests and a reviewable commit; a design document does
 not check off an implementation step. See the [baseline/link evidence](0002-baseline-evidence.md)
 and [initial engine-seam findings](0002-engine-seams.md).
 
-- [ ] **P0-01 — Reproducible clean-upstream baseline.** Build the pinned `beam/` source
+- [x] **P0-01 — Reproducible clean-upstream baseline.** Build the pinned `beam/` source
   in an external worktree
   from a clean checkout; repair tooling paths deliberately. Inventory scripts and
   workflows inherited from the old root layout are not assumed runnable unchanged.
   Preserve standalone `erl` as the baseline compatibility frontend.
   **Reset:** previous 148 + 44 + 5 results belong to the archived Realm fork.
-  Clean-upstream tooling now selects 84 focused + 35 resource cases and three
-  startup probes. Fresh validation is required; no old Realm result carries over.
+  **Fresh evidence:** snapshot `87d63923` configure/build/preload rebuild, 84 focused
+  + 35 resource cases, three startup probes and archive link all pass on ARM64 macOS
+  debug interpreter. No old Realm result carries over; see the transition record.
 - [ ] **P0-02 — Engine/instance source map.** Classify globals, locks, caches, startup
   order, OS registrations and asynchronous ownership. Start with `erl_init.c`
   (`erl_start`, `erl_init`, bootstrap/system processes), `erl_process.c/.h`,
@@ -504,7 +505,11 @@ and [initial engine-seam findings](0002-engine-seams.md).
   to it, and destroy an engine normally with zero isolates. One engine only initially.
   **Partial:** the prior archive-link witness did not call `erl_start`. The startup
   phase split is retained directly in `beam/erts/emulator/beam/erl_init.c` on the clean
-  upstream base. Neither change satisfies engine create/destroy.
+  upstream base. A new experimental POSIX entry genuinely starts the global emulator
+  and returns to its C++ caller; bytecode runs in that same PID. It is process-lifetime
+  only, takes global signal ownership and retains fatal startup/exit behavior.
+  No engine shutdown or isolates: [evidence](0002-engine-start-evidence.md).
+  P0-03 remains open until creation and destruction both return safely.
 - [ ] **P0-04 — Isolate context and fresh bootstrap.** Introduce explicit owned state,
   staged initialization/unwind and pre-publication membership. Reuse engine scheduler
   infrastructure; test two live contexts and failed creation cleanup before claiming

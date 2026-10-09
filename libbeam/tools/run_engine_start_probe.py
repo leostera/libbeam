@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Leandro Ostera <leandro@ostera.io>
+
+"""Start the real linked OTP runtime and regain host control; NOT isolate acceptance."""
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+sys.dont_write_bytecode = True
+from build_baseline import clean_environment, positive
+from link_archive_probe import parse_settings
+import otp_validation as runner
+
+
+def host_markers(text, pid):
+    host = f'HOST_STARTUP_RETURNED pid={pid} second_start=rejected'
+    beam = f'BEAM_STARTUP_OK pid={pid}'
+    lines = [line for line in text.splitlines()
+             if line.startswith(('HOST_STARTUP_RETURNED ', 'BEAM_STARTUP_OK '))]
+    return sorted(lines) == sorted([host, beam])
+
+
+def run_host(command, cwd, env, log, timeout=60):
+    """Observe both same-PID witnesses before releasing private host control FD."""
+    read_fd, write_fd = os.pipe()
+    child_env = dict(env, LIBBEAM_PROBE_CONTROL_FD=str(read_fd))
+    process = None
+    start = time.monotonic()
+    try:
+        with log.open('wb') as output:
+            process = subprocess.Popen(command, cwd=cwd, env=child_env,
+                                       stdin=subprocess.DEVNULL, stdout=output,
+                                       stderr=subprocess.STDOUT, pass_fds=(read_fd,),
+                                       start_new_session=True)
+            os.close(read_fd)
+            read_fd = -1
+            while True:
+                if log.stat().st_size > 1024 * 1024:
+                    raise RuntimeError('host output limit exceeded')
+                text = log.read_text(errors='replace')
+                if process.poll() is not None:
+                    raise RuntimeError('host exited before control acknowledgement')
+                if host_markers(text, process.pid):
+                    os.write(write_fd, b'X')
+                    break
+                if time.monotonic() - start >= timeout:
+                    raise TimeoutError('host/bytecode startup deadline exceeded')
+                time.sleep(0.02)
+            process.wait(timeout=max(0.1, timeout - (time.monotonic() - start)))
+            text = log.read_text(errors='replace')
+            terminal = 'HOST_CONTROL_OK engine_shutdown=false isolates_created=0 process_exit=true'
+            if process.returncode != 0 or text.splitlines().count(terminal) != 1:
+                raise RuntimeError('host control witness failed')
+            return {'status': 'passed', 'pid': process.pid, 'returncode': process.returncode,
+                    'seconds': round(time.monotonic() - start, 3),
+                    'same_pid_bytecode': True, 'second_start': 'rejected',
+                    'engine_shutdown': False, 'isolates_created': 0}
+    except BaseException:
+        if process is not None:
+            runner.stop_group(process)
+        raise
+    finally:
+        if read_fd >= 0:
+            os.close(read_fd)
+        os.close(write_fd)
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--root', type=Path, required=True, help='configured OTP source (beam/)')
+    p.add_argument('--output', type=Path, required=True, help='new external result directory')
+    p.add_argument('--jobs', type=positive, default=4)
+    p.add_argument('--iterations', type=positive, default=3)
+    args = p.parse_args()
+    source, output = args.root.resolve(), args.output.resolve()
+    if output.exists() or output.is_relative_to(source):
+        p.error('output must be new and outside the OTP source')
+    if not (source / 'Makefile').exists() or not (source / 'erts/emulator/beam/erl_embed.h').exists():
+        p.error('requires configured sources with experimental returning startup')
+    tools = Path(__file__).resolve().parent
+    fixtures = tools.parent / 'tests/fixtures'
+    cpp = tools.parent / 'examples/engine_start_probe.cpp'
+    env, removed = clean_environment(source, output, os.environ)
+    report = {'kind': 'experimental_process_lifetime_engine_start', 'status': 'running',
+              'engine_shutdown': 'not_implemented', 'isolate_acceptance': 'not_implemented',
+              'revision': runner.git(source, 'rev-parse', 'HEAD').decode().strip(),
+              'worktree': runner.git(source, 'status', '--porcelain').decode(),
+              'source_diff_sha256': hashlib.sha256(runner.git(source, 'diff', 'HEAD', '--binary')).hexdigest(),
+              'removed_environment_keys': removed, 'steps': [], 'inputs': {}}
+    for path in [Path(__file__), tools / 'otp_validation.py', tools / 'build_baseline.py',
+                 tools / 'link_archive_probe.py', tools / 'archive_probe.mk', cpp,
+                 fixtures / 'startup_probe.erl', fixtures / 'engine_start_probe.erl',
+                 source / 'erts/emulator/beam/erl_embed.h',
+                 source / 'erts/emulator/beam/erl_init.c', source / 'erts/emulator/beam/sys.h',
+                 source / 'erts/emulator/sys/unix/sys.c']:
+        report['inputs'][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def run(name, command, cwd=source):
+        step = {'name': name, 'command': command}
+        report['steps'].append(step)
+        step.update(runner.execute(command, cwd, env, output / f'{name}.log', 1800))
+        runner.save(output, report)
+        if step['status'] != 'passed':
+            raise RuntimeError(name + ' failed')
+
+    def interrupted(signum, frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, interrupted)
+    lock = Path(tempfile.gettempdir()) / f'otp-realm-validation-{os.getuid()}.lock'
+    with lock.open('a') as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        output.mkdir(parents=True)
+        runner.save(output, report)
+        try:
+            run('build', ['make', f'-j{args.jobs}', 'TYPE=debug', 'FLAVOR=emu'])
+            makefiles = [m for m in (source / 'erts/emulator').glob('*/Makefile')
+                         if (source / 'bin' / m.parent.name / 'libbeam.a').exists()]
+            if len(makefiles) != 1:
+                raise RuntimeError('expected one configured Unix emulator target')
+            make = ['make', '--no-print-directory', '-f', str(makefiles[0]), '-f',
+                    str(tools / 'archive_probe.mk'), 'TYPE=debug', 'FLAVOR=emu']
+            cwd = source / 'erts/emulator'
+            run('settings', make + ['libbeam-print-link-settings'], cwd)
+            settings = parse_settings((output / 'settings.log').read_text())
+            archive = Path(settings['ARCHIVE']).resolve()
+            if archive.name != 'libbeam.a' or not archive.is_relative_to(source / 'bin'):
+                raise RuntimeError('unexpected generated archive path')
+            # Direct native entry bypasses erlexec, which normally supplies this
+            # environment value for OTP's ordinary native forker driver.
+            env['BINDIR'] = str(archive.parent)
+            report['bindir'] = env['BINDIR']
+            report['native_forker'] = 'retained_ordinary_otp_support'
+            archive.unlink(missing_ok=True)
+            run('archive', make + [str(archive)], cwd)
+            copied = output / 'libbeam.debug.emu.a'
+            shutil.copyfile(archive, copied)
+            host = output / 'engine_start_probe'
+            run('link', shlex.split(settings['CXX']) + ['-std=c++17', str(cpp),
+                '-I' + str(source / 'erts/emulator/beam'), '-o', str(host)] +
+                shlex.split(settings['FLAGS']) + [str(copied)] + shlex.split(settings['LIBS']), cwd)
+            run('compile-fixtures', [str(source / 'bin/erlc'), '-o', str(output),
+                str(fixtures / 'startup_probe.erl'), str(fixtures / 'engine_start_probe.erl')])
+            command = [str(host), '-S', '2:2', '-SDcpu', '1:1', '-SDio', '1', '--',
+                       '-root', str(source), '-bindir', str(archive.parent), '-progname', 'libbeam-probe',
+                       '--', '-home', str(output), '--', '-noshell', '-noinput', '-pa', str(output),
+                       '-s', 'engine_start_probe', 'run']
+            for i in range(args.iterations):
+                step = {'name': f'host-{i}', 'command': command, 'status': 'running'}
+                report['steps'].append(step)
+                step.update(run_host(command, output, env, output / f'host-{i}.log'))
+                runner.save(output, report)
+            report['host_sha256'] = hashlib.sha256(host.read_bytes()).hexdigest()
+            report['archive_sha256'] = hashlib.sha256(copied.read_bytes()).hexdigest()
+            report['status'] = 'started_and_returned_not_shutdown'
+        except (Exception, KeyboardInterrupt) as error:
+            if report['steps'] and report['steps'][-1].get('status') == 'running':
+                report['steps'][-1].update(status='failed', error=repr(error))
+            report.update(status='failed', error=repr(error))
+        finally:
+            runner.save(output, report)
+    print(report['status'], report.get('error', ''), flush=True)
+    return 0 if report['status'] == 'started_and_returned_not_shutdown' else 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

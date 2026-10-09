@@ -1226,8 +1226,8 @@ static void initialize_darwin_main_thread_pipes(void)
 }
 
 #endif
-void
-erts_sys_main_thread(void)
+static void
+prepare_main_thread(void)
 {
 #ifdef __DARWIN__
     initialize_darwin_main_thread_pipes();
@@ -1238,6 +1238,21 @@ erts_sys_main_thread(void)
 #endif
 #endif
     smp_sig_notify(0); /* Notify initialized */
+}
+
+/* Experimental returning startup uses the host's main thread. Signal setup is
+ * mandatory even when the standalone wait loop is omitted. Darwin main-thread
+ * driver callbacks (wx/Cocoa) are not supported by this bring-up entry point. */
+void
+erts_sys_prepare_start_return(void)
+{
+    prepare_main_thread();
+}
+
+void
+erts_sys_main_thread(void)
+{
+    prepare_main_thread();
 
     /* Wait for a signal to arrive... */
 

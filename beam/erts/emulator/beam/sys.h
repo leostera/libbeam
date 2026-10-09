@@ -827,6 +827,9 @@ extern char *erts_sys_ddll_error(int code);
  * System interfaces for startup.
  */
 void erts_sys_main_thread(void);
+#ifndef __WIN32__
+void erts_sys_prepare_start_return(void);
+#endif
 
 extern int erts_sys_prepare_crash_dump(int secs);
 extern void erts_sys_pre_init(void);

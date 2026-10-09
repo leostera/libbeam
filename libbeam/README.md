@@ -29,8 +29,9 @@ and commit them alongside embedding changes; there is no submodule or patch seri
 No Realm implementation is part of the active source.
 
 [RFD 0002](../docs/rfds/0002-libbeam-isolates.md) defines the first proof and its
-acceptance criteria. No engine header, CMake target or runnable two-isolate example
-exists yet. The archive-link probe below is not an engine or isolate implementation.
+acceptance criteria. No public C++ Engine/Isolate API, CMake target or runnable
+two-isolate example exists yet. The archive-link probe does not start an engine;
+the separate experimental native entry below does, without shutdown or isolates.
 The initial interface is intended to manage one engine and multiple freshly created
 isolates with bounded binary requests/results and explicit stop/reclamation.
 Tenants run a positive-list BEAM-bytecode profile, not a complete OTP node; no
@@ -71,6 +72,29 @@ Makefile link settings to compile `examples/archive_link_probe.cpp`. It checks t
 linked `erl_start` symbol and runs the host **without invoking it**. Success is
 `linked_not_initialized`; neither engine lifecycle nor P0-03 is thereby accepted.
 The probe is experimental and not a portable library packaging interface yet.
+
+## Experimental real-runtime startup
+
+After building a current snapshot, this POSIX bring-up probe links the actual emulator,
+calls `erl_start_embedded`, receives control back in C++, observes ordinary Erlang
+execution in the same PID, and rejects a second startup. It is **not** a stable API.
+
+```sh
+python3 -B libbeam/tools/run_engine_start_probe.py \
+  --root /tmp/libbeam-baseline-source/beam \
+  --output /tmp/libbeam-engine-start-results --iterations 3
+```
+
+The native contract is in `beam/erts/emulator/beam/erl_embed.h`. Call once on the host
+main thread. It takes process-wide signal ownership and retains ordinary OTP native
+forker/port support and fatal error handling. Asynchronous boot is not acknowledged
+by the native return itself; the test waits for a bytecode witness through stdout.
+A private inherited FD controls only the test host. No tenant transport is implemented.
+
+**There is no engine destructor, restart or isolate creation.** The experiment ends
+with explicit OS process exit, not engine shutdown. Darwin wx/Cocoa main-thread
+callbacks are unsupported. Trusted fixtures only; not a reduced-profile runtime.
+See [evidence and limitations](../docs/rfds/0002-engine-start-evidence.md).
 
 Tests: `python3 -B -m unittest discover -s libbeam/tools -p 'test_*.py' -v`.
 Historical Realm validation evidence predates this migration and does not certify

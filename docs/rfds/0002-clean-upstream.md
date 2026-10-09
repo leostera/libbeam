@@ -71,9 +71,19 @@ Historical 148/44/5 results included Realm cases and are not carried forward.
 The final snapshot driver again accepts a clean detached **libbeam repository root**
 containing `beam/`. It builds directly without applying patches. Its validation helper
 and startup fixture live outside the emulator snapshot. Twelve tooling tests pass.
-A fresh end-to-end run of this final snapshot layout is still pending; do not confuse
-source-equivalent transition evidence with that run. See
-[`libbeam/README.md`](../../libbeam/README.md#build-and-link-probes) for commands.
+The fresh end-to-end snapshot run at `87d63923` now also passes: configure, bootstrap,
+preload regeneration/rebuild, 84 focused cases, 35 resource cases, three startup
+probes, and archive linking. This validates the final snapshot interface, not only
+the source-equivalent transition. Evidence:
+
+| Summary | SHA-256 |
+| --- | --- |
+| `/tmp/libbeam-snapshot-validation/results/summary.json` | `0fb29524a38a7b1b40c88711f600111f76c76e6b05b274616b6969ad93ff314d` |
+| `/tmp/libbeam-snapshot-validation/link/summary.json` | `f168f7de7f91f58cd4efcc804a32fd2463295f9cd13f900c5e63656005d24964` |
+
+See [`libbeam/README.md`](../../libbeam/README.md#build-and-link-probes) for commands.
+Subsequent experimental engine-start changes have
+[separate evidence and limitations](0002-engine-start-evidence.md).
 
 ## Commit checkpoint
 
@@ -85,6 +95,6 @@ safely reclaim isolates, enforce the reduced profile, or claim latency, density 
 security acceptance. Upstream has ambient OS/native capabilities; removing historical
 checks is not a security improvement or a substitute for new enforcement.
 
-**Next:** validate a fresh checkout using the final snapshot driver, then map thread
-shutdown ownership and implement host-returning engine lifecycle. Any historical
+**Next:** map thread shutdown ownership and implement a complete host-returning
+engine lifecycle. Any historical
 mechanism reused later must be justified and tested, not imported wholesale.
