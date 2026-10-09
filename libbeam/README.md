@@ -22,8 +22,10 @@ limitations under the License.
 
 # C++ embedding layer (in development)
 
-This directory contains initial build/link probes and will contain libbeam's public
-host interface, implementation, two-isolate example and integration tests.
+This directory contains build/link probes and an
+[API-first two-isolate example](examples/two_isolates.md). The example is a typed
+design contract, not a runnable implementation. The public host interface and
+isolate runtime still need to be built.
 [`../beam/`](../beam/) is a tracked OTP snapshot. Edit emulator sources directly
 and commit them alongside embedding changes; there is no submodule or patch series.
 No Realm implementation is part of the active source.

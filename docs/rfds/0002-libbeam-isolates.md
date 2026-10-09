@@ -225,31 +225,21 @@ later explicit gate, not inferred from interleaving on one thread.
 
 ## 4. Minimal host-facing contract
 
-The following is API-shaped pseudocode, **not a header that exists or compiles yet**.
-Names and exact result types will be resolved when implementing the proof.
+The concrete desired API is now written in
+[`two_isolates.cpp`](../../libbeam/examples/two_isolates.cpp), with
+[declaration-only types](../../libbeam/examples/proposed_isolate_api.hpp) and
+[same-module fixtures and implementation priorities](../../libbeam/examples/two_isolates.md).
+It typechecks but **cannot link or run yet**; no API implementation or fake backend
+exists. Names may evolve before this becomes a public SDK.
 
-```cpp
-auto engine = Engine::create(engine_options).value();
-auto a = engine.create_isolate(proof_profile).value();
-auto b = engine.create_isolate(proof_profile).value();
+The example submits both starts before waiting, exercises private code and named
+process state, reclaims A while B remains live, creates a fresh replacement, and
+requires explicit engine shutdown. It proposes correlated wait handles instead
+of exposing the completion-poll loop directly. Physical-release instrumentation
+and the rest of the acceptance assertions below remain separate requirements.
 
-a.load_modules(bundle_a).value();
-b.load_modules(bundle_b).value();
-a.start(bootstrap).value();
-b.start(bootstrap).value();
-
-auto qa = a.call("probe", "request", bytes("start"));
-auto qb = b.call("probe", "request", bytes("start"));
-// Poll host-owned completions; both execute in their respective isolate.
-expect_result(engine, qa, "A:ready");
-expect_result(engine, qb, "B:ready");
-
-expect_destroyed(engine, a.stop());
-expect_call(engine, b, "probe", "request", "version", "B");
-auto c = engine.create_isolate(proof_profile).value();
-// Load/start C; prove that it inherits none of A's application state.
-// Stop B and C, release handles/buffers, then shut down the engine.
-```
+**Implementation priority:** make this example real. Remove or reshape legacy
+machinery when it blocks that path, rather than completing a broad cleanup first.
 
 Required semantics:
 
@@ -346,22 +336,22 @@ returns `busy`. The proof must include partial-bootstrap failure cleanup too.
 
 ## 5. The first executable proof: P0
 
-### Deliverable layout (planned, not present yet)
+### Deliverable layout (API example and initial fixtures present; runtime planned)
 
 ```text
 libbeam/
-  CMakeLists.txt
-  include/libbeam/engine.h
-  src/engine.cpp
-  examples/two_isolates.cpp
-  tests/fixtures/common/probe_client.erl
-  tests/fixtures/a/probe.erl
-  tests/fixtures/b/probe.erl
-  tests/fixtures/c/probe.erl
-  tests/run_isolate_proof.py
+  CMakeLists.txt                         # planned
+  include/libbeam/engine.h               # planned public SDK
+  src/engine.cpp                        # planned
+  examples/two_isolates.cpp              # declaration-only API example
+  examples/proposed_isolate_api.hpp      # not an implemented/public SDK
+  tests/fixtures/two_isolates/probe_impl.hrl
+  tests/fixtures/two_isolates/a/probe.erl
+  tests/fixtures/two_isolates/b/probe.erl
+  tests/run_isolate_proof.py             # planned full acceptance runner
 ```
 
-The example is an ordinary C++ executable linked against a **single** libbeam engine
+The eventual example is an ordinary C++ executable linked against a **single** libbeam engine
 library. It must not exec `erl`, use Erlang distribution, call out to helper VMs or
 boot several renamed copies of the runtime. Static linking is enough for P0; shared
 library packaging, symbol visibility and a stable ABI follow later.

@@ -50,7 +50,9 @@ teardown/recreation without restarting the engine. The latency objective is
 single-digit milliseconds to **first execution**, not application completion.
 Concurrent density, execution budgets/eviction and suspend/resume have separate
 tracked gates; 1,000 sequential proof cycles do not prove 1,000 resident isolates.
-Its two-isolate CMake commands are proposed interfaces, not supported targets yet.
+The [two-isolate C++ example](libbeam/examples/two_isolates.md) now specifies the
+API we want, with same-module Erlang fixtures. It typechecks but does not link yet;
+its CMake commands remain proposed interfaces, not supported targets.
 The [build/link probes](libbeam/README.md#build-and-link-probes) and
 [real-runtime startup-return experiment](docs/rfds/0002-engine-start-evidence.md)
 are implemented starting points; they do not initialize independent isolates.
