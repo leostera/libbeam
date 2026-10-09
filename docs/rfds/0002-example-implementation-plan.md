@@ -126,6 +126,13 @@ next frontier: `Isolate::load_module`.
 
 **API:** `Isolate::load_module`.
 
+**First storage extraction:** [owned module tables](0002-owned-module-tables.md)
+now use instance-owned index/hash storage and record accounting, including in the
+existing diagnostic loader. Independent same-index records, growth/full handling
+and unpublished metadata disposal are tested. Atom ownership, private executable
+loading, code-index coordination and process context propagation remain undone;
+this does not satisfy M2/M3's gates.
+
 - Consume/copy host-supplied BEAM bytes, validate module identity and the supported
   profile, stage publication and roll back failures. Reject `on_load` before effects.
 - Make atoms, module/export/import/fun lookup, active code indices, literal/code

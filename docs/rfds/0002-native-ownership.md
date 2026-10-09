@@ -46,6 +46,10 @@ will share an engine, rather than each initializing the engine's native substrat
 
 ## Initial ownership classification
 
+Ledger at `e99f5799`. The subsequent [module-table extraction](0002-owned-module-tables.md)
+moves index/hash storage and record accounting into an owned component; code-space
+context propagation and the other namespace rows remain pending.
+
 This is a starting ledger, not an exhaustive global-state/effect audit. “Target”
 means intended ownership, not an assertion that migration has happened.
 

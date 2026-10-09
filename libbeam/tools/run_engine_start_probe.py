@@ -198,6 +198,14 @@ def main():
                  source / 'erts/emulator/beam/erl_embed.h',
                  source / 'erts/emulator/beam/erl_engine.h',
                  source / 'erts/emulator/beam/erl_engine.c',
+                 tools.parent / 'tests/native_module_table_roots_test.c',
+                 source / 'erts/emulator/beam/erl_module_table.h',
+                 source / 'erts/emulator/beam/module.c',
+                 source / 'erts/emulator/beam/module.h',
+                 source / 'erts/emulator/beam/index.c',
+                 source / 'erts/emulator/beam/index.h',
+                 source / 'erts/emulator/beam/hash.c',
+                 source / 'erts/emulator/beam/hash.h',
                  source / 'erts/emulator/beam/erl_init.c', source / 'erts/emulator/beam/sys.h',
                  source / 'erts/emulator/beam/erl_bif_port.c',
                  source / 'erts/emulator/beam/erl_bif_os.c',
@@ -289,6 +297,26 @@ def main():
                 '-I' + str(source / 'erts/include'),
                 '-I' + str(source / 'erts/include' / archive.parent.name), '-o', str(host)] +
                 shlex.split(settings['FLAGS']) + [str(copied)] + shlex.split(settings['LIBS']), cwd)
+            run('compile-settings', make + ['libbeam-print-compile-settings'], cwd)
+            compile_settings = dict(line.split('=', 1) for line in
+                (output / 'compile-settings.log').read_text().splitlines()
+                if line.startswith(('CC=', 'CFLAGS=', 'INCLUDES=')))
+            roots_object = output / 'module-roots.o'
+            roots_host = output / 'module-roots'
+            run('compile-module-roots', shlex.split(compile_settings['CC']) +
+                shlex.split(compile_settings['CFLAGS']) + shlex.split(compile_settings['INCLUDES']) +
+                ['-c', str(tools.parent / 'tests/native_module_table_roots_test.c'),
+                 '-o', str(roots_object)], cwd)
+            run('link-module-roots', shlex.split(settings['CXX']) + [str(roots_object),
+                '-o', str(roots_host)] + shlex.split(settings['FLAGS']) + [str(copied)] +
+                shlex.split(settings['LIBS']), cwd)
+            run('module-roots', [str(roots_host), '-S', '2:2', '-SDcpu', '1:1',
+                '-SDio', '1', '-A', '0', '--', '-root', '/libbeam-missing-root',
+                '--', '-boot', '/libbeam-missing-boot'])
+            if (output / 'module-roots.log').read_text().splitlines().count(
+                    'NATIVE_MODULE_ROOT_GUARDS_OK synthetic_markers=12 loaded_beam=0 isolates=0') != 1:
+                raise RuntimeError('module resource-root guard witness missing')
+            report['unpublished_module_root_guard_checks'] = 12
             run('compile-fixtures', [str(source / 'bin/erlc'), '-o', str(output),
                 str(fixtures / 'startup_probe.erl'), str(fixtures / 'engine_start_probe.erl')])
             command = [str(host), '-S', '2:2', '-SDcpu', '1:1', '-SDio', '1', '--',

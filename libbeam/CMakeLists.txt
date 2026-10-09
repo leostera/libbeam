@@ -40,6 +40,16 @@ if(BUILD_TESTING)
         add_executable(native_engine_control_test tests/native_engine_control_test.cpp)
         target_link_libraries(native_engine_control_test PRIVATE libbeam_erts)
         add_test(NAME native_engine_control_lifetime COMMAND native_engine_control_test)
+        # Internal component test against this checkout's header, not a new SDK.
+        add_executable(native_module_table_test tests/native_module_table_test.cpp)
+        target_include_directories(native_module_table_test PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../beam/erts/emulator/beam)
+        target_link_libraries(native_module_table_test PRIVATE libbeam_erts)
+        target_compile_features(native_module_table_test PRIVATE cxx_std_17)
+        add_test(NAME native_owned_module_tables COMMAND native_module_table_test
+            -S 2:2 -SDcpu 1:1 -SDio 1 -A 0 -- -root /libbeam-missing-root --
+            -boot /libbeam-missing-boot)
+        set_tests_properties(native_owned_module_tables PROPERTIES TIMEOUT 20)
         foreach(workers IN ITEMS 0 1 4)
             add_test(NAME native_prepare_without_otp_async_${workers}
                 COMMAND engine_prepare_probe -S 2:2 -SDcpu 1:1 -SDio 1 -A ${workers}

@@ -63,6 +63,8 @@ IndexSlot* index_put_entry(IndexTable*, void*);
 /* Erase all entries with index 'ix' and higher
 */
 void index_erase_latest_from(IndexTable*, Uint ix);
+/* Exclusive owner only: all readers/borrowed entries must already be gone. */
+void erts_index_destroy(IndexTable *);
 
 ERTS_GLB_INLINE int index_put(IndexTable*, void*);
 ERTS_GLB_INLINE IndexSlot* erts_index_lookup(IndexTable*, Uint);

@@ -75,6 +75,17 @@ erts_index_init(ErtsAlcType_t type, IndexTable* t, char* name,
     return t;
 }
 
+void
+erts_index_destroy(IndexTable *t)
+{
+    int i;
+    hash_delete(&t->htable);
+    for (i = 0; i < t->size; i += INDEX_PAGE_SIZE)
+        erts_free(t->type, t->seg_table[i >> INDEX_PAGE_SHIFT]);
+    erts_free(t->type, t->seg_table);
+    sys_memset(t, 0, sizeof(*t));
+}
+
 IndexSlot*
 index_put_entry(IndexTable* t, void* tmpl)
 {

@@ -24,6 +24,7 @@
 #define __MODULE_H__
 
 #include "index.h"
+#include "erl_module_table.h"
 #include "beam_code.h"
 
 struct erl_module_instance {
@@ -50,6 +51,7 @@ typedef struct erl_module {
     struct erl_module_instance curr;
     struct erl_module_instance old; /* active protected by "old_code" rwlock */
     struct erl_module_instance* on_load;
+    ErtsModuleTable *table_owner; /* Immutable record allocation/accounting owner. */
 } Module; 
 
 void erts_module_instance_init(struct erl_module_instance* modi);

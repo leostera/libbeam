@@ -18,6 +18,11 @@
 #
 # %CopyrightEnd%
 
+# Internal component tests must use the same private headers/defines as ERTS.
+.PHONY: libbeam-print-compile-settings
+libbeam-print-compile-settings:
+	@printf '%s\n' 'CC=$(CC)' 'CFLAGS=$(CFLAGS)' 'INCLUDES=$(INCLUDES)'
+
 # Read after OTP's generated emulator Makefile. Use its dependency/link settings,
 # rather than guessing libraries or copying an arbitrary set of emulator objects.
 .PHONY: libbeam-print-link-settings

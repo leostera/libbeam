@@ -38,6 +38,9 @@ not reuse whole-world startup.
 explicit `ErtsEngine`, engine-owned lifecycle/handle-registry state, and scheduler
 owner references. Remaining globals are classified by engine versus isolate
 ownership; multiple initialized runtimes/private worlds are not implemented.
+[Owned module tables](../docs/rfds/0002-owned-module-tables.md) are the first
+namespace-storage extraction: independent metadata records and unpublished table
+disposal work, but private atom/code loading and execution remain unimplemented.
 [`../beam/`](../beam/) is a tracked OTP snapshot. Edit emulator sources directly
 and commit them alongside embedding changes; there is no submodule or patch series.
 No Realm implementation is part of the active source.

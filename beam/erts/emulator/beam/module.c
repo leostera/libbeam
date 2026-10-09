@@ -45,11 +45,18 @@
 
 static int module_limit = MODULE_LIMIT;
 
-static IndexTable module_tables[ERTS_NUM_CODE_IX];
+struct ErtsModuleTable {
+    IndexTable index;
+    erts_atomic_t bytes;
+    int independently_allocated;
+};
+
+/* Diagnostic OTP-world adapter until loader/process code-space propagation.
+ * Private tables use the same component, never swap these roots. */
+static ErtsModuleTable module_tables[ERTS_NUM_CODE_IX];
 
 erts_rwmtx_t the_old_code_rwlocks[ERTS_NUM_CODE_IX];
 
-static erts_atomic_t tot_module_bytes;
 
 /* SMP note: Active module table lookup and current module instance can be
  *           read without any locks. Old module instances are protected by
@@ -59,7 +66,7 @@ static erts_atomic_t tot_module_bytes;
 
 void module_info(fmtfn_t to, void *to_arg)
 {
-    index_info(to, to_arg, &module_tables[erts_active_code_ix()]);
+    index_info(to, to_arg, &module_tables[erts_active_code_ix()].index);
 }
 
 
@@ -82,37 +89,38 @@ void erts_module_instance_init(struct erl_module_instance* modi)
     modi->nif = NULL;
     modi->num_breakpoints = 0;
     modi->num_traced_exports = 0;
+    modi->executable_region = NULL;
+    modi->writable_region = NULL;
+    modi->metadata = NULL;
     modi->unsealed = 0;
 }
 
 static Module* module_alloc(Module* tmpl)
 {
     Module* obj = (Module*) erts_alloc(ERTS_ALC_T_MODULE, sizeof(Module));
-    erts_atomic_add_nob(&tot_module_bytes, sizeof(Module));
+    obj->table_owner = tmpl->table_owner;
+    erts_atomic_add_nob(&obj->table_owner->bytes, sizeof(Module));
 
     obj->module = tmpl->module;
     obj->slot.index = -1;
     erts_module_instance_init(&obj->curr);
     erts_module_instance_init(&obj->old);
     obj->on_load = 0;
-    DBG_TRACE_MFA(make_atom(obj->module), 0, 0, "module_alloc");
     return obj;
 }
 
 static void module_free(Module* mod)
 {
+    ErtsModuleTable *owner = mod->table_owner;
     erts_free(ERTS_ALC_T_MODULE, mod);
-    erts_atomic_add_nob(&tot_module_bytes, -sizeof(Module));
+    erts_atomic_add_nob(&owner->bytes, -sizeof(Module));
 }
 
-void init_module_table(int limit)
+static void init_owned_module_table(ErtsModuleTable *owner, int limit)
 {
     HashFunctions f;
-    int i;
-
-    if (limit > 0) {
-        module_limit = limit;
-    }
+    erts_atomic_init_nob(&owner->bytes, 0);
+    owner->independently_allocated = 0;
 
     f.hash = (H_FUN) module_hash;
     f.cmp  = (HCMP_FUN) module_cmp;
@@ -122,62 +130,123 @@ void init_module_table(int limit)
     f.meta_free = (HMFREE_FUN) erts_free;
     f.meta_print = (HMPRINT_FUN) erts_print;
 
-    for (i = 0; i < ERTS_NUM_CODE_IX; i++) {
-        erts_index_init(ERTS_ALC_T_MODULE_TABLE, &module_tables[i], "module_code",
-            MODULE_SIZE, module_limit, f);
-    }
+    erts_index_init(ERTS_ALC_T_MODULE_TABLE, &owner->index, "module_code",
+                    MODULE_SIZE, limit, f);
+}
+
+void init_module_table(int limit)
+{
+    int i;
+    if (limit > 0)
+        module_limit = limit;
+    for (i = 0; i < ERTS_NUM_CODE_IX; i++)
+        init_owned_module_table(&module_tables[i], module_limit);
 
     for (i=0; i<ERTS_NUM_CODE_IX; i++) {
         erts_rwmtx_init(&the_old_code_rwlocks[i], "old_code", make_small(i),
             ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
     }
-    erts_atomic_init_nob(&tot_module_bytes, 0);
 }
 
+
+ErtsModuleTable *erts_module_table_create(int limit)
+{
+    ErtsModuleTable *owner;
+    if (limit <= 0)
+        return NULL;
+    owner = erts_alloc(ERTS_ALC_T_MODULE_TABLE, sizeof(*owner));
+    init_owned_module_table(owner, limit);
+    owner->independently_allocated = 1;
+    return owner;
+}
+
+Module *erts_module_table_find(ErtsModuleTable *owner, int atom_index)
+{
+    Module key;
+    if (atom_index < 0)
+        return NULL;
+    key.module = atom_index;
+    return (Module *) hash_get(&owner->index.htable, &key);
+}
+
+int erts_module_table_count(const ErtsModuleTable *owner)
+{
+    return owner->index.entries;
+}
+
+int erts_module_table_capacity(const ErtsModuleTable *owner)
+{
+    return owner->index.limit;
+}
+
+static int module_instance_has_resources(const struct erl_module_instance *modi)
+{
+    return modi->code_hdr || modi->code_length || modi->catches != BEAM_CATCHES_NIL ||
+        modi->nif || modi->num_breakpoints || modi->num_traced_exports ||
+        modi->executable_region || modi->writable_region || modi->metadata ||
+        modi->unsealed;
+}
+
+int erts_module_table_discard_unpublished(ErtsModuleTable *owner)
+{
+    int i;
+    if (!owner || !owner->independently_allocated)
+        return 1;
+    for (i = 0; i < owner->index.entries; i++) {
+        Module *mod = (Module *) erts_index_lookup(&owner->index, i);
+        if (mod->on_load || module_instance_has_resources(&mod->curr) ||
+            module_instance_has_resources(&mod->old))
+            return 1;
+    }
+    erts_index_destroy(&owner->index);
+    erts_free(ERTS_ALC_T_MODULE_TABLE, owner);
+    return 0;
+}
 
 Module*
 erts_get_module(Eterm mod, ErtsCodeIndex code_ix)
 {
-    Module e;
-    int index;
-    IndexTable* mod_tab;
-
     ASSERT(is_atom(mod));
     ERTS_LC_ASSERT(erts_get_scheduler_id() > 0 || erts_thr_progress_lc_is_delaying());
-
-    mod_tab = &module_tables[code_ix];
-
-    e.module = atom_val(mod);
-    index = index_get(mod_tab, (void*) &e);
-    if (index == -1) {
-	return NULL;
-    } else {
-	return (Module*) erts_index_lookup(mod_tab, index);
-    }
+    return erts_module_table_find(&module_tables[code_ix], atom_val(mod));
 }
 
 
-static Module* put_module(Eterm mod, IndexTable* mod_tab)
+Module *erts_module_table_put(ErtsModuleTable *owner, int atom_index)
 {
+    IndexTable *mod_tab = &owner->index;
     Module e;
     int oldsz, newsz;
     Module* res;
 
-    ASSERT(is_atom(mod));
-    e.module = atom_val(mod);
+    if (atom_index < 0)
+        return NULL;
+    e.module = atom_index;
+    e.table_owner = owner;
+    res = (Module *) hash_get(&mod_tab->htable, &e);
+    if (res)
+        return res;
+    if (mod_tab->entries >= mod_tab->limit)
+        return NULL;
     oldsz = index_table_sz(mod_tab);
     res = (Module*) index_put_entry(mod_tab, (void*) &e);
     newsz = index_table_sz(mod_tab);
-    erts_atomic_add_nob(&tot_module_bytes, (newsz - oldsz));
+    erts_atomic_add_nob(&owner->bytes, (newsz - oldsz));
     return res;
 }
 
 Module*
 erts_put_module(Eterm mod)
 {
+    Module *result;
     ERTS_LC_ASSERT(erts_initialized == 0 || erts_has_code_load_permission());
-
-    return put_module(mod, &module_tables[erts_staging_code_ix()]);
+    ASSERT(is_atom(mod));
+    result = erts_module_table_put(&module_tables[erts_staging_code_ix()], atom_val(mod));
+    if (!result)
+        erts_exit(ERTS_DUMP_EXIT, "no more index entries in module_code (max=%d)\n",
+                  module_tables[erts_staging_code_ix()].index.limit);
+    DBG_TRACE_MFA(mod, 0, 0, "module_put");
+    return result;
 }
 
 void *erts_writable_code_ptr(struct erl_module_instance *modi,
@@ -254,22 +323,26 @@ void erts_seal_module(struct erl_module_instance *modi)
 
 Module *module_code(int i, ErtsCodeIndex code_ix)
 {
-    return (Module*) erts_index_lookup(&module_tables[code_ix], i);
+    return (Module*) erts_index_lookup(&module_tables[code_ix].index, i);
 }
 
 int module_code_size(ErtsCodeIndex code_ix)
 {
-    return module_tables[code_ix].entries;
+    return module_tables[code_ix].index.entries;
 }
 
 int erts_module_table_limit(void)
 {
-    return module_tables[erts_active_code_ix()].limit;
+    return module_tables[erts_active_code_ix()].index.limit;
 }
 
 int module_table_sz(void)
 {
-    return erts_atomic_read_nob(&tot_module_bytes);
+    int i;
+    erts_aint_t bytes = 0;
+    for (i = 0; i < ERTS_NUM_CODE_IX; i++)
+        bytes += erts_atomic_read_nob(&module_tables[i].bytes);
+    return bytes;
 }
 
 #ifdef DEBUG
@@ -287,8 +360,9 @@ static ERTS_INLINE void copy_module(Module* dst_mod, Module* src_mod)
 
 void module_start_staging(void)
 {
-    IndexTable* src = &module_tables[erts_active_code_ix()];
-    IndexTable* dst = &module_tables[erts_staging_code_ix()];
+    IndexTable* src = &module_tables[erts_active_code_ix()].index;
+    ErtsModuleTable *dst_owner = &module_tables[erts_staging_code_ix()];
+    IndexTable* dst = &dst_owner->index;
     Module* src_mod;
     Module* dst_mod;
     int i, oldsz, newsz;
@@ -311,14 +385,17 @@ void module_start_staging(void)
      */
     oldsz = index_table_sz(dst);
     for (i = dst->entries; i < src->entries; i++) {
+        Module template;
 	src_mod = (Module*) erts_index_lookup(src, i);
-	dst_mod = (Module*) index_put_entry(dst, src_mod);
+        template.module = src_mod->module;
+        template.table_owner = dst_owner;
+	dst_mod = (Module*) index_put_entry(dst, &template);
 	ASSERT(dst_mod != src_mod);
 
         copy_module(dst_mod, src_mod);
     }
     newsz = index_table_sz(dst);
-    erts_atomic_add_nob(&tot_module_bytes, (newsz - oldsz));
+    erts_atomic_add_nob(&dst_owner->bytes, (newsz - oldsz));
 
     entries_at_start_staging = dst->entries;
     IF_DEBUG(dbg_load_code_ix = erts_staging_code_ix());
@@ -329,14 +406,15 @@ void module_end_staging(int commit)
     ASSERT(dbg_load_code_ix == erts_staging_code_ix());
 
     if (!commit) { /* abort */
-	IndexTable* tab = &module_tables[erts_staging_code_ix()];
+        ErtsModuleTable *owner = &module_tables[erts_staging_code_ix()];
+	IndexTable* tab = &owner->index;
 	int oldsz, newsz;
 
 	ASSERT(entries_at_start_staging <= tab->entries);
 	oldsz = index_table_sz(tab);
 	index_erase_latest_from(tab, entries_at_start_staging);
 	newsz = index_table_sz(tab);
-	erts_atomic_add_nob(&tot_module_bytes, (newsz - oldsz));
+	erts_atomic_add_nob(&owner->bytes, (newsz - oldsz));
     }
 
     IF_DEBUG(dbg_load_code_ix = -1);
