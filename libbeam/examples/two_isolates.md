@@ -7,8 +7,10 @@
 toward. The [experimental API](../include/libbeam/engine.hpp) now has a
 [buildable scaffold](../src/engine.cpp). **It links and runs, then exits 1 at
 `not implemented: Engine::create`.** Every unfinished API reports an explicit
-error. No VM is linked or started, and no successful engine/isolate/result is
-simulated. See the [milestone implementation plan](../../docs/rfds/0002-example-implementation-plan.md).
+error. A [native package build](../../docs/rfds/0002-native-api-link.md) now links
+real ERTS and reports the more specific cooperative stop/join blocker. Neither
+build starts a VM through this API or simulates a successful engine/isolate/result.
+See the [milestone implementation plan](../../docs/rfds/0002-example-implementation-plan.md).
 
 ## Read the example as the goal
 

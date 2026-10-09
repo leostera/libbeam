@@ -6,9 +6,33 @@
 #ifndef ERL_EMBED_H__
 #define ERL_EMBED_H__
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* Thread handles retained by erts_start_schedulers. Async workers are tracked
+ * separately by erl_async.c; this is NOT a census of all engine/native threads.
+ * Query only on the startup/control thread, before startup or after it returns.
+ * No concurrent startup/shutdown/query. Before startup the inventory is empty.
+ * Joinable creation is not a stop protocol or evidence of physical reclamation.
+ */
+enum ErlSchedulerThreadKind {
+    ERL_THREAD_SCHEDULER,
+    ERL_THREAD_DIRTY_CPU,
+    ERL_THREAD_DIRTY_IO,
+    ERL_THREAD_AUXILIARY,
+    ERL_THREAD_POLL,
+    ERL_THREAD_RUNQ_SUPERVISOR,
+    ERL_SCHEDULER_THREAD_KINDS
+};
+typedef struct {
+    size_t counts[ERL_SCHEDULER_THREAD_KINDS];
+    size_t total;
+    int all_joinable;
+} ErlSchedulerThreadInventory;
+void erl_scheduler_thread_inventory(ErlSchedulerThreadInventory *out);
 
 /* EXPERIMENTAL POSIX bring-up entry, not a stable libbeam API.
  *

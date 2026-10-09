@@ -2636,8 +2636,8 @@ start_otp_world(char *init, int boot_argc, char **boot_argv)
 }
 
 /* Thread launch is separate from OTP-world construction and frontend handoff.
- * The current scheduler/auxiliary threads are detached; no joinable engine
- * shutdown or empty-world startup contract is implied by this extraction. */
+ * Scheduler/auxiliary/poll thread handles are retained and created joinable.
+ * A coordinated stop/join protocol and empty-world startup remain unimplemented. */
 static void
 start_runtime_threads(void)
 {

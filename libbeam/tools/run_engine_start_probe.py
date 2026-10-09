@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import pty
+import re
 import termios
 from pathlib import Path
 import shlex
@@ -22,6 +23,7 @@ import time
 sys.dont_write_bytecode = True
 from build_baseline import clean_environment, positive
 from link_archive_probe import parse_settings
+from export_runtime_package import link_inputs, digest
 import otp_validation as runner
 
 
@@ -51,6 +53,16 @@ def host_markers(text, pid):
              if line.startswith(('HOST_STARTUP_RETURNED ', 'BEAM_STARTUP_OK ',
                                  'EXECUTABLE_PORTS_DENIED ', 'SIGNAL_ADMIN_REMOVED '))]
     return sorted(lines) == sorted([host, beam, denied, signal_denied])
+
+
+def thread_handle_marker(text):
+    lines = [line for line in text.splitlines() if line.startswith('HOST_THREAD_HANDLES_OK ')]
+    if len(lines) != 1:
+        return None
+    match = re.fullmatch(r'HOST_THREAD_HANDLES_OK total=(\d+) joinable=true stopped=false joined=false', lines[0])
+    if not match or int(match[1]) < 6:
+        return None
+    return int(match[1])
 
 
 def run_host(command, cwd, env, log, timeout=60):
@@ -85,12 +97,16 @@ def run_host(command, cwd, env, log, timeout=60):
             if (process.returncode != 0 or text.splitlines().count(terminal) != 1
                     or text.splitlines().count('HOST_NO_CHILDREN sigchld_preserved=true') != 1
                     or text.splitlines().count('HOST_SIGNALS_OK dispositions=9 altstack=true mask=true usr1_delivered=true') != 1
-                    or not host_markers(text, process.pid)):
+                    or not host_markers(text, process.pid)
+                    or thread_handle_marker(text) is None):
                 raise RuntimeError('host control witness failed')
             return {'status': 'passed', 'pid': process.pid, 'returncode': process.returncode,
                     'seconds': round(time.monotonic() - start, 3),
                     'same_pid_bytecode': True, 'second_start': 'rejected',
                     'engine_shutdown': False, 'isolates_created': 0,
+                    'scheduler_thread_handles': thread_handle_marker(text),
+                    'scheduler_threads_created_joinable': True,
+                    'scheduler_threads_stopped_or_joined': False,
                     'executable_port_denials': 11, 'forker_port': False,
                     'no_children_at_ack': True, 'sigchld_preserved': True,
                     'removed_signal_api_checks': 6, 'preserved_signal_dispositions': 9,
@@ -174,7 +190,8 @@ def main():
               'source_diff_sha256': hashlib.sha256(runner.git(source, 'diff', 'HEAD', '--binary')).hexdigest(),
               'removed_environment_keys': removed, 'steps': [], 'inputs': {}}
     for path in [Path(__file__), tools / 'otp_validation.py', tools / 'build_baseline.py',
-                 tools / 'link_archive_probe.py', tools / 'archive_probe.mk', cpp,
+                 tools / 'link_archive_probe.py', tools / 'export_runtime_package.py',
+                 tools / 'archive_probe.mk', cpp,
                  fixtures / 'startup_probe.erl', fixtures / 'engine_start_probe.erl',
                  source / 'erts/emulator/beam/erl_embed.h',
                  source / 'erts/emulator/beam/erl_init.c', source / 'erts/emulator/beam/sys.h',
@@ -188,6 +205,7 @@ def main():
                  source / 'erts/emulator/beam/break.c',
                  source / 'erts/emulator/nifs/common/prim_tty_nif.c',
                  source / 'erts/emulator/beam/erl_process.c',
+                 source / 'erts/emulator/beam/erl_alloc.types',
                  source / 'erts/emulator/beam/global.h',
                  source / 'erts/emulator/beam/erl_driver.h',
                  source / 'erts/emulator/Makefile.in',
@@ -237,7 +255,10 @@ def main():
                     str(tools / 'archive_probe.mk'), 'TYPE=debug', 'FLAVOR=emu']
             cwd = source / 'erts/emulator'
             run('settings', make + ['libbeam-print-link-settings'], cwd)
+            report['native_link_settings_sha256'] = digest(output / 'settings.log')
             settings = parse_settings((output / 'settings.log').read_text())
+            _, _, dependencies = link_inputs(settings, cwd)
+            report['native_link_inputs'] = {str(p): digest(p) for p in dependencies}
             archive = Path(settings['ARCHIVE']).resolve()
             if archive.name != 'libbeam.a' or not archive.is_relative_to(source / 'bin'):
                 raise RuntimeError('unexpected generated archive path')
@@ -299,6 +320,9 @@ def main():
                     step.update(run_terminal_host(terminal_command, output, env,
                         output / f'{name}.log', nonblocking=nonblocking, exit_code=exit_code))
                     runner.save(output, report)
+            for path, sha in report['native_link_inputs'].items():
+                if digest(path) != sha:
+                    raise RuntimeError('native link input changed during validation: ' + path)
             report['host_sha256'] = hashlib.sha256(host.read_bytes()).hexdigest()
             report['archive_sha256'] = hashlib.sha256(copied.read_bytes()).hexdigest()
             report['status'] = 'started_and_returned_not_shutdown'

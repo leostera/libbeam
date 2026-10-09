@@ -3,6 +3,9 @@
 
 #include <libbeam/engine.hpp>
 #include <utility>
+#ifdef LIBBEAM_LINKED_ERTS
+#include <erl_embed.h>
+#endif
 
 namespace libbeam {
 namespace {
@@ -32,7 +35,19 @@ Reclamation::Reclamation(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 Reclamation::Reclamation(Reclamation&&) noexcept = default;
 Reclamation::~Reclamation() = default;
 
-Result<Engine> Engine::create() { return missing("Engine::create"); }
+Result<Engine> Engine::create() {
+#ifdef LIBBEAM_LINKED_ERTS
+    ErlSchedulerThreadInventory threads{};
+    erl_scheduler_thread_inventory(&threads);
+    if (threads.total != 0)
+        return Error{ErrorCode::invalid_state, "Engine::create: runtime already started"};
+    // Linking and retaining thread handles are not a stop protocol. In particular,
+    // do not call erl_start_embedded and then unwind through an empty destructor.
+    return missing("Engine::create (ERTS linked; cooperative stop/join still required)");
+#else
+    return missing("Engine::create");
+#endif
+}
 Result<Isolate> Engine::create_isolate() { return missing("Engine::create_isolate"); }
 Status Engine::shutdown(Deadline) { return missing("Engine::shutdown"); }
 Status Isolate::load_module(ByteView) { return missing("Isolate::load_module"); }

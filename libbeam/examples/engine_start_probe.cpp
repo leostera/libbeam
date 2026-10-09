@@ -3,6 +3,14 @@
 
 // Experimental real-runtime bring-up, NOT the public Engine/Isolate API.
 #include "erl_embed.h"
+#ifdef LIBBEAM_PROBE_CPP_PREFLIGHT
+#include <libbeam/engine.hpp>
+static bool factory_rejects(libbeam::ErrorCode expected) {
+    auto result = libbeam::Engine::create();
+    auto* error = std::get_if<libbeam::Error>(&result);
+    return error && error->code == expected;
+}
+#endif
 #include <cerrno>
 #include <climits>
 #include <cstdio>
@@ -69,8 +77,30 @@ int main(int argc, char** argv) {
             sigaction(signals[i], nullptr, &saved_actions[i]) != 0) return 15;
     }
 
+#ifdef LIBBEAM_PROBE_CPP_PREFLIGHT
+    if (!factory_rejects(libbeam::ErrorCode::not_implemented)) return 21;
+#endif
+    ErlSchedulerThreadInventory threads = {};
+    erl_scheduler_thread_inventory(&threads);
+    if (threads.total != 0) return 19;
+
     // This genuinely starts the linked emulator; no helper VM is launched.
     if (erl_start_embedded(argc, argv) != 0) return 12;
+    erl_scheduler_thread_inventory(&threads);
+    size_t total = 0;
+    for (size_t count : threads.counts) total += count;
+    if (!threads.all_joinable || total != threads.total ||
+        threads.counts[ERL_THREAD_SCHEDULER] != 2 ||
+        threads.counts[ERL_THREAD_DIRTY_CPU] != 1 ||
+        threads.counts[ERL_THREAD_DIRTY_IO] != 1 ||
+        threads.counts[ERL_THREAD_AUXILIARY] == 0 ||
+        threads.counts[ERL_THREAD_POLL] == 0) return 20;
+    std::printf("HOST_THREAD_HANDLES_OK total=%zu joinable=true stopped=false joined=false\n",
+                threads.total);
+#ifdef LIBBEAM_PROBE_CPP_PREFLIGHT
+    if (!factory_rejects(libbeam::ErrorCode::invalid_state)) return 22;
+    std::puts("HOST_CPP_PREFLIGHT_OK before=not_implemented after=invalid_state");
+#endif
     if (!host_signal_state_preserved()) return 16;
     if (erl_start_embedded(argc, argv) != 1) return 13;
     std::printf("HOST_STARTUP_RETURNED pid=%ld second_start=rejected\n",

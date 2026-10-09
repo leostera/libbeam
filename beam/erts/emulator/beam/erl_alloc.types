@@ -352,6 +352,7 @@ type	PURGE_DATA	SHORT_LIVED	CODE		purge_data
 type	DB_HEIR_DATA	STANDARD	ETS		db_heir_data
 type	DB_MS_PSDO_PROC	LONG_LIVED	ETS		db_match_pseudo_proc
 type	SCHDLR_DATA	LONG_LIVED	SYSTEM		scheduler_data
+type	RUNTIME_THREAD_HANDLES LONG_LIVED SYSTEM runtime_thread_handles
 
 type	NFUNC_TRAP_WRAPPER	STANDARD	PROCESSES	nfunc_trap_wrapper
 type	MONITOR		FIXED_SIZE	PROCESSES	monitor

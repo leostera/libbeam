@@ -28,6 +28,9 @@ library and CMake target now build and run, but deliberately fail at the first
 unfinished operation (`Engine::create`). No successful runtime behavior is faked.
 The [implementation plan](../docs/rfds/0002-example-implementation-plan.md) tracks
 the real engine, private worlds, execution and reclamation work ahead.
+[Native archive integration](../docs/rfds/0002-native-api-link.md) now connects the
+C++ target to actual ERTS and retains joinable scheduler-thread handles. The public
+factory still refuses startup until cooperative stop/join and cleanup exist.
 [`../beam/`](../beam/) is a tracked OTP snapshot. Edit emulator sources directly
 and commit them alongside embedding changes; there is no submodule or patch series.
 No Realm implementation is part of the active source.

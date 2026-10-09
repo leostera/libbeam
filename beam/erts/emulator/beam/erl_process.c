@@ -32,6 +32,7 @@
 #include "erl_vm.h"
 #include "global.h"
 #include "erl_process.h"
+#include "erl_embed.h"
 #include "error.h"
 #include "bif.h"
 #include "erl_db.h"
@@ -8900,6 +8901,48 @@ sched_dirty_io_thread_func(void *vesdp)
     return NULL;
 }
 
+/* One runtime's retained thread handles. Previously auxiliary/poll thread IDs
+ * were discarded and all these threads were detached. This is the ownership
+ * foundation for coordinated shutdown, NOT an implemented stop/join protocol.
+ * Only the startup/control thread writes/reads this registry. It remains alive
+ * with the current process-lifetime runtime; never free it while threads run.
+ */
+typedef struct {
+    ethr_tid tid;
+    enum ErlSchedulerThreadKind kind;
+    int detached;
+} ErtsRuntimeThreadHandle;
+
+static ErtsRuntimeThreadHandle *runtime_thread_handles;
+static size_t runtime_thread_count;
+static size_t runtime_thread_capacity;
+
+static void
+retain_runtime_thread(ethr_tid tid, enum ErlSchedulerThreadKind kind, int detached)
+{
+    ErtsRuntimeThreadHandle *handle;
+    ASSERT(runtime_thread_count < runtime_thread_capacity);
+    handle = &runtime_thread_handles[runtime_thread_count++];
+    handle->tid = tid;
+    handle->kind = kind;
+    handle->detached = detached;
+}
+
+void
+erl_scheduler_thread_inventory(ErlSchedulerThreadInventory *out)
+{
+    size_t i;
+    sys_memset(out, 0, sizeof(*out));
+    out->all_joinable = 1;
+    out->total = runtime_thread_count;
+    for (i = 0; i < runtime_thread_count; i++) {
+        ErtsRuntimeThreadHandle *handle = &runtime_thread_handles[i];
+        out->counts[handle->kind]++;
+        if (handle->detached)
+            out->all_joinable = 0;
+    }
+}
+
 void
 erts_start_schedulers(void)
 {
@@ -8909,8 +8952,17 @@ erts_start_schedulers(void)
     ethr_thr_opts opts = ETHR_THR_OPTS_DEFAULT_INITER;
     int ix;
 
-    opts.detached = 1;
+    ASSERT(!runtime_thread_handles && !runtime_thread_count);
+    runtime_thread_capacity = (size_t) erts_no_schedulers
+        + erts_no_dirty_cpu_schedulers + erts_no_dirty_io_schedulers
+        + erts_no_poll_threads + (erts_runq_supervision_interval != 0);
+    for (ix = 0; ix < erts_no_aux_work_threads;
+         ix = ix == 0 ? 1 + (int) erts_no_schedulers : ix + 1)
+        runtime_thread_capacity++;
+    runtime_thread_handles = erts_alloc(ERTS_ALC_T_RUNTIME_THREAD_HANDLES,
+        runtime_thread_capacity * sizeof(*runtime_thread_handles));
 
+    opts.detached = 0;
     opts.name = name;
 
     if (erts_runq_supervision_interval) {
@@ -8926,7 +8978,8 @@ erts_start_schedulers(void)
 	if (0 != res)
 	    erts_exit(ERTS_ABORT_EXIT, "Failed to create run-queue supervision thread, "
                       "error = %d\n", res);
-
+        retain_runtime_thread(runq_supervisor_tid, ERL_THREAD_RUNQ_SUPERVISOR,
+                              opts.detached);
     }
 
     opts.suggested_stack_size = erts_sched_thread_suggested_stack_size;
@@ -8941,6 +8994,7 @@ erts_start_schedulers(void)
 	if (res != 0) {
            erts_exit(ERTS_ABORT_EXIT, "Failed to create scheduler thread %d, error = %d\n", ix, res);
 	}
+        retain_runtime_thread(esdp->tid, ERL_THREAD_SCHEDULER, opts.detached);
     }
 
     /* Probably not needed as thread create will imply a memory barrier,
@@ -8955,6 +9009,7 @@ erts_start_schedulers(void)
 	    res = ethr_thr_create(&esdp->tid,sched_dirty_cpu_thread_func,(void*)esdp,&opts);
 	    if (res != 0)
 		erts_exit(ERTS_ABORT_EXIT, "Failed to create dirty cpu scheduler thread %d, error = %d\n", ix, res);
+            retain_runtime_thread(esdp->tid, ERL_THREAD_DIRTY_CPU, opts.detached);
 	}
 	for (ix = 0; ix < erts_no_dirty_io_schedulers; ix++) {
 	    ErtsSchedulerData *esdp = ERTS_DIRTY_IO_SCHEDULER_IX(ix);
@@ -8963,6 +9018,7 @@ erts_start_schedulers(void)
 	    res = ethr_thr_create(&esdp->tid,sched_dirty_io_thread_func,(void*)esdp,&opts);
 	    if (res != 0)
 		erts_exit(ERTS_ABORT_EXIT, "Failed to create dirty io scheduler thread %d, error = %d\n", ix, res);
+            retain_runtime_thread(esdp->tid, ERL_THREAD_DIRTY_IO, opts.detached);
 	}
     }
 
@@ -8973,7 +9029,8 @@ erts_start_schedulers(void)
 
 	res = ethr_thr_create(&tid, aux_thread, (void *) (Sint) ix, &opts);
 	if (res != 0)
-	    erts_exit(ERTS_ABORT_EXIT, "Failed to create aux thread %d, error = %d\n", res);
+	    erts_exit(ERTS_ABORT_EXIT, "Failed to create aux thread %d, error = %d\n", ix, res);
+        retain_runtime_thread(tid, ERL_THREAD_AUXILIARY, opts.detached);
 	if (ix == 0)
 	    ix = (int) (1 + erts_no_schedulers);
 	else
@@ -9001,7 +9058,9 @@ erts_start_schedulers(void)
         res = ethr_thr_create(&tid, poll_thread, (void*) bpt, &opts);
         if (res != 0)
             erts_exit(ERTS_ABORT_EXIT, "Failed to create poll thread\n");
+        retain_runtime_thread(tid, ERL_THREAD_POLL, opts.detached);
     }
+    ASSERT(runtime_thread_count == runtime_thread_capacity);
 }
 
 BIF_RETTYPE

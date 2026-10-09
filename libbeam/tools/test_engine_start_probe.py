@@ -28,9 +28,17 @@ class EngineStartProbeTests(unittest.TestCase):
                      host + 'BEAM_STARTUP_OK pid=123\n'):
             self.assertFalse(probe.host_markers(text, 123))
 
+    def test_thread_handle_marker_rejects_missing_duplicate_and_detached(self):
+        marker = 'HOST_THREAD_HANDLES_OK total=7 joinable=true stopped=false joined=false\n'
+        self.assertEqual(probe.thread_handle_marker(marker), 7)
+        for text in ('', marker * 2, marker.replace('true', 'false'),
+                     marker.replace('total=7', 'total=0')):
+            self.assertIsNone(probe.thread_handle_marker(text))
+
     def test_private_control_handshake(self):
         code = '''import os
 pid=os.getpid()
+print("HOST_THREAD_HANDLES_OK total=7 joinable=true stopped=false joined=false", flush=True)
 print(f"HOST_STARTUP_RETURNED pid={pid} second_start=rejected", flush=True)
 print(f"BEAM_STARTUP_OK pid={pid}", flush=True)
 print("EXECUTABLE_PORTS_DENIED checks=11 forker_port=false", flush=True)

@@ -352,8 +352,10 @@ libbeam/
   tests/run_isolate_proof.py             # planned full acceptance runner
 ```
 
-The current example links only the C++ scaffold. The eventual working example must
-link against a **single** libbeam engine library. It must not exec `erl`, use Erlang distribution, call out to helper VMs or
+The current example links the C++ scaffold and can now optionally import a
+[hash-checked native ERTS package](0002-native-api-link.md). The public factory still
+refuses startup pending cooperative stop/join and cleanup. The eventual working
+example must link against a **single** libbeam engine library. It must not exec `erl`, use Erlang distribution, call out to helper VMs or
 boot several renamed copies of the runtime. Static linking is enough for P0; shared
 library packaging, symbol visibility and a stable ABI follow later.
 

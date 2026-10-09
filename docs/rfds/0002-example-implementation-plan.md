@@ -17,8 +17,11 @@ operation. The example turns that into a visible error and nonzero exit status.
 `unsupported` remains distinct: a deliberately excluded operation, not unfinished
 implementation work.
 
-**Current frontier: `Engine::create`.** No VM is linked or started by the scaffold,
-no isolate is constructed, and no successful reply or lifecycle status is simulated.
+**Current frontier: `Engine::create`.** The native build can now link ERTS and
+query its real thread inventory, but the public API does not start a VM or construct
+an isolate. No successful reply or lifecycle status is simulated. See
+[native linking and retained thread handles](0002-native-api-link.md) for partial
+M1 progress and the remaining cooperative stop/join blocker.
 The opaque implementation structs contain no runtime state and are never allocated
 by the failing factories. Their default destructors are safe only for this empty
 scaffold; they are not a future ownership strategy.
@@ -55,6 +58,11 @@ claimed for this scaffold-only change.
 ### M1 — Real engine ownership and safe failure paths
 
 **API:** `Engine::create`, `Engine::shutdown`, move/destructor behavior.
+
+**Partial progress:** native archive/dependency integration and retained joinable
+scheduler/auxiliary/poll/supervision handles are implemented and startup-tested.
+The public factory remains closed pending safe stop/join and cleanup. M1 is not
+complete; joinable creation alone is not thread termination or reclamation.
 
 - Integrate one actual emulator archive into the library target. Reuse the existing
   returning-startup experiment as source material, not as proof of destruction.
