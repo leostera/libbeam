@@ -39,6 +39,7 @@ class EngineStartProbeTests(unittest.TestCase):
         code = '''import os
 pid=os.getpid()
 print("HOST_THREAD_HANDLES_OK total=7 joinable=true stopped=false joined=false", flush=True)
+print("HOST_ENGINE_OWNER_OK live_handles_private=true uninitialized_candidate_released=true", flush=True)
 print(f"HOST_STARTUP_RETURNED pid={pid} second_start=rejected", flush=True)
 print(f"BEAM_STARTUP_OK pid={pid}", flush=True)
 print("EXECUTABLE_PORTS_DENIED checks=11 forker_port=false", flush=True)
@@ -54,6 +55,15 @@ print("HOST_CONTROL_OK engine_shutdown=false isolates_created=0 process_exit=tru
                                     root / 'host.log', timeout=10)
             self.assertEqual(result['status'], 'passed')
             self.assertFalse(result['engine_shutdown'])
+            self.assertTrue(result['explicit_engine_owner_checked'])
+            owner_line = next(line for line in code.splitlines(True)
+                              if line.startswith('print("HOST_ENGINE_OWNER_OK'))
+            for copies in (0, 2):
+                with self.subTest(owner_markers=copies):
+                    with self.assertRaisesRegex(RuntimeError, 'host control witness failed'):
+                        probe.run_host([sys.executable, '-c',
+                                        code.replace(owner_line, owner_line * copies)],
+                                       root, os.environ, root / f'owner-{copies}.log', timeout=10)
 
     def test_terminal_observer_accepts_preserved_state(self):
         with tempfile.TemporaryDirectory() as temp:

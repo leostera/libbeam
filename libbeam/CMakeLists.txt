@@ -37,6 +37,9 @@ if(BUILD_TESTING)
     if(LIBBEAM_ERTS_PACKAGE)
         target_link_libraries(api_scaffold_test PRIVATE libbeam_erts)
         target_compile_definitions(api_scaffold_test PRIVATE LIBBEAM_TEST_NATIVE=1)
+        add_executable(native_engine_control_test tests/native_engine_control_test.cpp)
+        target_link_libraries(native_engine_control_test PRIVATE libbeam_erts)
+        add_test(NAME native_engine_control_lifetime COMMAND native_engine_control_test)
         foreach(workers IN ITEMS 0 1 4)
             add_test(NAME native_prepare_without_otp_async_${workers}
                 COMMAND engine_prepare_probe -S 2:2 -SDcpu 1:1 -SDio 1 -A ${workers}

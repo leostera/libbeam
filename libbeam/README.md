@@ -34,6 +34,10 @@ factory still refuses initialization until ownership/cleanup exists.
 [Unbooted preparation](../docs/rfds/0002-unbooted-preparation.md) now initializes
 native substrate without starting OTP processes or workers. The engine path must
 not reuse whole-world startup.
+[Native ownership migration](../docs/rfds/0002-native-ownership.md) introduces an
+explicit `ErtsEngine`, engine-owned lifecycle/handle-registry state, and scheduler
+owner references. Remaining globals are classified by engine versus isolate
+ownership; multiple initialized runtimes/private worlds are not implemented.
 [`../beam/`](../beam/) is a tracked OTP snapshot. Edit emulator sources directly
 and commit them alongside embedding changes; there is no submodule or patch series.
 No Realm implementation is part of the active source.

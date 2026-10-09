@@ -3,6 +3,11 @@
 
 # Native preparation without booting an OTP world
 
+Checkpoint at `2113c003`. The subsequent [native ownership migration](0002-native-ownership.md)
+adds an explicit engine argument to preparation/startup/inventory operations and
+moves the lifecycle phase and scheduler-handle registry into that owner. The
+preparation-only guarantees and remaining global-state limitations below still apply.
+
 This corrects the earlier M1 direction: the Engine must **not** reuse whole-world
 startup or require that old OTP world to become destructible first.
 

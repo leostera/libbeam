@@ -80,13 +80,16 @@ int main(int argc, char** argv) {
 #ifdef LIBBEAM_PROBE_CPP_PREFLIGHT
     if (!factory_rejects(libbeam::ErrorCode::not_implemented)) return 21;
 #endif
+    ErtsEngine* engine = erl_engine_alloc();
+    ErtsEngine* uninitialized = erl_engine_alloc();
+    if (!engine || !uninitialized || engine == uninitialized) return 23;
     ErlSchedulerThreadInventory threads = {};
-    erl_scheduler_thread_inventory(&threads);
+    erl_scheduler_thread_inventory(engine, &threads);
     if (threads.total != 0) return 19;
 
     // This genuinely starts the linked emulator; no helper VM is launched.
-    if (erl_start_embedded(argc, argv) != 0) return 12;
-    erl_scheduler_thread_inventory(&threads);
+    if (erl_start_embedded(engine, argc, argv) != 0) return 12;
+    erl_scheduler_thread_inventory(engine, &threads);
     size_t total = 0;
     for (size_t count : threads.counts) total += count;
     if (!threads.all_joinable || total != threads.total ||
@@ -102,7 +105,17 @@ int main(int argc, char** argv) {
     std::puts("HOST_CPP_PREFLIGHT_OK before=not_implemented after=invalid_state");
 #endif
     if (!host_signal_state_preserved()) return 16;
-    if (erl_start_embedded(argc, argv) != 1) return 13;
+    if (erl_start_embedded(engine, argc, argv) != 1) return 13;
+    ErlSchedulerThreadInventory other{};
+    erl_scheduler_thread_inventory(uninitialized, &other);
+    if (other.total != 0 ||
+        erl_runtime_startup_phase(uninitialized) != ERL_RUNTIME_UNCLAIMED ||
+        erl_runtime_startup_phase(engine) != ERL_RUNTIME_THREADS_STARTED ||
+        erl_start_embedded(uninitialized, argc, argv) != 1 ||
+        erl_runtime_startup_phase(uninitialized) != ERL_RUNTIME_UNCLAIMED ||
+        erl_engine_discard_uninitialized(engine) != 1 ||
+        erl_engine_discard_uninitialized(uninitialized) != 0) return 24;
+    std::puts("HOST_ENGINE_OWNER_OK live_handles_private=true uninitialized_candidate_released=true");
     std::printf("HOST_STARTUP_RETURNED pid=%ld second_start=rejected\n",
                 static_cast<long>(getpid()));
     std::fflush(stdout);

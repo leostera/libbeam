@@ -27,7 +27,7 @@
 #include "sys.h"
 #include <ctype.h>
 #include "erl_vm.h"
-#include "erl_embed.h"
+#include "erl_engine.h"
 #include "global.h"
 #include "erl_process.h"
 #include "error.h"
@@ -86,7 +86,7 @@ extern void ConNormalExit(void);
 extern void ConWaitForExit(void);
 #endif
 
-static void erl_init(int ncpu,
+static void erl_init(ErtsEngine *engine, int ncpu,
 		     int proc_tab_sz,
 		     int legacy_proc_tab,
 		     int port_tab_sz,
@@ -101,11 +101,13 @@ static void erl_init(int ncpu,
                      int export_tab_sz);
 
 /* Internal startup phases, not reentrant embedding APIs. */
-static void start_otp_world(char *init, int boot_argc, char **boot_argv);
-static void start_runtime_threads(void);
-static void prepare_runtime(int argc, char **argv);
-/* Startup is restricted to one host control thread and one attempt per process. */
-static enum ErlRuntimeStartupPhase startup_phase = ERL_RUNTIME_UNCLAIMED;
+static void start_otp_world(ErtsEngine *engine, char *init, int boot_argc, char **boot_argv);
+static void start_runtime_threads(ErtsEngine *engine);
+static void prepare_runtime(ErtsEngine *engine, int argc, char **argv);
+/* Temporary guard/retained owner for the still-global substrate. Runtime
+ * operations receive their owner explicitly; this is not a current-engine API.
+ * Remove the one-runtime restriction only as the remaining globals migrate. */
+static ErtsEngine *claimed_engine;
 
 static erts_atomic_t exiting;
 
@@ -253,7 +255,7 @@ void erl_error(const char *fmt, va_list args)
 static int early_init(int *argc, char **argv);
 
 static void
-erl_init(int ncpu,
+erl_init(ErtsEngine *engine, int ncpu,
 	 int proc_tab_sz,
 	 int legacy_proc_tab,
 	 int port_tab_sz,
@@ -274,7 +276,7 @@ erl_init(int ncpu,
     erts_init_time(time_correction, time_warp_mode);
     erts_init_sys_common_misc();
     erts_init_process(ncpu, proc_tab_sz, legacy_proc_tab);
-    erts_init_scheduling(no_schedulers,
+    erts_init_scheduling(engine, no_schedulers,
 			 no_schedulers_online,
                          erts_no_poll_threads,
 			 no_dirty_cpu_schedulers,
@@ -1291,15 +1293,27 @@ early_init(int *argc, char **argv) /*
 }
 
 
+static int
+claim_runtime(ErtsEngine *engine)
+{
+    if (!engine)
+        return 2;
+    if (claimed_engine || engine->startup_phase != ERL_RUNTIME_UNCLAIMED)
+        return 1;
+    claimed_engine = engine;
+    engine->startup_phase = ERL_RUNTIME_PREPARING;
+    return 0;
+}
+
 void
 erl_start(int argc, char **argv)
 {
-    if (startup_phase != ERL_RUNTIME_UNCLAIMED)
-        erts_exit(ERTS_ERROR_EXIT, "Runtime initialization already claimed\n");
-    startup_phase = ERL_RUNTIME_PREPARING;
-    prepare_runtime(argc, argv);
-    start_otp_world(init, boot_argc, boot_argv);
-    start_runtime_threads();
+    ErtsEngine *engine = erl_engine_alloc();
+    if (claim_runtime(engine) != 0)
+        erts_exit(ERTS_ERROR_EXIT, "Cannot allocate or claim runtime engine\n");
+    prepare_runtime(engine, argc, argv);
+    start_otp_world(engine, init, boot_argc, boot_argv);
+    start_runtime_threads(engine);
     /* Temporary command-line tool host: keep the process alive until halt.
      * This is the same runtime contract, not an unrestricted legacy mode. */
     erts_sys_main_thread();
@@ -1308,37 +1322,38 @@ erl_start(int argc, char **argv)
 #ifndef __WIN32__
 /* Experimental unbooted preparation. No OTP bootstrap or thread launch. */
 int
-erl_prepare_runtime(int argc, char **argv)
+erl_prepare_runtime(ErtsEngine *engine, int argc, char **argv)
 {
-    if (startup_phase != ERL_RUNTIME_UNCLAIMED)
-        return 1;
-    startup_phase = ERL_RUNTIME_PREPARING;
-    prepare_runtime(argc, argv);
+    int result = claim_runtime(engine);
+    if (result != 0)
+        return result;
+    prepare_runtime(engine, argc, argv);
     return 0;
 }
 
 /* Process-lifetime diagnostic host, not the Engine constructor. */
 int
-erl_start_embedded(int argc, char **argv)
+erl_start_embedded(ErtsEngine *engine, int argc, char **argv)
 {
-    if (erl_prepare_runtime(argc, argv) != 0)
-        return 1;
-    start_otp_world(init, boot_argc, boot_argv);
-    start_runtime_threads();
+    int result = erl_prepare_runtime(engine, argc, argv);
+    if (result != 0)
+        return result;
+    start_otp_world(engine, init, boot_argc, boot_argv);
+    start_runtime_threads(engine);
     return 0;
 }
 #endif
 
-enum ErlRuntimeStartupPhase
-erl_runtime_startup_phase(void)
+int
+erl_runtime_is_claimed(void)
 {
-    return startup_phase;
+    return claimed_engine != NULL;
 }
 
 int
-erl_prepared_runtime_inventory(ErlPreparedRuntimeInventory *out)
+erl_prepared_runtime_inventory(const ErtsEngine *engine, ErlPreparedRuntimeInventory *out)
 {
-    if (startup_phase != ERL_RUNTIME_PREPARED)
+    if (!engine || engine != claimed_engine || engine->startup_phase != ERL_RUNTIME_PREPARED)
         return 1;
     out->processes = erts_ptab_count(&erts_proc);
     out->ports = erts_ptab_count(&erts_port);
@@ -1355,7 +1370,7 @@ erl_prepared_runtime_inventory(ErlPreparedRuntimeInventory *out)
  * A typed, recoverable initializer and ownership-aware cleanup are still needed.
  */
 static void
-prepare_runtime(int argc, char **argv)
+prepare_runtime(ErtsEngine *engine, int argc, char **argv)
 {
     int i = 1;
     char* arg=NULL;
@@ -2569,7 +2584,7 @@ prepare_runtime(int argc, char **argv)
     if (erts_dio_sched_thread_suggested_stack_size < ERTS_SCHED_THREAD_MIN_STACK_SIZE)
         erts_dio_sched_thread_suggested_stack_size = ERTS_SCHED_THREAD_MIN_STACK_SIZE;
 
-    erl_init(ncpu,
+    erl_init(engine, ncpu,
 	     proc_tab_sz,
 	     legacy_proc_tab,
 	     port_tab_sz,
@@ -2583,7 +2598,7 @@ prepare_runtime(int argc, char **argv)
              module_tab_sz,
              export_tab_sz);
 
-    startup_phase = ERL_RUNTIME_PREPARED;
+    engine->startup_phase = ERL_RUNTIME_PREPARED;
 }
 
 /* Populate the conventional, global OTP world before any scheduler runs.
@@ -2591,9 +2606,9 @@ prepare_runtime(int argc, char **argv)
  * preparation never calls it. It is not an isolate constructor: code indices,
  * init and housekeeping pointers are still global. */
 static void
-start_otp_world(char *init, int boot_argc, char **boot_argv)
+start_otp_world(ErtsEngine *engine, char *init, int boot_argc, char **boot_argv)
 {
-    ASSERT(startup_phase == ERL_RUNTIME_PREPARED);
+    ASSERT(engine->startup_phase == ERL_RUNTIME_PREPARED);
     load_preloaded();
     erts_end_staging_code_ix();
     erts_commit_staging_code_ix();
@@ -2669,20 +2684,20 @@ start_otp_world(char *init, int boot_argc, char **boot_argv)
         erts_proc_inc_refc(erts_trace_cleaner);
 
     }
-    startup_phase = ERL_RUNTIME_OTP_BOOTSTRAPPED;
+    engine->startup_phase = ERL_RUNTIME_OTP_BOOTSTRAPPED;
 }
 
 /* Thread launch is separate from OTP-world construction and frontend handoff.
  * Scheduler/auxiliary/poll thread handles are retained and created joinable.
  * A coordinated stop/join protocol and empty-world startup remain unimplemented. */
 static void
-start_runtime_threads(void)
+start_runtime_threads(ErtsEngine *engine)
 {
     /* Neither message dispatch nor async workers belong to preparation. */
     erts_start_sys_msg_dispatcher();
     erts_start_async_workers();
-    erts_start_schedulers();
-    startup_phase = ERL_RUNTIME_THREADS_STARTED;
+    erts_start_schedulers(engine);
+    engine->startup_phase = ERL_RUNTIME_THREADS_STARTED;
 
 #ifdef ERTS_ENABLE_LOCK_COUNT
     erts_lcnt_post_startup();

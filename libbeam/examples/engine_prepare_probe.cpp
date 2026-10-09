@@ -63,22 +63,26 @@ static bool factory_rejects(libbeam::ErrorCode expected) {
 
 int main(int argc, char** argv) {
     const auto before = os_threads();
-    if (erl_runtime_startup_phase() != ERL_RUNTIME_UNCLAIMED ||
+    ErtsEngine* engine = erl_engine_alloc();
+    ErtsEngine* candidate = erl_engine_alloc();
+    if (!engine || !candidate || engine == candidate || erl_runtime_is_claimed() ||
+        erl_runtime_startup_phase(engine) != ERL_RUNTIME_UNCLAIMED ||
+        erl_runtime_startup_phase(candidate) != ERL_RUNTIME_UNCLAIMED ||
         !factory_rejects(libbeam::ErrorCode::not_implemented)) return 10;
     ErlPreparedRuntimeInventory inventory{91, 92, 93, 94, 95};
-    if (erl_prepared_runtime_inventory(&inventory) != 1 ||
+    if (erl_prepared_runtime_inventory(engine, &inventory) != 1 ||
         inventory.processes != 91 || inventory.ports != 92 ||
         inventory.loaded_code_bytes != 93 || inventory.init_process_created != 94 ||
         inventory.system_process_roots != 95) return 11;
 
-    if (erl_prepare_runtime(argc, argv) != 0 ||
-        erl_runtime_startup_phase() != ERL_RUNTIME_PREPARED) return 12;
-    if (erl_prepared_runtime_inventory(&inventory) != 0 ||
+    if (erl_prepare_runtime(engine, argc, argv) != 0 ||
+        erl_runtime_startup_phase(engine) != ERL_RUNTIME_PREPARED) return 12;
+    if (erl_prepared_runtime_inventory(engine, &inventory) != 0 ||
         inventory.processes != 0 || inventory.ports != 0 ||
         inventory.loaded_code_bytes != 0 || inventory.init_process_created ||
         inventory.system_process_roots != 0) return 13;
     ErlSchedulerThreadInventory threads{};
-    erl_scheduler_thread_inventory(&threads);
+    erl_scheduler_thread_inventory(engine, &threads);
     const auto after = os_threads();
     std::fprintf(stderr, "HOST_PREPARE_OBSERVED processes=%zu ports=%zu code_bytes=%zu "
                  "scheduler_threads=%zu os_threads_before=%zu os_threads_after=%zu\n",
@@ -88,10 +92,25 @@ int main(int argc, char** argv) {
 
     // Preparation has claimed native state even though it launched no threads.
     if (!factory_rejects(libbeam::ErrorCode::invalid_state) ||
-        erl_prepare_runtime(argc, argv) != 1 ||
-        erl_start_embedded(argc, argv) != 1 ||
-        erl_runtime_startup_phase() != ERL_RUNTIME_PREPARED ||
+        erl_prepare_runtime(engine, argc, argv) != 1 ||
+        erl_start_embedded(engine, argc, argv) != 1 ||
+        erl_runtime_startup_phase(engine) != ERL_RUNTIME_PREPARED ||
         os_threads() != before) return 15;
+
+    // Other control objects have their own fields, but may not initialize the
+    // unmigrated global substrate. Rejection must not mutate that candidate.
+    inventory = {91, 92, 93, 94, 95};
+    if (erl_runtime_startup_phase(candidate) != ERL_RUNTIME_UNCLAIMED ||
+        erl_prepare_runtime(candidate, argc, argv) != 1 ||
+        erl_runtime_startup_phase(candidate) != ERL_RUNTIME_UNCLAIMED ||
+        erl_prepared_runtime_inventory(candidate, &inventory) != 1 ||
+        inventory.processes != 91 || inventory.ports != 92 ||
+        inventory.loaded_code_bytes != 93 || inventory.init_process_created != 94 ||
+        inventory.system_process_roots != 95 ||
+        erl_engine_discard_uninitialized(candidate) != 0 ||
+        erl_engine_discard_uninitialized(engine) != 1 ||
+        erl_runtime_startup_phase(engine) != ERL_RUNTIME_PREPARED) return 16;
+    std::puts("HOST_PREPARE_OWNER_OK candidate_unchanged=true initialized_owner_retained=true");
 
     std::printf("HOST_PREPARE_OK processes=0 ports=0 code_bytes=0 system_roots=0 "
                 "scheduler_threads=0 os_threads_unchanged=true host_control=true\n");

@@ -32,7 +32,7 @@
 #include "erl_vm.h"
 #include "global.h"
 #include "erl_process.h"
-#include "erl_embed.h"
+#include "erl_engine.h"
 #include "error.h"
 #include "bif.h"
 #include "erl_db.h"
@@ -5987,13 +5987,14 @@ init_scheduler_registers(ErtsSchedulerData* esdp) {
 }
 
 static void
-init_scheduler_data(ErtsSchedulerData* esdp, int num,
+init_scheduler_data(ErtsEngine *engine, ErtsSchedulerData* esdp, int num,
 		    ErtsSchedulerSleepInfo* ssi,
 		    ErtsRunQueue* runq,
 		    char** daww_ptr, size_t daww_sz,
 		    Process *shadow_proc,
                     Uint64 time_stamp)
 {
+    esdp->engine = engine;
     esdp->timer_wheel = NULL;
     esdp->match_pseudo_process = NULL;
     esdp->free_process = NULL;
@@ -6083,7 +6084,7 @@ init_scheduler_data(ErtsSchedulerData* esdp, int num,
 }
 
 void
-erts_init_scheduling(int no_schedulers, int no_schedulers_online, int no_poll_threads,
+erts_init_scheduling(ErtsEngine *engine, int no_schedulers, int no_schedulers_online, int no_poll_threads,
 		     int no_dirty_cpu_schedulers, int no_dirty_cpu_schedulers_online,
 		     int no_dirty_io_schedulers
 		     )
@@ -6275,7 +6276,7 @@ erts_init_scheduling(int no_schedulers, int no_schedulers_online, int no_poll_th
 
     for (ix = 0; ix < n; ix++) {
 	ErtsSchedulerData *esdp = ERTS_SCHEDULER_IX(ix);
-	init_scheduler_data(esdp, ix+1, ERTS_SCHED_SLEEP_INFO_IX(ix),
+	init_scheduler_data(engine, esdp, ix+1, ERTS_SCHED_SLEEP_INFO_IX(ix),
 			    ERTS_RUNQ_IX(ix), &daww_ptr, daww_sz,
                             NULL, 0);
     }
@@ -6299,13 +6300,13 @@ erts_init_scheduling(int no_schedulers, int no_schedulers_online, int no_poll_th
 
 	for (ix = 0; ix < no_dirty_cpu_schedulers; ix++) {
 	    ErtsSchedulerData *esdp = ERTS_DIRTY_CPU_SCHEDULER_IX(ix);
-	    init_scheduler_data(esdp, ix+1, ERTS_DIRTY_CPU_SCHED_SLEEP_INFO_IX(ix),
+	    init_scheduler_data(engine, esdp, ix+1, ERTS_DIRTY_CPU_SCHED_SLEEP_INFO_IX(ix),
 				ERTS_DIRTY_CPU_RUNQ, NULL, 0,
 				&adsp[adspix++].dsp, ts);
 	}
 	for (ix = 0; ix < no_dirty_io_schedulers; ix++) {
 	    ErtsSchedulerData *esdp = ERTS_DIRTY_IO_SCHEDULER_IX(ix);
-	    init_scheduler_data(esdp, ix+1, ERTS_DIRTY_IO_SCHED_SLEEP_INFO_IX(ix),
+	    init_scheduler_data(engine, esdp, ix+1, ERTS_DIRTY_IO_SCHED_SLEEP_INFO_IX(ix),
 				ERTS_DIRTY_IO_RUNQ, NULL, 0,
                                 &adsp[adspix++].dsp, ts);
 	}
@@ -8913,30 +8914,36 @@ typedef struct {
     int detached;
 } ErtsRuntimeThreadHandle;
 
-static ErtsRuntimeThreadHandle *runtime_thread_handles;
-static size_t runtime_thread_count;
-static size_t runtime_thread_capacity;
+typedef struct ErtsSchedulerThreadGroup {
+    size_t count;
+    size_t capacity;
+    ErtsRuntimeThreadHandle handles[];
+} ErtsSchedulerThreadGroup;
 
 static void
-retain_runtime_thread(ethr_tid tid, enum ErlSchedulerThreadKind kind, int detached)
+retain_runtime_thread(ErtsSchedulerThreadGroup *threads, ethr_tid tid,
+                      enum ErlSchedulerThreadKind kind, int detached)
 {
     ErtsRuntimeThreadHandle *handle;
-    ASSERT(runtime_thread_count < runtime_thread_capacity);
-    handle = &runtime_thread_handles[runtime_thread_count++];
+    ASSERT(threads->count < threads->capacity);
+    handle = &threads->handles[threads->count++];
     handle->tid = tid;
     handle->kind = kind;
     handle->detached = detached;
 }
 
 void
-erl_scheduler_thread_inventory(ErlSchedulerThreadInventory *out)
+erl_scheduler_thread_inventory(const ErtsEngine *engine, ErlSchedulerThreadInventory *out)
 {
+    const ErtsSchedulerThreadGroup *threads = engine->scheduler_threads;
     size_t i;
     sys_memset(out, 0, sizeof(*out));
     out->all_joinable = 1;
-    out->total = runtime_thread_count;
-    for (i = 0; i < runtime_thread_count; i++) {
-        ErtsRuntimeThreadHandle *handle = &runtime_thread_handles[i];
+    if (!threads)
+        return;
+    out->total = threads->count;
+    for (i = 0; i < threads->count; i++) {
+        const ErtsRuntimeThreadHandle *handle = &threads->handles[i];
         out->counts[handle->kind]++;
         if (handle->detached)
             out->all_joinable = 0;
@@ -8944,23 +8951,28 @@ erl_scheduler_thread_inventory(ErlSchedulerThreadInventory *out)
 }
 
 void
-erts_start_schedulers(void)
+erts_start_schedulers(ErtsEngine *engine)
 {
+    ErtsSchedulerThreadGroup *threads;
+    size_t capacity;
     ethr_tid tid;
     int res = 0;
     char name[ETHR_THR_NAME_MAX + 1];
     ethr_thr_opts opts = ETHR_THR_OPTS_DEFAULT_INITER;
     int ix;
 
-    ASSERT(!runtime_thread_handles && !runtime_thread_count);
-    runtime_thread_capacity = (size_t) erts_no_schedulers
+    ASSERT(engine && !engine->scheduler_threads);
+    capacity = (size_t) erts_no_schedulers
         + erts_no_dirty_cpu_schedulers + erts_no_dirty_io_schedulers
         + erts_no_poll_threads + (erts_runq_supervision_interval != 0);
     for (ix = 0; ix < erts_no_aux_work_threads;
          ix = ix == 0 ? 1 + (int) erts_no_schedulers : ix + 1)
-        runtime_thread_capacity++;
-    runtime_thread_handles = erts_alloc(ERTS_ALC_T_RUNTIME_THREAD_HANDLES,
-        runtime_thread_capacity * sizeof(*runtime_thread_handles));
+        capacity++;
+    threads = erts_alloc(ERTS_ALC_T_RUNTIME_THREAD_HANDLES,
+        sizeof(*threads) + capacity * sizeof(ErtsRuntimeThreadHandle));
+    threads->count = 0;
+    threads->capacity = capacity;
+    engine->scheduler_threads = threads;
 
     opts.detached = 0;
     opts.name = name;
@@ -8978,7 +8990,7 @@ erts_start_schedulers(void)
 	if (0 != res)
 	    erts_exit(ERTS_ABORT_EXIT, "Failed to create run-queue supervision thread, "
                       "error = %d\n", res);
-        retain_runtime_thread(runq_supervisor_tid, ERL_THREAD_RUNQ_SUPERVISOR,
+        retain_runtime_thread(threads, runq_supervisor_tid, ERL_THREAD_RUNQ_SUPERVISOR,
                               opts.detached);
     }
 
@@ -8989,12 +9001,13 @@ erts_start_schedulers(void)
     for (ix = 0; ix < erts_no_schedulers; ix++) {
 	ErtsSchedulerData *esdp = ERTS_SCHEDULER_IX(ix);
 	ASSERT(ix == esdp->no - 1);
+        ASSERT(esdp->engine == engine);
 	erts_snprintf(opts.name, sizeof(name), "erts_sched_%d", ix + 1);
 	res = ethr_thr_create(&esdp->tid, sched_thread_func, (void*)esdp, &opts);
 	if (res != 0) {
            erts_exit(ERTS_ABORT_EXIT, "Failed to create scheduler thread %d, error = %d\n", ix, res);
 	}
-        retain_runtime_thread(esdp->tid, ERL_THREAD_SCHEDULER, opts.detached);
+        retain_runtime_thread(threads, esdp->tid, ERL_THREAD_SCHEDULER, opts.detached);
     }
 
     /* Probably not needed as thread create will imply a memory barrier,
@@ -9004,21 +9017,23 @@ erts_start_schedulers(void)
     {
 	for (ix = 0; ix < erts_no_dirty_cpu_schedulers; ix++) {
 	    ErtsSchedulerData *esdp = ERTS_DIRTY_CPU_SCHEDULER_IX(ix);
+            ASSERT(esdp->engine == engine);
 	    erts_snprintf(opts.name, sizeof(name), "erts_dcpus_%d", ix + 1);
             opts.suggested_stack_size = erts_dcpu_sched_thread_suggested_stack_size;
 	    res = ethr_thr_create(&esdp->tid,sched_dirty_cpu_thread_func,(void*)esdp,&opts);
 	    if (res != 0)
 		erts_exit(ERTS_ABORT_EXIT, "Failed to create dirty cpu scheduler thread %d, error = %d\n", ix, res);
-            retain_runtime_thread(esdp->tid, ERL_THREAD_DIRTY_CPU, opts.detached);
+            retain_runtime_thread(threads, esdp->tid, ERL_THREAD_DIRTY_CPU, opts.detached);
 	}
 	for (ix = 0; ix < erts_no_dirty_io_schedulers; ix++) {
 	    ErtsSchedulerData *esdp = ERTS_DIRTY_IO_SCHEDULER_IX(ix);
+            ASSERT(esdp->engine == engine);
 	    erts_snprintf(opts.name, sizeof(name), "erts_dios_%d", ix + 1);
             opts.suggested_stack_size = erts_dio_sched_thread_suggested_stack_size;
 	    res = ethr_thr_create(&esdp->tid,sched_dirty_io_thread_func,(void*)esdp,&opts);
 	    if (res != 0)
 		erts_exit(ERTS_ABORT_EXIT, "Failed to create dirty io scheduler thread %d, error = %d\n", ix, res);
-            retain_runtime_thread(esdp->tid, ERL_THREAD_DIRTY_IO, opts.detached);
+            retain_runtime_thread(threads, esdp->tid, ERL_THREAD_DIRTY_IO, opts.detached);
 	}
     }
 
@@ -9030,7 +9045,7 @@ erts_start_schedulers(void)
 	res = ethr_thr_create(&tid, aux_thread, (void *) (Sint) ix, &opts);
 	if (res != 0)
 	    erts_exit(ERTS_ABORT_EXIT, "Failed to create aux thread %d, error = %d\n", ix, res);
-        retain_runtime_thread(tid, ERL_THREAD_AUXILIARY, opts.detached);
+        retain_runtime_thread(threads, tid, ERL_THREAD_AUXILIARY, opts.detached);
 	if (ix == 0)
 	    ix = (int) (1 + erts_no_schedulers);
 	else
@@ -9058,9 +9073,9 @@ erts_start_schedulers(void)
         res = ethr_thr_create(&tid, poll_thread, (void*) bpt, &opts);
         if (res != 0)
             erts_exit(ERTS_ABORT_EXIT, "Failed to create poll thread\n");
-        retain_runtime_thread(tid, ERL_THREAD_POLL, opts.detached);
+        retain_runtime_thread(threads, tid, ERL_THREAD_POLL, opts.detached);
     }
-    ASSERT(runtime_thread_count == runtime_thread_capacity);
+    ASSERT(threads->count == threads->capacity);
 }
 
 BIF_RETTYPE

@@ -37,7 +37,7 @@ Reclamation::~Reclamation() = default;
 
 Result<Engine> Engine::create() {
 #ifdef LIBBEAM_LINKED_ERTS
-    if (erl_runtime_startup_phase() != ERL_RUNTIME_UNCLAIMED)
+    if (erl_runtime_is_claimed())
         return Error{ErrorCode::invalid_state, "Engine::create: runtime initialization already claimed"};
     // Preparation no longer boots OTP or launches threads. Its global allocations
     // still need ownership/cleanup before a real Engine can safely unwind.

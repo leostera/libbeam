@@ -98,7 +98,8 @@ def run_host(command, cwd, env, log, timeout=60):
                     or text.splitlines().count('HOST_NO_CHILDREN sigchld_preserved=true') != 1
                     or text.splitlines().count('HOST_SIGNALS_OK dispositions=9 altstack=true mask=true usr1_delivered=true') != 1
                     or not host_markers(text, process.pid)
-                    or thread_handle_marker(text) is None):
+                    or thread_handle_marker(text) is None
+                    or text.splitlines().count('HOST_ENGINE_OWNER_OK live_handles_private=true uninitialized_candidate_released=true') != 1):
                 raise RuntimeError('host control witness failed')
             return {'status': 'passed', 'pid': process.pid, 'returncode': process.returncode,
                     'seconds': round(time.monotonic() - start, 3),
@@ -106,6 +107,7 @@ def run_host(command, cwd, env, log, timeout=60):
                     'engine_shutdown': False, 'isolates_created': 0,
                     'scheduler_thread_handles': thread_handle_marker(text),
                     'scheduler_threads_created_joinable': True,
+                    'explicit_engine_owner_checked': True,
                     'scheduler_threads_stopped_or_joined': False,
                     'executable_port_denials': 11, 'forker_port': False,
                     'no_children_at_ack': True, 'sigchld_preserved': True,
@@ -194,6 +196,8 @@ def main():
                  tools / 'archive_probe.mk', cpp,
                  fixtures / 'startup_probe.erl', fixtures / 'engine_start_probe.erl',
                  source / 'erts/emulator/beam/erl_embed.h',
+                 source / 'erts/emulator/beam/erl_engine.h',
+                 source / 'erts/emulator/beam/erl_engine.c',
                  source / 'erts/emulator/beam/erl_init.c', source / 'erts/emulator/beam/sys.h',
                  source / 'erts/emulator/beam/erl_bif_port.c',
                  source / 'erts/emulator/beam/erl_bif_os.c',
@@ -205,6 +209,7 @@ def main():
                  source / 'erts/emulator/beam/break.c',
                  source / 'erts/emulator/nifs/common/prim_tty_nif.c',
                  source / 'erts/emulator/beam/erl_process.c',
+                 source / 'erts/emulator/beam/erl_process.h',
                  source / 'erts/emulator/beam/erl_alloc.types',
                  source / 'erts/emulator/beam/erl_async.c',
                  source / 'erts/emulator/beam/erl_async.h',

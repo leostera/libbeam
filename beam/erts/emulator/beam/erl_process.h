@@ -411,6 +411,7 @@ typedef enum {
 } ErtsSchedType;
 
 typedef struct ErtsSchedulerData_ ErtsSchedulerData;
+struct ErtsEngine;
 
 typedef struct ErtsRunQueue_ ErtsRunQueue;
 
@@ -747,6 +748,9 @@ struct ErtsSchedulerData_ {
     erts_alloc_verify_func_t verify_unused_temp_alloc;
     Allctr_t *verify_unused_temp_alloc_data;
 #endif
+    /* Set once during construction, before publication. Scheduling is engine-
+     * owned; the process's future isolate owner is a distinct association. */
+    struct ErtsEngine *engine;
 };
 
 typedef union {
@@ -1905,7 +1909,7 @@ extern int erts_system_profile_ts_type;
 void erts_pre_init_process(void);
 void erts_late_init_process(void);
 void erts_early_init_scheduling(int);
-void erts_init_scheduling(int, int, int, int, int, int);
+void erts_init_scheduling(struct ErtsEngine *, int, int, int, int, int, int);
 void erts_execute_dirty_system_task(Process *c_p);
 int erts_set_gc_state(Process *c_p, int enable);
 Eterm erts_sched_wall_time_request(Process *c_p, int set, int enable,
@@ -2122,7 +2126,7 @@ ErtsSchedSuspendResult
 erts_block_multi_scheduling(Process *, ErtsProcLocks, int, int, int);
 int erts_is_multi_scheduling_blocked(void);
 Eterm erts_multi_scheduling_blockers(Process *, int);
-void erts_start_schedulers(void);
+void erts_start_schedulers(struct ErtsEngine *engine);
 void erts_alloc_notify_delayed_dealloc(int);
 void erts_alloc_ensure_handle_delayed_dealloc_call(int);
 void erts_notify_canceled_timer(ErtsSchedulerData *, int);

@@ -63,8 +63,13 @@ claimed for this scaffold-only change.
 **Partial progress:** native archive integration, retained joinable scheduler-family
 handles, and a preparation-only native entry are implemented. Preparation is now
 separate from OTP bootstrap and worker launch; its witness observes zero processes,
-ports, loaded BEAM code, system-process roots and new OS threads. M1 is not complete:
-global preparation allocations still lack scoped ownership and reclamation.
+ports, loaded BEAM code, system-process roots and new OS threads.
+[Native ownership migration](0002-native-ownership.md) now introduces `ErtsEngine`,
+moves lifecycle/handle-registry state into it, and gives scheduler data an explicit
+engine association at construction. Uninitialized control objects can be freed;
+initialized objects cannot yet be reclaimed. M1 is not complete: other preparation
+allocations remain global. The ownership ledger separates engine infrastructure
+from the private namespaces to extract next—not everything moves into Engine.
 
 - Integrate one actual emulator archive. **Do not call whole-world startup from
   Engine creation**, or boot a temporary OTP world inside the Engine. The old
@@ -85,7 +90,7 @@ global preparation allocations still lack scoped ownership and reclamation.
   finish, retain safe ownership; finish the destructor/coordinator policy before
   treating this API as usable. Engine restart/unload is not needed for this proof.
 
-Starting points: `erl_init.c`, `erl_embed.h`, `erl_process.c`, `erl_async.c`, Unix
+Starting points: `erl_engine.c/.h`, `erl_init.c`, `erl_embed.h`, `erl_process.c`, `erl_async.c`, Unix
 `sys.c`, poll and thread-progress machinery. ERTS changes begin **here**, not after
 all the C++ methods have been filled in.
 
@@ -98,8 +103,10 @@ executing after cleanup. No `_Exit` success path. Expected next frontier:
 
 **API:** `Engine::create_isolate` and the ownership beneath Isolate handles.
 
-- Introduce a real world/context in ERTS: engine affinity, generation, lifecycle
-  state, private table roots and retained ownership for asynchronous users.
+- Introduce a real `ErtsIsolate`/code-space context in ERTS: engine affinity,
+  generation, lifecycle state, private table roots and retained ownership for
+  asynchronous users. Start extracting the atom/module/export/code-index state
+  with M3; completing every engine-global migration is not a prerequisite.
 - Establish an immutable owner on processes before publication; spawn inherits it.
   Scheduler, dirty/async work and deferred callbacks carry the correct context.
 - Distinguish shared engine facilities from isolate state. Do not create a new
