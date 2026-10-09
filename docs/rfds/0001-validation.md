@@ -23,11 +23,11 @@ limitations under the License.
 # Reproducing Realm validation
 
 This guide supports W1-01–04 in the [work checklist](0001-work-plan.md).
-The runner is [scripts/realm-validation.py](../scripts/realm-validation.py).
+The runner is [scripts/realm-validation.py](../../beam/scripts/realm-validation.py).
 It uses Python 3.9+ standard-library facilities and POSIX process groups/locking;
 Windows support is not claimed. GNU Make and the normal OTP build/test prerequisites
-are required. See [OTP development](../HOWTO/DEVELOPMENT.md) and
-[OTP testing](../HOWTO/TESTING.md).
+are required. See [OTP development](../../beam/HOWTO/DEVELOPMENT.md) and
+[OTP testing](../../beam/HOWTO/TESTING.md).
 
 ## Fresh build
 
@@ -250,7 +250,7 @@ open. Logs: `/tmp/beam-realms-w1/{upstream-c-node,snapshot-c-node,c-node-before,
 
 ### Minimal initial-handshake reproducer
 
-[scripts/realm_ei_probe.erl](../scripts/realm_ei_probe.erl) exercises only initial
+[scripts/realm_ei_probe.erl](../../beam/scripts/realm_ei_probe.erl) exercises only initial
 connection and echo, without Common Test or remote spawn behavior. First build
 the repaired C helper through the runner's `c-node` profile. Then:
 

@@ -1,0 +1,452 @@
+<!--
+%CopyrightBegin%
+
+SPDX-License-Identifier: Apache-2.0
+
+Copyright 2026 Leandro Ostera <leandro@ostera.io>
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+%CopyrightEnd%
+-->
+
+# RFD 0002: libbeam — an embeddable BEAM engine with fresh isolates
+
+- **Status:** Draft architecture and executable-proof specification. Not implemented.
+- **Decision proposed:** Separate process-wide engine initialization from creation of
+  independently owned Erlang execution worlds. Expose lifecycle to a C++ embedder,
+  not to tenant Erlang programs.
+- **First deliverable:** A native executable linked against libbeam that creates two
+  fresh isolates, runs conflicting same-name modules concurrently in lifetime,
+  destroys one without disturbing the other, then creates a fresh replacement.
+- **Repository:** `beam/` contains the OTP source and emulator modifications;
+  `libbeam/` will contain the C++ embedding surface, host example and integration
+  tests; `docs/` contains project documentation.
+- **Provenance:** OTP source baseline `cca4e72510a97cfca6427602d3da8a22d5ff7a33`
+  (`30.0-rc0`), plus the experimental Realm work described in RFD 0001. The new
+  repository starts from a source snapshot, not the upstream Git history.
+- **Security:** The first proof is for trusted fixtures only. Passing it does not
+  authorize hostile tenants, arbitrary native extensions or production deployment.
+
+## 1. Motivation and relation to Realms
+
+Today, initializing BEAM largely initializes one global Erlang world. Its module
+resolution, atom table, process services and many native subsystems assume that
+world is the VM. Simply exporting the existing entry point from a library would
+not make multiple independent worlds possible.
+
+RFD 0001 approached coexistence by giving processes immutable Realm membership
+and mediating access inside that world. It produced useful ownership, lifetime,
+policy and negative-test evidence, but code and several services remain global.
+
+This RFD changes the center of the design:
+
+> Initialize one engine. Instantiate a fresh Erlang world on demand. Let ordinary
+> Erlang code behave as though that world is its entire BEAM.
+
+We call that world an **isolate**. The embedder, not a tenant program, creates,
+configures, loads and destroys it. There is no mandatory tenant `isolate:create`
+API, nor an isolate argument on ordinary Erlang operations.
+
+This is the proposed direction for the first embedding proof, not a claim that
+RFD 0001 is completed or its existing native checks can be removed. Its public
+Realm API remains an experimental legacy interface until explicitly migrated.
+Do not expose it in the proof's tenant profile. Its immutable membership,
+retained-owner resource checks, teardown lessons, private-code contracts and
+bypass witnesses are reusable inputs. Do not maintain two independent, ambiguous
+notions of resource owner: decide how existing `ErtsRealm` ownership maps to the
+new isolate before integrating it. Nested Realms are not required by this proof.
+
+## 2. Goals and exclusions
+
+### Goals
+
+1. A C++ host links the engine as a library and retains control of its process.
+2. Engine initialization returns; creating an isolate does not restart the engine.
+3. Isolates are created fresh on demand, without prebooted tenant-instance pools.
+4. Simultaneously live isolates can load different implementations of the exact
+   same module/function/arity without module renaming or global code swapping.
+5. Ordinary spawn, messaging, monitoring and local resource operations execute in
+   an implicit, immutable isolate context.
+6. Stopping and reclaiming an isolate does not halt the host or another isolate.
+7. An orchestrator can deliver bounded events and observe results without owning
+   or retaining raw BEAM heap pointers.
+8. Creation, activation, execution and physical destruction costs are measured
+   separately; no V8-equivalent latency or density is assumed.
+
+### Not part of the first proof
+
+- A complete workerd integration, HTTP server, deployment system or cloud service.
+- A public, stable ABI, several independent engines in one process, or engine
+  reinitialization after its final shutdown.
+- Distributed Erlang, live migration, cross-isolate PIDs or transparent links.
+- Full OTP application compatibility, Elixir/Gleam acceptance, interactive shell,
+  debugger, arbitrary NIF/driver loading, ports or direct OS effects.
+- Production CPU/memory fairness, security certification or recovery from every
+  engine bug, fatal allocator failure and unsafe native operation.
+- Snapshots of running applications, fork-based cloning, a separate OS process per
+  isolate, or `dlmopen`/multiple copies of the entire emulator as a substitute.
+
+An immutable bootstrap image or reusable compilation artifact may be shared.
+That is different from assigning an already-running instance to a tenant. A first
+proof must not rely on a pool to conceal instance creation cost.
+
+## 3. Architecture and ownership
+
+```text
+C++ host / future workerd-style orchestration
+    | create, load, invoke, receive completion, stop, release
+    v
+libbeam public embedding interface
+    |
+BEAM engine — process-wide infrastructure, initialized once
+    +-- shared scheduler infrastructure / host integration
+    +-- isolate A: independently owned Erlang world
+    +-- isolate B: independently owned Erlang world
+    +-- isolate C: created later, without restarting the engine
+```
+
+The wrapper is not the isolation implementation. Core changes belong in `beam/`;
+`libbeam/` exposes an intentionally small ownership-safe interface above them.
+
+| State or mechanism | Proposed owner / requirement |
+| --- | --- |
+| Runtime executable code, immutable built-in metadata | Engine, where actually immutable and context-independent |
+| Scheduler/async worker threads and physical clock source | Engine; no new thread fleet per isolate |
+| Erlang processes, mailboxes, monitors and links | Isolate; ordinary spawn inherits context before publication |
+| Process lookup/storage infrastructure | May use an engine-wide physical table, but lookup, enumeration, identity lifetime and accounting must preserve isolate boundaries |
+| Module/export/import/fun resolution and code publication state | Isolate; global publication indices are not code namespaces |
+| Runtime-created atoms | Isolate-local namespace/lifetime; immutable predefined atoms may use a common representation if proven safe |
+| Registration, ETS, persistent terms, atomics/counters | Isolate-owned state, not global state hidden by result filtering |
+| Logical timers and deferred callbacks | Retain originating isolate, validate destination, cancel/drain during teardown; physical timer infrastructure may be shared |
+| Bootstrap/OTP service processes | Per-isolate where their state belongs to the Erlang world |
+| Host I/O and service access | Explicit host-granted capability; no ambient authority merely because native code can reach the OS |
+| Allocator arenas, caches, JIT artifacts and thread progress | Ownership/lifetime audit required; physical sharing must not imply shared mutable application state |
+
+These are contracts to implement, not statements that the current source already
+has these boundaries. A source ownership inventory must identify initialization,
+all use sites, asynchronous producers, charges and destruction for each subsystem.
+Moving declarations into an `Isolate` struct without changing their users is not
+sufficient. Avoid a mutable process-global "current isolate" selector. Execution
+context must remain correct across scheduler migration, dirty execution, yields,
+GC, callbacks and teardown. Thread-local access is only an implementation aid,
+never the sole durable provenance of deferred work.
+
+The first proof may use one shared scheduler thread, provided A and B remain live
+and scheduled together. Simultaneous execution on several scheduler threads is a
+later explicit gate, not inferred from interleaving on one thread.
+
+## 4. Minimal host-facing contract
+
+The following is API-shaped pseudocode, **not a header that exists or compiles yet**.
+Names and exact result types will be resolved when implementing the proof.
+
+```cpp
+auto engine = Engine::create(engine_options).value();
+auto a = engine.create_isolate(proof_profile).value();
+auto b = engine.create_isolate(proof_profile).value();
+
+a.load_modules(bundle_a).value();
+b.load_modules(bundle_b).value();
+a.start(bootstrap).value();
+b.start(bootstrap).value();
+
+auto qa = a.call("probe", "request", bytes("start"));
+auto qb = b.call("probe", "request", bytes("start"));
+// Poll host-owned completions; both execute in their respective isolate.
+expect_result(engine, qa, "A:ready");
+expect_result(engine, qb, "B:ready");
+
+expect_destroyed(engine, a.stop());
+expect_call(engine, b, "probe", "request", "version", "B");
+auto c = engine.create_isolate(proof_profile).value();
+// Load/start C; prove that it inherits none of A's application state.
+// Stop B and C, release handles/buffers, then shut down the engine.
+```
+
+Required semantics:
+
+- **Ownership:** One engine per host process for this proof. The host owns engine
+  and isolate handles; no C++ exception crosses a future C ABI. Public errors are
+  structured statuses, not host termination or log-only failures.
+- **Threading:** Public management/poll operations are initially restricted to one
+  host control thread, documented and checked. Scheduler threads run independently.
+  No arbitrary host callback is invoked while VM locks are held. Completions are
+  queued for the host to poll; reentrant invocation is not silently supported.
+- **Load:** Host-supplied module bytes are consumed/copied with documented lifetime.
+  The host, not the tenant, supplies the bootstrap bundle. Admission/load failures
+  roll back unpublished state. Unsupported post-start replacement returns an error;
+  hot upgrades are a separate milestone.
+- **Call:** The proof uses exported arity-one functions accepting a binary and
+  returning a binary. Invocation executes in a normal isolate-owned Erlang process,
+  not on the host thread. Erlang exceptions become correlated failure completions.
+  A returned invocation does not implicitly destroy unrelated isolate processes.
+- **Transport:** Input bytes are copied on admission; output buffers have explicit
+  host ownership/release. No `Eterm`, PID, fun, magic reference or native pointer
+  crosses as authority. No generic unsafe ETF decoder is required by the proof.
+- **Bounds:** Initial proof limits: 64 KiB per payload, 64 outstanding calls per
+  isolate, and 1 MiB of queued payload bytes per isolate, including queued output.
+  Reserve capacity for terminal statuses so saturation cannot silently lose accepted
+  requests. Over-limit admission returns `full`/`limit` before side effects.
+  These transport bounds are not aggregate heap or CPU budgets.
+- **Completion:** Accepted requests receive exactly one terminal result, exception,
+  cancellation or stopped status. No callbacks target a released host handle.
+  A host-side deadline does not by itself prove VM cancellation/reclamation.
+- **Identity:** Handles are scoped to their engine and generation. Operations on a
+  live handle whose isolate is stopped return `closed`; reusing freed C++ storage is
+  not supported. A surviving handle may retain a small tombstone/control block, not
+  the reclaimed application world. Account for this separately from isolate-owned
+  resources. Internal identifier reuse must not revive stale queued work.
+- **Host process:** Isolate failure/normal shutdown must not call `exit()` on the
+  host. In the initial profile, tenant `halt` and VM-wide controls are denied before
+  effects. Engine invariant failure or fatal OOM may still be process-fatal; the
+  trusted proof is not crash containment for arbitrary native code.
+
+### Lifecycle and reclamation
+
+```text
+created -> loaded -> running -> stopping -> stopped -> reclaimed
+                \-> failed -> cleanup -----------------^
+```
+
+`stop` closes admission before cancellation. Running processes must reach the
+appropriate exit/safe-point paths; queued timers, signals, code references and
+native work retain the isolate until detached or drained. Logical stop and physical
+reclamation are distinct observable events. Physical reclamation must not free
+state still referenced by code, a scheduler, a host completion or a resource.
+
+A deadline can return `pending`/`timeout`; it must not force unsafe freeing. The
+host can continue polling and serving B while A drains. Completion payloads already
+copied into host-owned buffers may outlive A without retaining its mutable world.
+Engine shutdown requires all isolates reclaimed and handles released, otherwise
+returns `busy`. The proof must include partial-bootstrap failure cleanup too.
+
+## 5. The first executable proof: P0
+
+### Deliverable layout (planned, not present yet)
+
+```text
+libbeam/
+  CMakeLists.txt
+  include/libbeam/engine.h
+  src/engine.cpp
+  examples/two_isolates.cpp
+  tests/fixtures/common/probe_client.erl
+  tests/fixtures/a/probe.erl
+  tests/fixtures/b/probe.erl
+  tests/fixtures/c/probe.erl
+  tests/run_isolate_proof.py
+```
+
+The example is an ordinary C++ executable linked against a **single** libbeam engine
+library. It must not exec `erl`, use Erlang distribution, call out to helper VMs or
+boot several renamed copies of the runtime. Static linking is enough for P0; shared
+library packaging, symbol visibility and a stable ABI follow later.
+
+### P0 runtime profile
+
+Start on one documented development platform with a debug interpreter build and
+one shared scheduler. The host explicitly provisions a minimal bootstrap sufficient
+for the listed operations. Enumerate the exact preloaded modules, internal processes,
+BIFs and native facilities required; this is not silently equivalent to full OTP.
+
+Tenant-visible isolate lifecycle APIs, distribution activation, dynamic native
+loading, arbitrary ports/OS I/O, tracing/debug escape hatches and host-global controls
+are unsupported. They must fail before effects, rather than merely being absent
+from the fixture. Any trusted bootstrap-only exception must be explicit and not
+reachable through ordinary tenant invocation. Already-loaded native paths require
+review; denying `load_nif` alone is not a native-effect boundary.
+
+### Fixture and assertions
+
+A, B and C contain different implementations of **`probe` with identical exported
+MFAs**. A separate common caller module ensures external imports are exercised.
+Each uses ordinary Erlang operations; none calls Realm/isolate management APIs.
+
+The host harness must assert:
+
+1. **Embedding:** Engine initialization returns to host C++; the host continues
+   executing. OS-process inspection confirms no child BEAM runtime. Thread counts
+   show no per-isolate scheduler fleet; record any shared lazy thread creation.
+2. **Fresh creation:** A and B are independently created after engine initialization,
+   with no pre-existing tenant instance assigned to either. Both stay live throughout
+   the conflicting-code tests. Do not test A and B only in separate host runs.
+3. **Private same-MFA execution:** A returns `A` and B returns `B` for direct external
+   calls from the common module, runtime-computed `apply`, external fun invocation
+   and retained local fun invocation. Interleave repeated requests. Load/start B
+   after A is already running and prove A's results do not change. No renaming,
+   rewriting one shared code table between turns, or host-side substitution of
+   answers. Selecting an already resident private table from actual execution context
+   is legitimate; replacing global code to simulate separate worlds is not.
+4. **Ordinary concurrency:** Spawn multiple local processes; exchange messages and
+   exercise monitor/link exit behavior and reduction-based preemption. Keep a busy
+   Erlang loop in A while B must complete requests within the harness deadline.
+5. **Local services/state:** Both register `worker`, create a named ETS table `cache`,
+   and use the same persistent-term key, but read back different values. Their own
+   lookups/enumerations do not reveal the other's fixtures. Local atomics/counters
+   work and creator exit does not incorrectly revoke same-isolate resources.
+6. **Atom scope:** Create a unique runtime atom in A; B cannot resolve it through
+   `binary_to_existing_atom`. It must not accidentally occur in B's loaded literals
+   or bootstrap. Predefined atoms may be shared; dynamic namespace leakage is not
+   acceptable. Do not count shared immutable predefinitions as a private-atom proof.
+7. **Teardown with work outstanding:** Leave local timers, processes, monitor/link
+   state and an accepted host invocation pending in A. Stop A. Admission closes,
+   accepted calls terminate exactly once, and late work cannot target B or a later
+   replacement. B's version, registry/ETS/persistent state and progress remain intact.
+8. **Fresh replacement:** After A's physical reclamation, create C. Its same-name
+   module returns `C`; before initializing its fixture state, registration, ETS and
+   persistent-term lookups show A's data is absent. Recheck A's unique dynamic atom.
+9. **Error cleanup:** Bad module bytes, failed startup, unknown MFA, thrown Erlang
+   exception, rejected oversized requests and shutdown with live handles produce
+   explicit statuses. Failure of A does not invalidate B or poison later creation.
+10. **Repeatability:** Repeat fresh create/start/use/stop/reclaim for at least 1,000
+    small isolates in one engine, keeping B alive as a sentinel. Report iteration
+    count and every failed/timed-out assertion; do not replace failures with retries.
+11. **Physical release:** Isolate-owned process/resource/code/timer/native-work
+    counters return to zero after reclamation. Record retained engine caches
+    separately with a documented lifetime/bound; RSS alone is neither a leak proof
+    nor proof of prompt freeing. Allocator/sanitizer checks supplement these counters.
+12. **Host survival:** Stop and reclaim all isolates, release buffers and handles,
+    shut down the engine, then execute a host-side assertion before returning normally
+    from `main`. Isolate shutdown must never stand in for process exit.
+
+P0 proves these operations only. Full Erlang language/OTP compatibility, complete
+cross-boundary adversarial coverage and multi-scheduler execution remain separate
+acceptance gates even when every P0 assertion passes.
+
+### Intended build/run contract
+
+These are target commands to implement, **not currently working commands**:
+
+```sh
+cmake -S libbeam -B build/libbeam-proof \
+  -DLIBBEAM_OTP_SOURCE_DIR="$PWD/beam" \
+  -DLIBBEAM_EMULATOR=interpreter -DCMAKE_BUILD_TYPE=Debug
+cmake --build build/libbeam-proof --target two_isolates
+python3 libbeam/tests/run_isolate_proof.py \
+  --host build/libbeam-proof/two_isolates \
+  --iterations 1000 --output /tmp/libbeam-proof-new
+```
+
+The build integration must drive the supported OTP/bootstrap tooling; do not hand
+copy a selection of emulator objects into an archive and assume it is a valid build.
+The integration must document compiler/linker flags, dependencies, PIC requirements
+where applicable, entrypoint separation and the exact bootstrap artifact source.
+Use the checkout compiler, not an arbitrary installed OTP compiler, for fixtures.
+
+The runner uses a fresh output directory and a serialized build/test lock. It records
+revision/dirty state, compiler/runtime variants, fixture/library/executable hashes,
+actual process/thread observations, assertions, deadlines, reclamation counters and
+raw timing samples. Missing assertions, skips, fewer iterations, unexpected runtime
+variants and child-runtime shortcuts fail the run. A timeout is failure or pending
+reclamation, never a successful destroy. Hard external timeout kills only the proof
+host process group, with evidence preserved. No hosted result is inferred locally.
+
+## 6. Implementation sequence and source investigation
+
+All items below are open. Each implementation slice must have its own tests and
+reviewable commit; a design document does not check off an implementation step.
+
+- [ ] **P0-01 — Reproducible relocated baseline.** Build the source under `beam/`
+  from a clean checkout; repair tooling paths deliberately. Inventory scripts and
+  workflows inherited from the old root layout are not assumed runnable unchanged.
+  Preserve standalone `erl` as the baseline compatibility frontend.
+- [ ] **P0-02 — Engine/instance source map.** Classify globals, locks, caches, startup
+  order, OS registrations and asynchronous ownership. Start with `erl_init.c`
+  (`erl_start`, `erl_init`, bootstrap/system processes), `erl_process.c/.h`,
+  `erl_sched*`, `erl_alloc*`, `atom.c`, `module.c`, `export.c`, `code_ix.c/.h`,
+  `erl_fun.c`, `register.c`, `erl_db*`, `erl_bif_persistent.c`, `erl_hl_timer.c`,
+  `erl_proc_sig_queue.c`, `erl_nif.c`, driver/port infrastructure and emulator dispatch.
+  Paths here are relative to `beam/erts/emulator/beam/`; wildcard names denote source
+  families. Explicitly locate process-fatal paths and startup-only assumptions.
+- [ ] **P0-03 — Library entry/exit seam.** Split executable setup/CLI behavior from
+  engine construction, execution and shutdown. Link a minimal host, return control
+  to it, and destroy an engine normally with zero isolates. One engine only initially.
+- [ ] **P0-04 — Isolate context and fresh bootstrap.** Introduce explicit owned state,
+  staged initialization/unwind and pre-publication membership. Reuse engine scheduler
+  infrastructure; test two live contexts and failed creation cleanup before claiming
+  independent code or services.
+- [ ] **P0-05 — True code/atom environments.** Make loader, exports/imports, funs,
+  literal ownership and interpreter dispatch isolate-aware. Establish dynamic atom
+  scope and bootstrap representation. Pass the simultaneous conflicting-MFA witness.
+  Module renaming is not an intermediate result that satisfies this item.
+- [ ] **P0-06 — Local services and native ownership.** Implement the P0 registry,
+  ETS, persistent-term, timer and resource behavior with provenance retained through
+  deferred work. A profile denial cannot satisfy a P0 operation promised as local.
+- [ ] **P0-07 — Embedding transport and lifecycle.** Implement bounded binary calls,
+  completion ownership, cancellation, stale-work rejection and stop/reclaim semantics.
+  Scope/reject host-fatal tenant operations and ensure B survives A's teardown.
+- [ ] **P0-08 — Full executable witness.** Deliver the C++ host, independently compiled
+  bundles, strict runner and 1,000-cycle sentinel test above. Record supported platform,
+  build flavor and all unsupported operations. No security approval implied.
+- [ ] **P0-09 — Measurements and review.** Record phase-separated results and review
+  leaks, host-global assumptions and blockers. Decide go/no-go for the next stage
+  based on evidence rather than a claimed V8-equivalent startup budget.
+
+Particularly difficult seams are atom IDs embedded in terms/code, export and fun
+entry lifetime, code purger/literal collector ownership, scheduler-safe teardown,
+NIF resources outliving creators and global `halt`/signal handlers. These may require
+structural changes, not mechanical parameter additions. If the cost of an ownership
+choice is prohibitive, amend this RFD explicitly rather than silently weakening P0.
+
+## 7. Measurements and subsequent gates
+
+Measure independently:
+
+- Cold host/engine startup (including process initialization).
+- Fresh empty-isolate construction in an already initialized engine.
+- Bootstrap, module load/link and top-level application activation.
+- First response and subsequent request execution.
+- Logical stop and eventual physical reclamation, including tail latency.
+- Incremental physical memory and isolate-accounted memory at increasing live counts.
+- Host responsiveness and B latency while A creates, runs and stops.
+
+Use repeated fresh creations, keep raw data and report p50/p99 with sample counts,
+clock resolution, dispersion and caching conditions. Separate first-ever code-cache
+use from later reuse of immutable artifacts. Record debug results as debug results;
+optimized measurements are necessary before performance decisions. No maximum
+startup time or memory target has yet been agreed.
+
+After P0, gates include optimized interpreter/JIT (both supported architectures),
+multi-scheduler/dirty execution, real OTP supervision/application trees, independently
+versioned Erlang/Elixir/Gleam stacks, OS/native capability mediation, aggregate budgets
+and fairness, OOM/fuzz/sanitizer coverage, independent security review, portable library
+packaging and orchestration integration. Each needs explicit acceptance criteria.
+
+The host can eventually provide a worker-style service interface and route events
+between isolates. A separate HTTP/orchestration project should consume libbeam's
+interface, not require ordinary tenant code to manage its own isolation machinery.
+
+## 8. Workerd lessons and evidence limits
+
+The architectural reference is the inspected workerd revision
+`f4ebbae6562718e53afbc3bba0f882266bd89529`, not an assertion about all production
+Cloudflare implementation details:
+
+- [Engine initialization and isolate construction/destruction](https://github.com/cloudflare/workerd/blob/f4ebbae6562718e53afbc3bba0f882266bd89529/src/workerd/jsg/setup.c++): process-level initialization is distinct from `v8::Isolate::New()`/`Dispose()`.
+- [Dynamic loader and server construction](https://github.com/cloudflare/workerd/blob/f4ebbae6562718e53afbc3bba0f882266bd89529/src/workerd/server/server.c++): named loads can reuse instances; unnamed loads create fresh instances; startup promises gate requests. The server uses a null isolate limit enforcer, not the full production limiter.
+- [Worker/Script/Isolate contracts](https://github.com/cloudflare/workerd/blob/f4ebbae6562718e53afbc3bba0f882266bd89529/src/workerd/io/worker.h): these are distinct objects, and ordinary Worker instances can serve multiple requests.
+- [I/O context ownership](https://github.com/cloudflare/workerd/blob/f4ebbae6562718e53afbc3bba0f882266bd89529/src/workerd/io/io-context.h): context destruction cancels associated I/O; wrong-context resource use is rejected.
+- [Built-in compilation cache](https://github.com/cloudflare/workerd/blob/f4ebbae6562718e53afbc3bba0f882266bd89529/src/workerd/jsg/compile-cache.h): immutable reusable compilation data is different from reused mutable application state.
+- [Security warning](https://github.com/cloudflare/workerd/blob/f4ebbae6562718e53afbc3bba0f882266bd89529/README.md): workerd alone is not the full hardened production sandbox.
+
+No workerd/V8 creation benchmark was performed in that source study. Nor does this
+RFD assume V8's single-executor isolate scheduling should replace BEAM's process
+scheduler and preemption model.
+
+Related design/evidence:
+[Realms RFD](0001-beam-realms.md),
+[private-code contract](0001-code-environment-contract.md),
+[shared-code witness](0001-code-environment-spike.md),
+[resource ownership and remaining bypasses](0001-shared-resource-enforcement.md).
+Existing evidence remains historical; it does not validate the embedding proof.

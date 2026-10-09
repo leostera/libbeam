@@ -50,7 +50,7 @@ explicit paths and invariants. No lookup-overhead estimate has been measured.
 
 ## Executable shared-namespace witness
 
-[`scripts/realm_code_probe.erl`](../scripts/realm_code_probe.erl) is a diagnostic
+[`scripts/realm_code_probe.erl`](../../beam/scripts/realm_code_probe.erl) is a diagnostic
 for the existing implementation, **not a passing private-environment test**.
 It uses two restricted Realms with host-bound byte endpoints and no cross-Realm
 ordinary messages. The host loads two versions of the same unchanged module name.

@@ -312,7 +312,7 @@ available. No security or density claim follows from passing identity tests.
 
 ## Building
 
-Use [the OTP development guide](../HOWTO/DEVELOPMENT.md). On the current Apple
+Use [the OTP development guide](../../beam/HOWTO/DEVELOPMENT.md). On the current Apple
 Silicon development host, configuration uses Homebrew OpenSSL:
 
 ```sh

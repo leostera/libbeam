@@ -22,8 +22,12 @@ limitations under the License.
 
 # RFD 0001: BEAM Realms for a single-node edge runtime
 
-- **Status:** Active experimental implementation; design/public API remain draft.
+- **Status:** Historical experimental implementation; design/public API remain draft.
   Not an implemented security boundary.
+- **Embedding direction:** [RFD 0002](0002-libbeam-isolates.md) proposes host-managed
+  isolates and a C++ library proof. It reframes the next implementation effort;
+  it does not complete this RFD's open tasks or acceptance gates. Existing evidence
+  predates the repository relocation under `beam/`.
 - **Goal:** Complete the full M0–M5 RFD, including validation and the explicit
   security go/no-go—not only the current prototype API.
 - **Source baseline:** `cca4e72510a97cfca6427602d3da8a22d5ff7a33`, reporting
@@ -742,8 +746,8 @@ regression thresholds from baseline data; this RFD invents no density claims.
 
 ## 8. Build and implementation workflow
 
-Follow [DEVELOPMENT.md](../HOWTO/DEVELOPMENT.md),
-[INSTALL.md](../HOWTO/INSTALL.md), and [TESTING.md](../HOWTO/TESTING.md).
+Follow [DEVELOPMENT.md](../../beam/HOWTO/DEVELOPMENT.md),
+[INSTALL.md](../../beam/HOWTO/INSTALL.md), and [TESTING.md](../../beam/HOWTO/TESTING.md).
 A starting workflow, subject to configuring local dependencies, is:
 
 ```sh
@@ -837,14 +841,14 @@ risks documented—not merely by the presence of the APIs.
 
 ## 10. Further source reading
 
-- [BeamAsm](../erts/emulator/internal_doc/BeamAsm.md): JIT execution and calling
+- [BeamAsm](../../beam/erts/emulator/internal_doc/BeamAsm.md): JIT execution and calling
   conventions.
-- [Process and port tables](../erts/emulator/internal_doc/PTables.md): lookup,
+- [Process and port tables](../../beam/erts/emulator/internal_doc/PTables.md): lookup,
   publication, and lifetime.
-- [Thread progress](../erts/emulator/internal_doc/ThreadProgress.md): deferred
+- [Thread progress](../../beam/erts/emulator/internal_doc/ThreadProgress.md): deferred
   reclamation and synchronization.
-- [Code loading](../erts/emulator/internal_doc/CodeLoading.md): code publication
+- [Code loading](../../beam/erts/emulator/internal_doc/CodeLoading.md): code publication
   model; corroborate details against the pinned implementation.
-- [Tracing](../erts/emulator/internal_doc/Tracing.md): tracing internals.
-- [Contribution guide](../CONTRIBUTING.md): upstream changes of this scope require
+- [Tracing](../../beam/erts/emulator/internal_doc/Tracing.md): tracing internals.
+- [Contribution guide](../../beam/CONTRIBUTING.md): upstream changes of this scope require
   design discussion and potentially an EEP; this draft is not upstream approval.
