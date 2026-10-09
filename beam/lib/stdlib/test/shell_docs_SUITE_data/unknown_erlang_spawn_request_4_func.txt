@@ -1,0 +1,23 @@
+%% %CopyrightBegin%
+%%
+%% SPDX-License-Identifier: Apache-2.0
+%%
+%% Copyright Ericsson AB 2021-2026. All Rights Reserved.
+%%
+%% %CopyrightEnd%
+
+[1m  spawn_request(NodeOrModule, ModuleOrFunction, FunctionOrArgs,[0m
+[1mArgsOrOptions)[0m
+
+[4mSince[0m:
+  OTP 23.0
+
+  Equivalent to [4mspawn_request(Node,Module,Function,Args,[])[0m or [4m[0m
+  [4mspawn_request(node(),Module,Function,Args,Options)[0m depending on
+  the arguments.
+
+  That is either:
+
+   • a spawn request with no options.
+
+   • a spawn request on the local node.

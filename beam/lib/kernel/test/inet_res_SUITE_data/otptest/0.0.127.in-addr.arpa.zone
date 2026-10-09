@@ -1,0 +1,50 @@
+;;
+;; %CopyrightBegin%
+;;
+;; SPDX-License-Identifier: Apache-2.0
+;;
+;; Copyright Ericsson AB 2020-2026. All Rights Reserved.
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+;;
+;; %CopyrightEnd%
+;;
+
+$TTL	3600
+@	IN SOA	ns.otptest. lsa.otptest. (
+		1		; serial
+		60		; refresh
+		10		; retry
+		300		; expiry
+		30 )		; minimum
+
+	IN NS		ns.otptest.
+	IN MX	10	mx.otptest.
+
+1	IN PTR		test1-78901234567890123456789012345678.otptest.
+2	IN PTR		test2-78901234567890123456789012345678.otptest.
+10	IN PTR		mx.otptest.
+11	IN PTR		ns1-5678901234567890123456789012345678.otptest.
+12	IN PTR		ns2-5678901234567890123456789012345678.otptest.
+21	IN PTR		mx1-5678901234567890123456789012345678.otptest.
+22	IN PTR		mx2-5678901234567890123456789012345678.otptest.
+23	IN PTR		mx3-5678901234567890123456789012345678.otptest.
+24	IN PTR		mx4-5678901234567890123456789012345678.otptest.
+25	IN PTR		mx5-5678901234567890123456789012345678.otptest.
+26	IN PTR		mx6-5678901234567890123456789012345678.otptest.
+27	IN PTR		mx7-5678901234567890123456789012345678.otptest.
+
+28	IN PTR		resolve.otptest.
+
+253     IN CNAME        254
+254	IN PTR		ns.otptest.

@@ -1,0 +1,25 @@
+Original Authors:	
+
+Ingela Anderton Andin - supported http client
+Johan Blom - unsupported http client
+Håkan Mattsson - tftp
+Peter Högfeldt - first version of ftp
+Joakim Grebenö - first version of httpd
+Mattias Nilsson - first version of httpd
+
+Contributors:
+
+Ingela Anderton Andin 
+Martin Gustafsson
+Johan Blom
+Torbjörn Törnkvist 
+Joe Armstrong
+Tyler Hughes
+
+# %CopyrightBegin%
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Copyright Ericsson AB 1996-2025. All Rights Reserved.
+#
+# %CopyrightEnd%

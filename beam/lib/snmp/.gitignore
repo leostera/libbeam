@@ -1,0 +1,16 @@
+# Match at any level.
+
+*.BKP
+*.orig
+*.rej
+
+doc/index.html
+mibs/.index
+
+# Generated src and stuff...
+/src/misc/snmp_pdus_basic.erl
+/src/misc/snmp_pdus_basic.asn1db
+
+# Agent
+src/agent/Makefile
+

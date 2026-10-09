@@ -1,0 +1,43 @@
+%%
+%% %CopyrightBegin%
+%%
+%% SPDX-License-Identifier: Apache-2.0
+%%
+%% Copyright Ericsson AB 2000-2025. All Rights Reserved.
+%%
+%% Licensed under the Apache License, Version 2.0 (the "License");
+%% you may not use this file except in compliance with the License.
+%% You may obtain a copy of the License at
+%%
+%%     http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing, software
+%% distributed under the License is distributed on an "AS IS" BASIS,
+%% WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+%% See the License for the specific language governing permissions and
+%% limitations under the License.
+%%
+%% %CopyrightEnd%
+%%
+
+%% This file defines the target address parameters.
+%% The data is inserted into the snmpTargetAddrTable defined
+%% in SNMP-TARGET-MIB, and in the snmpTargetAddrExtTable defined
+%% in SNMP-COMMUNITY-MIB.
+%% Each row is a 10-tuple:
+%% {Name, Ip, Udp, Timeout, RetryCount, TagList, ParamsName, EngineId,
+%%        TMask, MaxMessageSize}.
+%% The EngineId value is only used if Inform-Requests are sent to this
+%% target.  If Informs are not sent, this value is ignored, and can be
+%% e.g. an empty string.  However, if Informs are sent, it is essential
+%% that the value of EngineId matches the value of the target's
+%% actual snmpEngineID.
+%% For example
+%% {"1.2.3.4 v1", [1,2,3,4], 162, 
+%%  1500, 3, "std_inform", "otp_v2", "",
+%%  [127,0,0,0],  2048}.
+%%
+
+
+{"%TARGET_NAME_PRE% v2",   %ADDR%, 5000, 1500, 3, "std_trap",   "target_v2", "", [], 2048}.
+{"%TARGET_NAME_PRE% v2.2", %ADDR%, 5000, 1500, 3, "std_inform", "target_v2", "", [], 2048}.

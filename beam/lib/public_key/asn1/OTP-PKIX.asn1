@@ -1,0 +1,259 @@
+-- %CopyrightBegin%
+--
+-- SPDX-License-Identifier: Apache-2.0
+--
+-- Copyright Ericsson AB 2008-2025. All Rights Reserved.
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+--
+-- %CopyrightEnd%
+
+OTP-PKIX {iso(1) identified-organization(3) dod(6) internet(1)
+	  private(4) enterprise(1) 193 otp(19) otpApplications(3)}
+
+DEFINITIONS EXPLICIT TAGS ::=
+
+BEGIN
+
+-- EXPORTS ALL
+
+IMPORTS
+        ATTRIBUTE, Extensions{}, SingleAttribute
+        FROM PKIX-CommonTypes-2009
+
+	CertificateSerialNumber, CertExtensions{}, NoticeReference
+	FROM PKIX1Implicit-2009
+	{iso(1) identified-organization(3) dod(6) internet(1) security(5)
+	mechanisms(5) pkix(7) id-mod(0) id-mod-pkix1-implicit-02(59)}
+
+       at-name, at-surname, at-givenName, at-initials, at-generationQualifier,
+       at-x520LocalityName, at-x520StateOrProvinceName,
+       at-x520OrganizationName, at-x520OrganizationalUnitName, at-x520Title,
+       at-x520dnQualifier, at-x520SerialNumber, at-x520Pseudonym,
+       at-domainComponent, at-emailAddress,
+       id-at-commonName, id-at-countryName, id-domainComponent, id-emailAddress,
+       ub-emailaddress-length,
+       Validity, Version, SubjectPublicKeyInfo,
+       UniqueIdentifier, DirectoryString{},
+       id-qt-unotice, id-qt-cps
+       FROM PKIX1Explicit-2009
+       {iso(1) identified-organization(3) dod(6) internet(1)
+	security(5) mechanisms(5) pkix(7) id-mod(0)
+	id-mod-pkix1-explicit-02(51)}
+
+	--Keys and Signatures
+        dsa-with-sha1, DSA-Sig-Value, mda-sha1, pk-dsa, DSA-Params
+        FROM PKIXAlgs-2009
+
+	AlgorithmIdentifier{}, SIGNATURE-ALGORITHM
+	FROM AlgorithmInformation-2009
+	{iso(1) identified-organization(3) dod(6) internet(1) security(5)
+	mechanisms(5) pkix(7) id-mod(0)
+	id-mod-algorithmInformation-02(58)};
+--
+-- Certificate
+--
+
+OTPCertificate  ::=  SEQUENCE  {
+     tbsCertificate       OTPTBSCertificate,
+     signatureAlgorithm    AlgorithmIdentifier{SIGNATURE-ALGORITHM,
+                                    { OTPSignatureAlgorithms }},
+     signature            BIT STRING  }
+
+OTPTBSCertificate  ::=  SEQUENCE  {
+     version         [0]  Version DEFAULT v1,
+     serialNumber         CertificateSerialNumber,
+     signature            AlgorithmIdentifier{SIGNATURE-ALGORITHM,
+                                    { OTPSignatureAlgorithms }},
+     issuer               OTPName,
+     validity             Validity,
+     subject              OTPName,
+     subjectPublicKeyInfo SubjectPublicKeyInfo,
+     ... ,
+      [[2:               -- If present, version MUST be v2
+      issuerUniqueID  [1]  IMPLICIT UniqueIdentifier OPTIONAL,
+      subjectUniqueID [2]  IMPLICIT UniqueIdentifier OPTIONAL
+      ]],
+      [[3:               -- If present, version MUST be v3 --
+      extensions      [3]  Extensions{{CertExtensions}} OPTIONAL
+      ]], ... }
+
+-- Here follows a workaround to handle very old certificates.
+
+OTPSignatureAlgorithms SIGNATURE-ALGORITHM ::= {
+    OTPSignatureAlgs, ...,
+    PKIX1-PSS-OAEP-Algorithms-2009.SignatureAlgs }
+
+OTPSignatureAlgs SIGNATURE-ALGORITHM ::= {
+  PKIXAlgs-2009.sa-rsaWithMD2      |
+  PKIXAlgs-2009.sa-rsaWithMD5      |
+  PKIXAlgs-2009.sa-rsaWithSHA1     |
+  otp-sa-dsaWithSHA1               |
+  PKIXAlgs-2009.sa-ecdsaWithSHA1,
+  ..., -- Extensible
+  PKIXAlgs-2009.sa-dsaWithSHA224   |
+  PKIXAlgs-2009.sa-dsaWithSHA256   |
+  PKIXAlgs-2009.sa-ecdsaWithSHA224 |
+  PKIXAlgs-2009.sa-ecdsaWithSHA256 |
+  PKIXAlgs-2009.sa-ecdsaWithSHA384 |
+  PKIXAlgs-2009.sa-ecdsaWithSHA512
+}
+
+otp-sa-dsaWithSHA1 SIGNATURE-ALGORITHM ::= {
+  IDENTIFIER dsa-with-sha1
+  VALUE DSA-Sig-Value
+-- Allow DSA-Params as well as NULL here.
+  PARAMS TYPE OTP-DSA-Params-Or-NULL ARE absent
+  HASHES { mda-sha1 }
+  PUBLIC-KEYS { pk-dsa }
+  SMIME-CAPS { IDENTIFIED BY dsa-with-sha1 }
+}
+
+OTP-DSA-Params-Or-NULL ::= CHOICE {
+  present DSA-Params,           -- Only in very old certificates.
+  absent NULL
+}
+
+-- OTPName can contain country name and email addresses that don't
+-- follow the standard.
+
+OTPName ::= CHOICE {
+    rdnSequence  RDNSequence }
+
+RDNSequence ::= SEQUENCE OF OTPRelativeDistinguishedName
+
+OTPRelativeDistinguishedName  ::=
+      SET SIZE (1 .. MAX) OF SingleAttribute { {OTPSupportedAttributes} }
+
+OTPSupportedAttributes ATTRIBUTE ::= {
+    at-name | at-surname | at-givenName | at-initials |
+    at-generationQualifier | otp-at-x520CommonName |
+    at-x520LocalityName | at-x520StateOrProvinceName |
+    at-x520OrganizationName | at-x520OrganizationalUnitName |
+    at-x520Title | at-x520dnQualifier | otp-at-x520countryName |
+    at-x520SerialNumber | at-x520Pseudonym | otp-at-domainComponent |
+    otp-at-emailAddress, ... }
+
+otp-at-x520countryName ATTRIBUTE ::= {
+    TYPE OTP-X520countryName IDENTIFIED BY id-at-countryName }
+
+otp-at-domainComponent ATTRIBUTE ::= {
+    TYPE OTP-DomainComponent IDENTIFIED BY id-domainComponent }
+
+otp-at-emailAddress ATTRIBUTE ::= {
+    TYPE OTP-emailAddress IDENTIFIED BY id-emailAddress }
+
+otp-at-x520CommonName ATTRIBUTE ::= {
+    TYPE OTP-X520CommonName IDENTIFIED BY id-at-commonName }
+
+-- We accept utf8String encoding of the US-ASCII
+-- country name code and the mix up with other country code systems
+-- that uses three characters instead of two.
+
+OTP-X520countryName ::= CHOICE {
+    correct           PrintableString (SIZE (2..3)), -- Correct size is 2.
+    wrong             UTF8String      (SIZE (2..3))
+}
+
+-- We accept PrintableString encoding of DomainComponent
+-- which should be IA5String per RFC 2247, but some devices
+-- use PrintableString.
+
+OTP-DomainComponent ::= CHOICE {
+    correct IA5String,
+    wrong PrintableString
+}
+
+OTP-emailAddress ::= CHOICE {
+    correct IA5String (SIZE (1..ub-emailaddress-length)),
+    wrong UTF8String
+}
+
+-- We accept CommonName values longer than the ub-common-name (64)
+-- SIZE constraint. Real-world certificates (e.g. Google Cloud
+-- Memorystore Redis, Tailscale DERP) use CNs exceeding 64 chars.
+-- OpenSSL accepts long CNs when parsing; OTP should too.
+
+OTP-X520CommonName ::= DirectoryString {255}
+
+-- We use this variation of SingleAttribute/AttributeTypeAndValue
+-- when calculating the "short" hash of the certificate issuer.
+-- See public_key:short_name_hash/1.
+
+HashSingleAttribute ::= SEQUENCE {
+    type      OBJECT IDENTIFIER,
+    value     UTF8String
+}
+
+HashRDNSequence ::= SEQUENCE OF HashRelativeDistinguishedName
+
+HashRelativeDistinguishedName  ::=
+      SET SIZE (1 .. MAX) OF HashSingleAttribute
+
+-- Used to workaround that some CAs create too long User Notices
+
+OTPCertificatePolicies ::= SEQUENCE SIZE (1..MAX) OF OTPPolicyInformation
+
+OTPPolicyInformation ::= SEQUENCE {
+     policyIdentifier   CertPolicyId,
+     policyQualifiers   SEQUENCE SIZE (1..MAX) OF
+                OTPPolicyQualifierInfo OPTIONAL }
+
+CertPolicyId ::= OBJECT IDENTIFIER
+
+CERT-POLICY-QUALIFIER ::= TYPE-IDENTIFIER
+
+OTPPolicyQualifierInfo ::= SEQUENCE {
+       policyQualifierId  CERT-POLICY-QUALIFIER.
+            &id({PolicyQualifierId}),
+       qualifier          CERT-POLICY-QUALIFIER.
+            &Type({PolicyQualifierId}{@policyQualifierId})}
+
+-- Implementations that recognize additional policy qualifiers MUST
+-- augment the following definition for PolicyQualifierId
+
+PolicyQualifierId CERT-POLICY-QUALIFIER ::=
+    { pqid-cps | pqid-unotice, ... }
+
+pqid-cps CERT-POLICY-QUALIFIER ::= { CPSuri IDENTIFIED BY id-qt-cps }
+pqid-unotice CERT-POLICY-QUALIFIER ::= { OTPUserNotice
+    IDENTIFIED BY id-qt-unotice }
+
+-- CPS pointer qualifier
+
+CPSuri ::= IA5String
+
+OTPUserNotice ::= SEQUENCE {
+     noticeRef        NoticeReference OPTIONAL,
+     explicitText     OTPDisplayText OPTIONAL}
+
+-- NoticeReference ::= SEQUENCE {
+--     organization     OTPDisplayText,
+--     noticeNumbers    SEQUENCE OF INTEGER }
+
+OTPDisplayText ::= CHOICE {
+     ia5String        IA5String      (SIZE (1..650)),
+     visibleString    VisibleString  (SIZE (1..650)),
+     bmpString        BMPString      (SIZE (1..650)),
+     utf8String       UTF8String     (SIZE (1..650)) }
+
+-- Extensions
+
+Extensions  ::=  SEQUENCE SIZE (1..MAX) OF OTPExtension
+
+OTPExtension  ::=  SEQUENCE  {
+     extnID      OBJECT IDENTIFIER,
+     critical    BOOLEAN DEFAULT FALSE,
+     extnValue   OCTET STRING  }
+
+END

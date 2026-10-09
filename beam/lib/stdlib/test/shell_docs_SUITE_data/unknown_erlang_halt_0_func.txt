@@ -1,0 +1,16 @@
+%% %CopyrightBegin%
+%%
+%% SPDX-License-Identifier: Apache-2.0
+%%
+%% Copyright Ericsson AB 2021-2026. All Rights Reserved.
+%%
+%% %CopyrightEnd%
+
+[1m  halt()[0m
+
+  Equivalent to calling [4mhalt(0, [])[0m.
+
+  For example:
+
+    > halt().
+    os_prompt%

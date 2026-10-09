@@ -1,0 +1,15 @@
+%% %CopyrightBegin%
+%%
+%% SPDX-License-Identifier: Apache-2.0
+%%
+%% Copyright Ericsson AB 2021-2026. All Rights Reserved.
+%%
+%% %CopyrightEnd%
+
+[1m  change_owner(Filename, Uid)[0m
+
+  Changes owner of a file. See [4mwrite_file_info/2[0m.
+
+[1m  change_owner(Filename, Uid, Gid)[0m
+
+  Changes owner and group of a file. See [4mwrite_file_info/2[0m.

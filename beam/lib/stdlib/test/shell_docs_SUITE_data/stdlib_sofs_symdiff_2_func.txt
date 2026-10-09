@@ -1,0 +1,20 @@
+%% %CopyrightBegin%
+%%
+%% SPDX-License-Identifier: Apache-2.0
+%%
+%% Copyright Ericsson AB 2021-2026. All Rights Reserved.
+%%
+%% %CopyrightEnd%
+
+[1m  symdiff(Set1, Set2)[0m
+
+  Returns the symmetric difference (or the Boolean sum) of [4mSet1[0m
+  and [4mSet2[0m.
+
+[1mExamples[0m
+
+    1> S1 = sofs:set([1,2,3]).
+    2> S2 = sofs:set([2,3,4]).
+    3> P = sofs:symdiff(S1, S2).
+    4> sofs:to_external(P).
+    [1,4]

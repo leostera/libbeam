@@ -1,0 +1,18 @@
+%% %CopyrightBegin%
+%%
+%% SPDX-License-Identifier: MIT
+%%
+%% Copyright (c) 2010, Torbjörn Törnkvist
+%% Copyright Ericsson AB 2012-2025. All Rights Reserved.
+%%
+%% %CopyrightEnd%
+{application, eldap,
+ [{description, "Ldap api"},
+  {vsn, "%VSN%"},
+  {modules, [eldap, 'ELDAPv3']},
+  {registered, []},
+  {applications, [kernel, stdlib, asn1]},
+  {env, []},
+  {runtime_dependencies, ["stdlib-3.4","ssl-5.3.4","kernel-3.0","erts-6.0",
+			  "asn1-3.0"]}
+]}.

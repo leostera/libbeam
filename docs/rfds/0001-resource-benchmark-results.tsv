@@ -1,0 +1,124 @@
+# %CopyrightBegin%
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# Copyright 2026 Leandro Ostera <leandro@ostera.io>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# %CopyrightEnd%
+#
+# Ownership-check batch: matched opt-JIT, 5000 samples x 10 repetitions. Not accepted thresholds.
+source	mode	workload	metric	repetitions	median	min	max	population_stddev
+upstream	host	alias_message	p50_ns	10	583.0	583	584	0.4
+upstream	host	alias_message	p99_ns	10	917.0	875	1208	93.42612054452438
+upstream	host	alias_message	total_ns	10	3332458.5	3226167	3526125	94022.85611110736
+upstream	host	atomic_add_get	p50_ns	10	42.0	42	42	0.0
+upstream	host	atomic_add_get	p99_ns	10	62.5	42	84	20.70289834781594
+upstream	host	atomic_add_get	total_ns	10	491417.0	454042	541041	27426.894012264678
+upstream	host	clock_pair	p50_ns	10	42.0	42	42	0.0
+upstream	host	clock_pair	p99_ns	10	42.0	42	83	12.3
+upstream	host	clock_pair	total_ns	10	473646.0	463250	514167	14615.443106522634
+upstream	host	counter_atomic_add_get	p50_ns	10	42.0	42	42	0.0
+upstream	host	counter_atomic_add_get	p99_ns	10	84.0	84	125	12.3
+upstream	host	counter_atomic_add_get	total_ns	10	486396.0	460541	536292	26305.927495718526
+upstream	host	counter_write_add_get	p50_ns	10	42.0	42	42	0.0
+upstream	host	counter_write_add_get	p99_ns	10	84.0	83	84	0.4898979485566356
+upstream	host	counter_write_add_get	total_ns	10	453062.5	439000	502583	20121.039555649208
+upstream	host	large_binary_message	p50_ns	10	2312.5	2292	2334	20.601941656067275
+upstream	host	large_binary_message	p99_ns	10	8208.5	8000	9583	553.4353078725643
+upstream	host	large_binary_message	total_ns	10	15442542.0	14915791	16454458	394472.88076572516
+upstream	host	priority_message	p50_ns	10	584.0	583	625	18.989470766717012
+upstream	host	priority_message	p99_ns	10	917.0	834	1042	49.47777278738403
+upstream	host	priority_message	total_ns	10	3441521.0	3302500	3776333	118722.0435169476
+upstream	host	private_ets	p50_ns	10	125.0	125	125	0.0
+upstream	host	private_ets	p99_ns	10	209.0	167	250	18.564482217395668
+upstream	host	private_ets	total_ns	10	985229.5	958375	1031375	22898.121722316002
+upstream	host	process_memory	process_info_memory_sum	10	269600.0	269600	269600	0.0
+upstream	host	registration	p50_ns	10	125.0	125	125	0.0
+upstream	host	registration	p99_ns	10	167.0	167	209	18.943072612435397
+upstream	host	registration	total_ns	10	804229.0	772875	891833	32224.766941593232
+upstream	host	small_message	p50_ns	10	500.0	500	500	0.0
+upstream	host	small_message	p99_ns	10	792.0	750	875	31.165525825822353
+upstream	host	small_message	total_ns	10	2959417.0	2772208	3102917	99694.7253990902
+upstream	host	spawn_exit	p50_ns	10	834.0	833	875	16.555663683464942
+upstream	host	spawn_exit	p99_ns	10	1458.5	1000	3625	776.960977141066
+upstream	host	spawn_exit	total_ns	10	4780479.0	4631625	5044584	128081.56779603379
+current	host	alias_message	p50_ns	10	584.0	583	625	19.054920624342678
+current	host	alias_message	p99_ns	10	958.5	875	13791	3839.3134138801433
+current	host	alias_message	total_ns	10	3409124.5	3264875	9412541	1805592.3456054775
+current	host	atomic_add_get	p50_ns	10	42.0	42	42	0.0
+current	host	atomic_add_get	p99_ns	10	42.0	42	83	16.4
+current	host	atomic_add_get	total_ns	10	458208.5	441625	527375	27972.42635525206
+current	host	clock_pair	p50_ns	10	42.0	42	42	0.0
+current	host	clock_pair	p99_ns	10	42.0	42	42	0.0
+current	host	clock_pair	total_ns	10	477416.0	454667	529791	27274.956414997258
+current	host	counter_atomic_add_get	p50_ns	10	42.0	42	42	0.0
+current	host	counter_atomic_add_get	p99_ns	10	84.0	84	125	12.3
+current	host	counter_atomic_add_get	total_ns	10	472895.5	448542	519625	21108.519951905677
+current	host	counter_write_add_get	p50_ns	10	42.0	42	42	0.0
+current	host	counter_write_add_get	p99_ns	10	84.0	83	125	12.442266674525184
+current	host	counter_write_add_get	total_ns	10	458729.5	440500	487250	14565.170216650406
+current	host	large_binary_message	p50_ns	10	2500.0	2333	2584	83.11678530838401
+current	host	large_binary_message	p99_ns	10	8458.5	7959	20917	3762.6020836649736
+current	host	large_binary_message	total_ns	10	15672375.0	15329709	22907792	2181511.592282812
+current	host	priority_message	p50_ns	10	625.0	583	625	18.943072612435397
+current	host	priority_message	p99_ns	10	938.0	916	27042	8279.139900376125
+current	host	priority_message	total_ns	10	3495958.5	3373208	11378041	2489021.977554439
+current	host	private_ets	p50_ns	10	125.0	125	125	0.0
+current	host	private_ets	p99_ns	10	187.5	167	250	27.529802033432787
+current	host	private_ets	total_ns	10	979000.0	935417	1123583	54848.716014233185
+current	host	process_memory	process_info_memory_sum	10	272800.0	272800	272800	0.0
+current	host	realm_activation_stop	p50_ns	10	1999270.5	1998250	1999584	448.77813003754983
+current	host	realm_activation_stop	p99_ns	10	2056500.0	2025750	2084125	19976.386744353946
+current	host	realm_activation_stop	total_ns	10	199995020.5	199920375	200017792	30358.320583490782
+current	host	registration	p50_ns	10	125.0	125	125	0.0
+current	host	registration	p99_ns	10	167.0	167	208	12.3
+current	host	registration	total_ns	10	837187.5	776541	934541	48878.249259665594
+current	host	small_message	p50_ns	10	500.0	500	500	0.0
+current	host	small_message	p99_ns	10	833.0	791	13792	3893.215720968978
+current	host	small_message	total_ns	10	2912062.5	2807125	8811500	1777226.761202115
+current	host	spawn_exit	p50_ns	10	875.0	834	875	20.08581589082206
+current	host	spawn_exit	p99_ns	10	1354.5	958	25125	7675.3777138327205
+current	host	spawn_exit	total_ns	10	4812708.0	4672750	10891417	2063905.8626896238
+current	restricted	alias_message	p50_ns	10	583.0	583	584	0.458257569495584
+current	restricted	alias_message	p99_ns	10	917.0	875	14125	3962.5546608217282
+current	restricted	alias_message	total_ns	10	3350687.5	3199000	9552083	1874416.7247321499
+current	restricted	atomic_add_get	p50_ns	10	42.0	42	42	0.0
+current	restricted	atomic_add_get	p99_ns	10	62.5	42	83	20.5
+current	restricted	atomic_add_get	total_ns	10	485874.5	439625	528542	29563.97107223588
+current	restricted	clock_pair	p50_ns	10	42.0	42	42	0.0
+current	restricted	clock_pair	p99_ns	10	42.0	42	42	0.0
+current	restricted	clock_pair	total_ns	10	507020.5	494166	539125	13109.646410563482
+current	restricted	counter_atomic_add_get	p50_ns	10	42.0	42	42	0.0
+current	restricted	counter_atomic_add_get	p99_ns	10	84.0	84	84	0.0
+current	restricted	counter_atomic_add_get	total_ns	10	474833.5	461958	616542	45050.017358931174
+current	restricted	counter_write_add_get	p50_ns	10	42.0	42	42	0.0
+current	restricted	counter_write_add_get	p99_ns	10	84.0	84	84	0.0
+current	restricted	counter_write_add_get	total_ns	10	461979.5	441042	485542	14214.500873755645
+current	restricted	large_binary_message	p50_ns	10	2500.0	2375	2542	43.57166510474439
+current	restricted	large_binary_message	p99_ns	10	8354.5	8125	20167	4484.160979492151
+current	restricted	large_binary_message	total_ns	10	15886521.0	15668458	22428083	2545535.7384190485
+current	restricted	priority_message	p50_ns	10	625.0	584	625	16.4
+current	restricted	priority_message	p99_ns	10	937.5	875	16250	4543.62963389403
+current	restricted	priority_message	total_ns	10	3459396.0	3336000	7566959	1223759.382639169
+current	restricted	private_ets	p50_ns	10	125.0	125	167	12.6
+current	restricted	private_ets	p99_ns	10	208.5	167	250	32.14731715089145
+current	restricted	private_ets	total_ns	10	986562.5	971500	1131667	57761.97776262513
+current	restricted	process_memory	process_info_memory_sum	10	272800.0	272800	272800	0.0
+current	restricted	small_message	p50_ns	10	500.0	500	541	16.4
+current	restricted	small_message	p99_ns	10	854.5	750	29875	10331.082181456113
+current	restricted	small_message	total_ns	10	2980562.5	2793417	11989250	3306786.424161695
+current	restricted	spawn_exit	p50_ns	10	875.0	875	916	16.4
+current	restricted	spawn_exit	p99_ns	10	2312.5	1792	15000	4906.883650546444
+current	restricted	spawn_exit	total_ns	10	4999750.0	4823500	11205667	2107713.555426828

@@ -1,0 +1,52 @@
+#!/bin/bash
+
+## %CopyrightBegin%
+##
+## SPDX-License-Identifier: Apache-2.0
+##
+## Copyright Ericsson AB 2024-2026. All Rights Reserved.
+##
+## Licensed under the Apache License, Version 2.0 (the "License");
+## you may not use this file except in compliance with the License.
+## You may obtain a copy of the License at
+##
+##     http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+##
+## %CopyrightEnd%
+
+ARGS=("$@")
+
+## If EX_DOC is not set to a file, we search the PATH for it using command -v
+if [ ! -f "${EX_DOC}" ]; then
+   EX_DOC=$(command -v ex_doc)
+fi
+
+## Detect ex_doc version and store it in a variable
+## This is currently used to handle search engine changes in v0.39.0
+export EX_DOC_VERSION=$($EX_DOC --version)
+
+## If EX_DOC_WARNINGS_AS_ERRORS is not explicitly turned on
+## and any .app file is missing, we turn off warnings as errors
+if [ "${EX_DOC_WARNINGS_AS_ERRORS}" != "true" ]; then
+    for app in $ERL_TOP/lib/*/; do
+        if [ ! -f $app/ebin/*.app ]; then
+            EX_DOC_WARNINGS_AS_ERRORS=false
+        fi
+    done
+fi
+
+escript@EXEEXT@ "${EX_DOC}" "${ARGS[@]}"
+
+if [ "$?" != "0" ]; then
+    ## Touch the config file in order to re-trigger make
+    if [ -f "docs.exs" ]; then
+        touch "docs.exs"
+    fi
+    exit 1;
+fi

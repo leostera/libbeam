@@ -1,0 +1,61 @@
+%% %CopyrightBegin%
+%%
+%% SPDX-License-Identifier: MIT
+%%
+%% Copyright (c) 2010, Torbjörn Törnkvist
+%% Copyright Ericsson AB 2025. All Rights Reserved.
+%%
+%% Permission is hereby granted, free of charge, to any person obtaining a copy
+%% of this software and associated documentation files (the "Software"), to deal
+%% in the Software without restriction, including without limitation the rights
+%% to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+%% copies of the Software, and to permit persons to whom the Software is
+%% furnished to do so, subject to the following conditions:
+%%
+%% The above copyright notice and this permission notice shall be included in
+%% all copies or substantial portions of the Software.
+%%
+%% THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+%% IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+%% FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+%% AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+%% LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+%% OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+%% THE SOFTWARE.
+%%
+%% %CopyrightEnd%
+
+Hi, 
+
+This is 'eldap', the Erlang LDAP library.
+
+It exports an API that can do all possible operations
+you may want to do against an LDAP server. The code has
+been tested to work at some point, but only the bind
+and search operations are running daily in our products,
+so there may be bugs lurking in some parts of the code.
+
+To just use eldap for doing authentication, do like in:
+
+ {ok,X} = eldap:open(["ldap.mycorp.com"], []).
+ eldap:simple_bind(X, "uid=tobbe,ou=People,dc=mycorp,dc=com", "passwd").
+
+In the doc/README.example you'll find a trace from a
+Erlang shell session as an example on how to setup a
+connection, authenticate (bind) and perform a search.
+Note that by using the option {ssl, true}, you should
+be able to setup an SSL tunnel (LDAPS) if your Erlang
+system has been configured with SSL.
+
+In the test directory there are some hints and examples
+on how to test the code and how to setup and populate 
+an OpenLDAP server. The 'eldap' code has been tested
+against OpenLDAP, IPlanet and ActiveDirectory servers.
+
+If you plan to incorporate this code into your system
+I suggest that you build a server/supervisor harnesk
+that uses 'eldap' (as we have done in our products).
+
+Good luck ! 
+/Tobbe
+

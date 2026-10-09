@@ -1,0 +1,41 @@
+%% %CopyrightBegin%
+%%
+%% SPDX-License-Identifier: Apache-2.0
+%%
+%% Copyright Ericsson AB 1996-2025. All Rights Reserved.
+%%
+%% %CopyrightEnd%
+{application, parsetools,
+ [{description, "XLATETOOLS  CXC 138 xx"},
+  {vsn, "%VSN%"},
+  {modules, [leex,
+             yecc,
+	     yeccparser,
+	     yeccscan
+	    ]
+  },
+  {registered,[]},
+  {applications, [kernel,stdlib]},
+  {env, [{file_util_search_methods,[{"", ""}, {"ebin", "esrc"}, {"ebin", "src"}]}
+	]
+  },
+  {runtime_dependencies, ["stdlib-3.4","kernel-3.0","erts-6.0"]}
+ ]
+}. 
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,53 @@
+#!/bin/sh
+#
+
+# %CopyrightBegin%
+#
+# SPDX-License-Identifier: Apache-2.0
+# 
+# Copyright Ericsson AB 2000-2025. All Rights Reserved.
+# 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# 
+# %CopyrightEnd%
+
+# Converts a SNMPv2 MIB to a SNMPv1 MIB
+# Some kind of ad hoc algorithm is used - the
+# v2 MIBs must be well-formatted.
+# mbj@erlang.ericsson.se 971114
+
+Out=nope
+
+while [ $# -gt 0 ];
+do
+  case $1 in
+  -h*)
+     echo "Usage: snmp-v2tov1 [-o OutFile] FileName"
+     echo "  Converts a SNMPv2 MIB to a SNMPv1 MIB"
+     exit;;
+  -o)
+     Out=$2
+     shift;
+     shift;;
+  *)
+     File=$1
+     shift;;
+  esac
+done
+
+if [ "X$Out" = "Xnope" ]
+then
+  Out=$File.v1
+fi
+
+%PERL% $ERL_TOP/lib/snmp/bin/snmp-v2tov1.pl $File | sed -f $ERL_TOP/lib/snmp/bin/snmp-v2tov1.sed > $Out

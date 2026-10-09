@@ -1,0 +1,29 @@
+%% %CopyrightBegin%
+%%
+%% SPDX-License-Identifier: Apache-2.0
+%%
+%% Copyright Ericsson AB 1996-2025. All Rights Reserved.
+%%
+%% %CopyrightEnd%
+{application, tftp,
+ [{description, "TFTP application"},
+  {vsn, "%VSN%"},
+  {registered, []},
+  {mod, { tftp_app, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, [
+             tftp,
+             tftp_app,
+             tftp_binary,
+             tftp_engine,
+             tftp_file,
+             tftp_lib,
+             tftp_logger,
+             tftp_sup
+            ]},
+  {runtime_dependencies, ["erts-6.0","stdlib-5.0","kernel-6.0"]}
+ ]}.

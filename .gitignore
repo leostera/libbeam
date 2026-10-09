@@ -1,0 +1,8 @@
+# Repository-level development outputs. OTP-specific rules live in beam/.gitignore.
+.DS_Store
+__pycache__/
+*.py[cod]
+/build/
+/libbeam/build/
+/libbeam/cmake-build-*/
+/libbeam/CMakeUserPresets.json

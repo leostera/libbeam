@@ -1,0 +1,21 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%% %CopyrightBegin%
+%%
+%% SPDX-License-Identifier: Apache-2.0
+%%
+%% Copyright Ericsson AB 2025. All Rights Reserved.
+%%
+%% %CopyrightEnd%
+-export([main/1]).
+-compile(nowarn_latin1_binary).
+
+main(_) ->
+    ok = io:setopts([{encoding,latin1}]),
+    _D = erlang:system_flag(backtrace_depth, 0),
+    A = <<"\x{aa}">>,
+    S = lists:flatten(io_lib:format("~p/~p.", [A, A])),
+    {ok, Ts, _} = erl_scan:string(S, 1),
+    {ok, Es} = erl_parse:parse_exprs(Ts),
+    B = erl_eval:new_bindings(),
+    erl_eval:exprs(Es, B).

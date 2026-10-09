@@ -1,0 +1,78 @@
+## %CopyrightBegin%
+##
+## SPDX-License-Identifier: Apache-2.0
+##
+## Copyright Ericsson AB 2024-2026. All Rights Reserved.
+##
+## Licensed under the Apache License, Version 2.0 (the "License");
+## you may not use this file except in compliance with the License.
+## You may obtain a copy of the License at
+##
+##     http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+##
+## %CopyrightEnd%
+
+##
+## update-release-sigstore: Regenerates Sigstore attestation files
+##                          when an existing GitHub release is edited.
+##
+
+name: Update Sigstore Files
+
+on:
+  release:
+    types: [edited]
+
+permissions:
+  contents: read
+
+jobs:
+  update-release-sigstore:
+    if: github.event_name == 'release'
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+            persist-credentials: false
+      - name: Download release artifacts
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          TAG: "${{ github.event.release.tag_name }}"
+        run: gh release download "${TAG}"
+      - name: Copy artifacts
+        run: mkdir artifacts; cp *.tar.gz artifacts/
+      - name: Attest Distribution Assets with SBoM
+        id: attest-sbom
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # ratchet:actions/attest@v4.10
+        with:
+          subject-path: |
+            artifacts/*.tar.gz
+            bom.*.json
+          sbom-path: bom.spdx.json
+      - name: Copy SBoM provenance
+        id: sbom-provenance
+        shell: bash
+        env:
+          ATTESTATION: "${{ steps.attest-sbom.outputs.bundle-path }}"
+        run: |
+          shopt -s nullglob
+          mkdir attestations
+          for FILE in artifacts/*.tar.gz bom.*.json; do
+            cp "$ATTESTATION" "attestations/$(basename "$FILE").sigstore"
+          done
+      - name: Update release
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          TAG: "${{ github.event.release.tag_name }}"
+        run: gh release upload "${TAG}" attestations/*.sigstore --clobber
