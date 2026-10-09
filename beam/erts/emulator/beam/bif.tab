@@ -732,22 +732,6 @@ bif erts_internal:counters_info/1
 
 bif erts_internal:spawn_system_process/3
 
-# Experimental Realm lifecycle (not an isolation boundary).
-bif erts_internal:realm_id/0
-bif erts_internal:realm_identity/0
-bif erts_internal:realm_identity/1
-bif erts_internal:realm_create/1
-bif erts_internal:realm_spawn_root/4
-bif erts_internal:realm_spawn/3
-bif erts_internal:realm_spawn/4
-bif erts_internal:realm_close/1
-bif erts_internal:realm_stop_children/1
-bif erts_internal:realm_stop_members/1
-bif erts_internal:realm_endpoint_create/4
-bif erts_internal:realm_endpoint_send/2
-bif erts_internal:realm_endpoint_receive/1
-bif erts_internal:realm_endpoint_revoke/1
-
 #
 # New in 21.3
 #

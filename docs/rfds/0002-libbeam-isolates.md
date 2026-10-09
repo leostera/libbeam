@@ -33,12 +33,13 @@ limitations under the License.
 - **First deliverable:** A native executable linked against libbeam that creates two
   fresh isolates, runs conflicting same-name modules concurrently in lifetime,
   destroys one without disturbing the other, then creates a fresh replacement.
-- **Repository:** `beam/` contains the OTP source and emulator modifications;
-  `libbeam/` will contain the C++ embedding surface, host example and integration
-  tests; `docs/` contains project documentation.
-- **Provenance:** OTP source baseline `cca4e72510a97cfca6427602d3da8a22d5ff7a33`
-  (`30.0-rc0`), plus the experimental Realm work described in RFD 0001. The new
-  repository starts from a source snapshot, not the upstream Git history.
+- **Repository:** `beam/` is a tracked upstream OTP snapshot with direct emulator
+  changes. It is not a submodule and requires no separately applied patch series.
+  `libbeam/` contains embedding tools and will contain the C++ API and isolate tests;
+  `docs/` contains project documentation.
+- **Provenance:** clean upstream OTP `cca4e72510a97cfca6427602d3da8a22d5ff7a33`
+  (`30.0-rc0`). Realm changes are excluded. The previous implementation remains at
+  `archive/realm-snapshot` (`eb019d92`); see the [transition record](0002-clean-upstream.md).
 - **Security:** The first proof is for trusted fixtures only. Passing it does not
   authorize hostile tenants, arbitrary native extensions or production deployment.
 
@@ -63,14 +64,14 @@ We call that world an **isolate**. The embedder, not a tenant program, creates,
 configures, loads and destroys it. There is no mandatory tenant `isolate:create`
 API, nor an isolate argument on ordinary Erlang operations.
 
-This is the proposed direction for the first embedding proof, not a claim that
-RFD 0001 is completed or its existing native checks can be removed. Its public
-Realm API remains an experimental legacy interface until explicitly migrated.
-Do not expose it in the proof's tenant profile. Its immutable membership,
-retained-owner resource checks, teardown lessons, private-code contracts and
-bypass witnesses are reusable inputs. Do not maintain two independent, ambiguous
-notions of resource owner: decide how existing `ErtsRealm` ownership maps to the
-new isolate before integrating it. Nested Realms are not required by this proof.
+The active implementation now starts from clean upstream OTP, not the Realm fork.
+The public Realm API and all historical emulator enforcement have been removed
+from the active source. This is a deliberate architectural reset, not a claim that
+upstream provides equivalent isolation: it does not. Historical membership, retained-
+owner, teardown and private-code work remains reference material only. Reintroduce
+mechanisms only when justified by the host-managed design, with fresh ownership
+contracts and tests. There is no existing `ErtsRealm` owner to inherit or migrate.
+Nested Realms are not required by this proof.
 
 ## 2. Goals and exclusions
 
@@ -478,13 +479,14 @@ implementation slice needs tests and a reviewable commit; a design document does
 not check off an implementation step. See the [baseline/link evidence](0002-baseline-evidence.md)
 and [initial engine-seam findings](0002-engine-seams.md).
 
-- [x] **P0-01 — Reproducible relocated baseline.** Build the source under `beam/`
+- [ ] **P0-01 — Reproducible clean-upstream baseline.** Build the pinned `beam/` source
+  in an external worktree
   from a clean checkout; repair tooling paths deliberately. Inventory scripts and
   workflows inherited from the old root layout are not assumed runnable unchanged.
   Preserve standalone `erl` as the baseline compatibility frontend.
-  **Evidence:** clean ARM64 macOS worktree configure/build/preload rebuild; debug
-  interpreter profiles pass 148 + 44 + 5 test executions. Realm tooling/workflows
-  have relocated paths; other inherited upstream workflows remain unvalidated.
+  **Reset:** previous 148 + 44 + 5 results belong to the archived Realm fork.
+  Clean-upstream tooling now selects 84 focused + 35 resource cases and three
+  startup probes. Fresh validation is required; no old Realm result carries over.
 - [ ] **P0-02 — Engine/instance source map.** Classify globals, locks, caches, startup
   order, OS registrations and asynchronous ownership. Start with `erl_init.c`
   (`erl_start`, `erl_init`, bootstrap/system processes), `erl_process.c/.h`,
@@ -500,10 +502,9 @@ and [initial engine-seam findings](0002-engine-seams.md).
 - [ ] **P0-03 — Library entry/exit seam.** Split executable setup/CLI behavior from
   engine construction, execution and shutdown. Link a minimal host, return control
   to it, and destroy an engine normally with zero isolates. One engine only initially.
-  **Partial:** a C++ host links OTP's existing archive and returns normally without
-  starting it. Internal OTP-world construction, late thread launch and frontend
-  main-thread handoff are now distinct phases, with standalone regressions passing.
-  Neither the packaging witness nor this refactor satisfies engine create/destroy.
+  **Partial:** the prior archive-link witness did not call `erl_start`. The startup
+  phase split is retained directly in `beam/erts/emulator/beam/erl_init.c` on the clean
+  upstream base. Neither change satisfies engine create/destroy.
 - [ ] **P0-04 — Isolate context and fresh bootstrap.** Introduce explicit owned state,
   staged initialization/unwind and pre-publication membership. Reuse engine scheduler
   infrastructure; test two live contexts and failed creation cleanup before claiming

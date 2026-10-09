@@ -19,7 +19,7 @@
 #
 # %CopyrightEnd%
 
-"""Build/test a clean relocated OTP baseline; this does not build libbeam isolates."""
+"""Build/test the clean-upstream OTP snapshot and direct libbeam emulator changes."""
 import argparse
 import fcntl
 import hashlib
@@ -70,12 +70,14 @@ def git(root, *args):
 
 def check_source(root):
     if Path(git(root, "rev-parse", "--show-toplevel")).resolve() != root:
-        raise ValueError("--source-root must be the repository root, not beam/")
+        raise ValueError("--source-root must be the libbeam repository root, not beam/")
     if git(root, "status", "--porcelain"):
         raise ValueError("use a clean detached worktree, not a dirty development checkout")
     source = root / "beam"
     if not (source / "otp_build").is_file():
         raise ValueError("missing beam/otp_build")
+    if (source / ".git").exists():
+        raise ValueError("beam/ must be a tracked source snapshot, not a submodule")
     if any((source / p).exists() for p in ("Makefile", "config.status", "bin/erl")):
         raise ValueError("source is already configured/built; create a fresh worktree")
     return source
@@ -94,18 +96,20 @@ def main():
     root, output = args.source_root.resolve(), args.output.resolve()
     try:
         source = check_source(root)
+        if root == Path(__file__).resolve().parents[2]:
+            raise ValueError("build in a fresh detached worktree, not this development checkout")
         if output.is_relative_to(root):
             raise ValueError("output must be outside the source worktree")
         if output.exists():
             raise ValueError("output directory must be new")
     except (ValueError, subprocess.CalledProcessError) as error:
         parser.error(str(error))
-    runner_path = source / "scripts/realm-validation.py"
-    spec = importlib.util.spec_from_file_location("realm_validation", runner_path)
+    runner_path = Path(__file__).with_name("otp_validation.py").resolve()
+    spec = importlib.util.spec_from_file_location("otp_validation", runner_path)
     runner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runner)
     env, removed = clean_environment(source, output, os.environ)
-    report = {"schema": 1, "kind": "relocated_standalone_otp_baseline",
+    report = {"schema": 1, "kind": "snapshot_otp_baseline", "otp_source": str(source),
               "isolate_acceptance": "not_implemented", "status": "running",
               "source_root": str(root), "revision": git(root, "rev-parse", "HEAD"),
               "driver_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
@@ -133,12 +137,12 @@ def main():
                     raise RuntimeError(f"{name}: {step['status']}")
         # Each validation subprocess takes the same lock itself, including its build.
         # Never hold it in this parent while starting a validation subprocess.
-        for profile in ("all", "resources", "public-api"):
+        for profile in ("focused", "resources", "startup"):
             command = [sys.executable, "-B", str(runner_path), "--root", str(source),
                        "--output", str(output / profile), "--variants", args.variant,
                        "--profile", profile, "--jobs", str(args.jobs),
                        "--build-timeout", str(args.timeout), "--test-timeout", str(args.timeout)]
-            if profile != "all":
+            if profile != "focused":
                 command.append("--skip-build")
             print(profile, flush=True)
             step = {"name": profile, "command": command, "status": "running"}
@@ -161,6 +165,8 @@ def main():
     finally:
         report["finished_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         report["final_worktree"] = git(root, "status", "--porcelain")
+        report["final_diff_sha256"] = hashlib.sha256(subprocess.check_output(
+            ["git", "-C", str(root), "diff", "HEAD", "--binary"])).hexdigest()
         if output.exists():
             runner.save(output, report)
     print(report["status"], report.get("error", ""), flush=True)

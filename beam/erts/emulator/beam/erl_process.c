@@ -40,7 +40,6 @@
 #include "beam_catches.h"
 #include "erl_threads.h"
 #include "erl_binary.h"
-#include "erl_bits.h"
 #include "beam_bp.h"
 #include "erl_cpu_topology.h"
 #include "erl_thr_progress.h"
@@ -129,653 +128,6 @@ runq_got_work_to_execute(ErtsRunQueue *rq)
 }
 
 const Process erts_invalid_process = {{ERTS_INVALID_PID}};
-
-typedef struct ErtsRealmEndpoint_ ErtsRealmEndpoint;
-typedef struct ErtsRealmEndpointMessage_ {
-    struct ErtsRealmEndpointMessage_ *next;
-    Uint size;
-    byte data[];
-} ErtsRealmEndpointMessage;
-
-struct ErtsRealmEndpoint_ {
-    ErtsRealm *realm;           /* Owns a reference; host is the other party. */
-    int to_host;
-    int revoked;
-    Uint max_messages, max_bytes;
-    Uint messages, bytes;
-    ErtsRealmEndpointMessage *head, *tail;
-    ErtsRealmEndpoint *prev, *next;
-};
-
-/* Initial host-channel profile. Limits bound copying and cleanup per BIF. */
-#define ERTS_REALM_ENDPOINTS 64
-#define ERTS_REALM_ENDPOINT_MESSAGES 1024
-#define ERTS_REALM_ENDPOINT_BYTES (1024*1024)
-#define ERTS_REALM_ENDPOINT_MESSAGE_BYTES (64*1024)
-
-struct ErtsRealm_ {
-    erts_refc_t refc;
-    Uint id;
-    Binary *identity;           /* Owned token; no back-reference to the Realm. */
-    ErtsRealmPolicy policy;     /* Immutable; authority belongs to the Realm. */
-    ErtsRealm *parent;          /* Owning reference; NULL for a top-level Realm. */
-    ErtsRealm *owner;           /* Top-level Realm owns the subtree lock. */
-    Uint depth;
-    /* Only initialized in the owner. Never held while acquiring process locks. */
-    erts_mtx_t lock;
-    int closing;
-    int attached;
-    Uint pending_spawns;
-    Uint used_processes;        /* Subtree: reserved + live/deferred processes. */
-    Uint used_realms;           /* Subtree: all retained Realm objects. */
-    Uint used_endpoints;        /* Subtree: retained endpoint objects. */
-    Uint queued_endpoint_messages;
-    ErtsRealmEndpoint *endpoints;
-    Process *members;
-    ErtsRealm *children;       /* Non-owning, active children; lock protected. */
-    ErtsRealm *prev;
-    ErtsRealm *next;
-};
-
-#define ERTS_REALM_MAX_DEPTH 64
-
-/* The host Realm is immortal and does not participate in subtree accounting. */
-ErtsRealm erts_host_realm;
-static erts_atomic_t realm_id_counter;
-
-static int
-realm_identity_destructor(Binary *bin)
-{
-    /* Identity can survive metadata reclamation; it carries no authority. */
-    return 1;
-}
-
-static Binary *
-realm_create_identity(void)
-{
-    Binary *bin = erts_create_magic_binary(0, realm_identity_destructor);
-    erts_refc_inc(&bin->intern.refc, 1);
-    return bin;
-}
-
-Eterm
-erts_realm_identity(Process *p, ErtsRealm *realm)
-{
-    Eterm *hp;
-    ASSERT(realm && realm->identity);
-    hp = HAlloc(p, ERTS_MAGIC_REF_THING_SIZE);
-    return erts_mk_magic_ref(&hp, &MSO(p), realm->identity);
-}
-
-static void realm_drain_endpoints_locked(ErtsRealm *realm, Uint budget);
-
-static int
-realm_closed_locked(ErtsRealm *realm)
-{
-    for (; realm; realm = realm->parent) {
-        if (realm->closing)
-            return 1;
-    }
-    return 0;
-}
-
-static void
-realm_detach_locked(ErtsRealm *realm)
-{
-    if (!realm->attached)
-        return;
-    if (realm->prev)
-        realm->prev->next = realm->next;
-    else {
-        ASSERT(realm->parent->children == realm);
-        realm->parent->children = realm->next;
-    }
-    if (realm->next)
-        realm->next->prev = realm->prev;
-    realm->prev = realm->next = NULL;
-    realm->attached = 0;
-}
-
-/* Closed, drained subtrees leave the active tree even if handles retain them. */
-static void
-realm_prune_locked(ErtsRealm *realm)
-{
-    for (; realm; realm = realm->parent) {
-        if (realm->members || realm->pending_spawns || realm->children
-            || realm->queued_endpoint_messages || !realm_closed_locked(realm))
-            break;
-        realm_detach_locked(realm);
-    }
-}
-
-void
-erts_realm_default_policy(ErtsRealm *parent, ErtsRealmPolicy *policy)
-{
-    policy->allow_create_realms = 0;
-    policy->restrict_process_access = parent != &erts_host_realm
-        && parent->policy.restrict_process_access;
-    policy->max_realms = parent == &erts_host_realm ? MAX_SMALL : parent->policy.max_realms;
-    policy->max_processes = parent == &erts_host_realm ? MAX_SMALL : parent->policy.max_processes;
-}
-
-int
-erts_realm_can_manage(ErtsRealm *caller, ErtsRealm *target)
-{
-    if (caller == &erts_host_realm)
-        return 1;
-    if (!caller || !caller->policy.allow_create_realms)
-        return 0;
-    for (target = target->parent; target; target = target->parent) {
-        if (target == caller)
-            return 1;
-    }
-    return 0;
-}
-
-int
-erts_realm_is_restricted(ErtsRealm *realm)
-{
-    return !realm || realm->policy.restrict_process_access;
-}
-
-int
-erts_realm_allow_process(ErtsRealm *caller, ErtsRealm *target, int management)
-{
-    if (!caller || !target)
-        return 0;
-    if (caller == target)
-        return 1;
-    if (!erts_realm_is_restricted(caller) && !erts_realm_is_restricted(target))
-        return 1;
-    /* Explicit management ancestry also supports the existing stop wrapper.
-     * This exception does not authorize ordinary cross-Realm data delivery. */
-    return management && erts_realm_can_manage(caller, target);
-}
-
-int
-erts_realm_process_access(Process *caller, Eterm target, int management)
-{
-    if (is_internal_pid(target)) {
-        Process *rp = erts_proc_lookup_raw(target);
-        return !rp || erts_realm_allow_process(caller->realm, rp->realm, management);
-    }
-    if (is_external_pid(target) || is_internal_port(target) || is_external_port(target))
-        return !erts_realm_is_restricted(caller->realm);
-    /* Leave malformed arguments and absent targets to each operation's normal
-     * validation. Callers must resolve names before checking the final target. */
-    return 1;
-}
-
-int
-erts_realm_can_spawn_root(ErtsRealm *caller, ErtsRealm *target)
-{
-    return erts_realm_can_manage(caller, target);
-}
-
-ErtsRealm *
-erts_create_realm(ErtsRealm *parent, const ErtsRealmPolicy *policy, int *error)
-{
-    ErtsRealm *realm, *r;
-    erts_aint_t id, actual;
-
-    *error = BADARG;
-    if (parent != &erts_host_realm
-        && (!parent || !parent->policy.allow_create_realms
-            || (parent->policy.restrict_process_access && !policy->restrict_process_access)
-            || policy->max_realms > parent->policy.max_realms
-            || policy->max_processes > parent->policy.max_processes))
-        return NULL;
-    *error = SYSTEM_LIMIT;
-    if (parent != &erts_host_realm && parent->depth >= ERTS_REALM_MAX_DEPTH)
-        return NULL;
-
-    /* Saturate rather than wrap: diagnostic identities are never reused. */
-    id = erts_atomic_read_nob(&realm_id_counter);
-    for (;;) {
-        if (id == MAX_SMALL)
-            return NULL;
-        actual = erts_atomic_cmpxchg_nob(&realm_id_counter, id + 1, id);
-        if (actual == id)
-            break;
-        id = actual;
-    }
-
-    realm = erts_alloc_fnf(ERTS_ALC_T_REALM, sizeof(ErtsRealm));
-    if (!realm)
-        return NULL;
-    erts_refc_init(&realm->refc, 1);
-    realm->id = (Uint) id + 1;
-    realm->identity = realm_create_identity();
-    realm->policy = *policy;
-    realm->parent = parent == &erts_host_realm ? NULL : parent;
-    realm->owner = realm->parent ? parent->owner : realm;
-    realm->depth = realm->parent ? parent->depth + 1 : 1;
-    realm->closing = realm->attached = 0;
-    realm->pending_spawns = realm->used_processes = 0;
-    realm->used_realms = 1;
-    realm->used_endpoints = realm->queued_endpoint_messages = 0;
-    realm->endpoints = NULL;
-    realm->members = NULL;
-    realm->children = realm->prev = realm->next = NULL;
-
-    if (!realm->parent) {
-        erts_mtx_init(&realm->lock, "realm", make_small(realm->id),
-                      ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
-    }
-    else {
-        erts_mtx_lock(&realm->owner->lock);
-        for (r = parent; r; r = r->parent) {
-            if (r->closing || r->used_realms >= r->policy.max_realms) {
-                erts_mtx_unlock(&realm->owner->lock);
-                erts_bin_release(realm->identity);
-                erts_free(ERTS_ALC_T_REALM, realm);
-                return NULL;
-            }
-        }
-        erts_ref_realm(parent);
-        for (r = parent; r; r = r->parent)
-            r->used_realms++;
-        realm->next = parent->children;
-        if (realm->next)
-            realm->next->prev = realm;
-        parent->children = realm;
-        realm->attached = 1;
-        erts_mtx_unlock(&realm->owner->lock);
-    }
-    return realm;
-}
-
-void
-erts_ref_realm(ErtsRealm *realm)
-{
-    ASSERT(realm);
-    if (realm != &erts_host_realm)
-        erts_refc_inc(&realm->refc, 1);
-}
-
-void
-erts_deref_realm(ErtsRealm *realm)
-{
-    ErtsRealm *parent, *r;
-    if (realm == &erts_host_realm)
-        return;
-    ASSERT(realm);
-    /* Serialize final release with snapshots of the non-owning child list. */
-    erts_mtx_lock(&realm->owner->lock);
-    if (erts_refc_dectest(&realm->refc, 0) != 0) {
-        erts_mtx_unlock(&realm->owner->lock);
-        return;
-    }
-    ASSERT(!realm->pending_spawns && !realm->members && !realm->children);
-    ASSERT(!realm->used_processes && realm->used_realms == 1);
-    ASSERT(!realm->used_endpoints && !realm->endpoints
-           && !realm->queued_endpoint_messages);
-    parent = realm->parent;
-    realm_detach_locked(realm);
-    for (r = realm; r; r = r->parent) {
-        ASSERT(r->used_realms);
-        r->used_realms--;
-    }
-    if (parent)
-        realm_prune_locked(parent);
-    erts_mtx_unlock(&realm->owner->lock);
-    if (!parent)
-        erts_mtx_destroy(&realm->lock);
-    /* Magic-reference table locks must not be acquired under the Realm lock. */
-    erts_bin_release(realm->identity);
-    erts_free(ERTS_ALC_T_REALM, realm);
-    if (parent)
-        erts_deref_realm(parent);
-}
-
-Uint
-erts_realm_id(ErtsRealm *realm)
-{
-    ASSERT(realm);
-    return realm->id;
-}
-
-void
-erts_close_realm(ErtsRealm *realm)
-{
-    ASSERT(realm != &erts_host_realm);
-    erts_mtx_lock(&realm->owner->lock);
-    realm->closing = 1;
-    realm_prune_locked(realm);
-    erts_mtx_unlock(&realm->owner->lock);
-}
-
-int
-erts_realm_stop_children(ErtsRealm *realm, ErtsRealm **children, Uint capacity)
-{
-    ErtsRealm *child;
-    int count = 0;
-    erts_mtx_lock(&realm->owner->lock);
-    if (!realm_closed_locked(realm)) {
-        erts_mtx_unlock(&realm->owner->lock);
-        return -1;
-    }
-    for (child = realm->children; child && count < capacity; child = child->next) {
-        erts_ref_realm(child);
-        children[count++] = child;
-    }
-    erts_mtx_unlock(&realm->owner->lock);
-    return count;
-}
-
-/* Returns -1 unless closed to admission; completion includes descendants. */
-int
-erts_realm_stop_members(ErtsRealm *realm, Eterm *pids, Uint capacity, int *done)
-{
-    Process *p;
-    int count = 0;
-
-    ASSERT(realm != &erts_host_realm);
-    erts_mtx_lock(&realm->owner->lock);
-    if (!realm_closed_locked(realm)) {
-        erts_mtx_unlock(&realm->owner->lock);
-        return -1;
-    }
-    realm_drain_endpoints_locked(realm, 64);
-    for (p = realm->members; p && count < capacity; p = p->realm_next)
-        pids[count++] = p->common.id;
-    *done = !realm->members && !realm->pending_spawns && !realm->children
-        && !realm->queued_endpoint_messages;
-    erts_mtx_unlock(&realm->owner->lock);
-    return count;
-}
-
-static int
-realm_reserve_spawn(ErtsRealm *realm)
-{
-    ErtsRealm *r;
-    if (realm == &erts_host_realm)
-        return 1;
-    erts_mtx_lock(&realm->owner->lock);
-    for (r = realm; r; r = r->parent) {
-        if (r->closing || r->used_processes >= r->policy.max_processes) {
-            erts_mtx_unlock(&realm->owner->lock);
-            return 0;
-        }
-    }
-    for (r = realm; r; r = r->parent)
-        r->used_processes++;
-    realm->pending_spawns++;
-    erts_mtx_unlock(&realm->owner->lock);
-    return 1;
-}
-
-static void
-realm_cancel_spawn(ErtsRealm *realm)
-{
-    ErtsRealm *r;
-    if (realm == &erts_host_realm)
-        return;
-    erts_mtx_lock(&realm->owner->lock);
-    ASSERT(realm->pending_spawns);
-    realm->pending_spawns--;
-    for (r = realm; r; r = r->parent) {
-        ASSERT(r->used_processes);
-        r->used_processes--;
-    }
-    realm_prune_locked(realm);
-    erts_mtx_unlock(&realm->owner->lock);
-}
-
-static void
-realm_publish_member(Process *p)
-{
-    ErtsRealm *realm = p->realm;
-    if (realm == &erts_host_realm)
-        return;
-    erts_mtx_lock(&realm->owner->lock);
-    ASSERT(realm->pending_spawns);
-    realm->pending_spawns--;
-    p->realm_next = realm->members;
-    if (realm->members)
-        realm->members->realm_prev = p;
-    realm->members = p;
-    erts_mtx_unlock(&realm->owner->lock);
-}
-
-static void
-realm_remove_member(Process *p)
-{
-    ErtsRealm *realm = p->realm, *r;
-    if (realm == &erts_host_realm)
-        return;
-    erts_mtx_lock(&realm->owner->lock);
-    if (p->realm_prev)
-        p->realm_prev->realm_next = p->realm_next;
-    else {
-        ASSERT(realm->members == p);
-        realm->members = p->realm_next;
-    }
-    if (p->realm_next)
-        p->realm_next->realm_prev = p->realm_prev;
-    p->realm_prev = p->realm_next = NULL;
-    for (r = realm; r; r = r->parent) {
-        ASSERT(r->used_processes);
-        r->used_processes--;
-    }
-    realm_prune_locked(realm);
-    erts_mtx_unlock(&realm->owner->lock);
-}
-
-static ErtsRealmEndpointMessage *
-realm_endpoint_pop_locked(ErtsRealmEndpoint *ep)
-{
-    ErtsRealmEndpointMessage *msg = ep->head;
-    ASSERT(msg && ep->messages && ep->realm->queued_endpoint_messages);
-    ep->head = msg->next;
-    if (!ep->head)
-        ep->tail = NULL;
-    ep->messages--;
-    ep->bytes -= msg->size;
-    ep->realm->queued_endpoint_messages--;
-    return msg;
-}
-
-static void
-realm_endpoint_clear_locked(ErtsRealmEndpoint *ep)
-{
-    ep->revoked = 1;
-    while (ep->head)
-        erts_free(ERTS_ALC_T_REALM_MSG, realm_endpoint_pop_locked(ep));
-}
-
-static void
-realm_drain_endpoints_locked(ErtsRealm *realm, Uint budget)
-{
-    ErtsRealmEndpoint *ep;
-    for (ep = realm->endpoints; ep && budget; ep = ep->next) {
-        ep->revoked = 1;
-        while (ep->head && budget) {
-            erts_free(ERTS_ALC_T_REALM_MSG, realm_endpoint_pop_locked(ep));
-            budget--;
-        }
-    }
-    realm_prune_locked(realm);
-}
-
-static int
-realm_endpoint_destructor(Binary *bin)
-{
-    ErtsRealmEndpoint *ep = ERTS_MAGIC_BIN_DATA(bin);
-    ErtsRealm *realm = ep->realm, *r;
-    if (!realm)                 /* Failed constructor, before admission. */
-        return 1;
-    erts_mtx_lock(&realm->owner->lock);
-    if (ep->prev)
-        ep->prev->next = ep->next;
-    else {
-        ASSERT(realm->endpoints == ep);
-        realm->endpoints = ep->next;
-    }
-    if (ep->next)
-        ep->next->prev = ep->prev;
-    realm_endpoint_clear_locked(ep);
-    for (r = realm; r; r = r->parent) {
-        ASSERT(r->used_endpoints);
-        r->used_endpoints--;
-    }
-    realm_prune_locked(realm);
-    erts_mtx_unlock(&realm->owner->lock);
-    erts_deref_realm(realm);
-    return 1;
-}
-
-static ErtsRealmEndpoint *
-realm_endpoint_get(Eterm handle)
-{
-    Binary *bin;
-    if (!is_internal_magic_ref(handle))
-        return NULL;
-    bin = erts_magic_ref2bin(handle);
-    if (ERTS_MAGIC_BIN_DESTRUCTOR(bin) != realm_endpoint_destructor)
-        return NULL;
-    return ERTS_MAGIC_BIN_DATA(bin);
-}
-
-Eterm
-erts_realm_endpoint_create(Process *p, ErtsRealm *realm, int to_host,
-                           Uint max_messages, Uint max_bytes)
-{
-    Binary *bin;
-    ErtsRealmEndpoint *ep;
-    ErtsRealm *r;
-    Eterm *hp;
-
-    if (p->realm != &erts_host_realm || realm == &erts_host_realm
-        || !max_messages || max_messages > ERTS_REALM_ENDPOINT_MESSAGES
-        || !max_bytes || max_bytes > ERTS_REALM_ENDPOINT_BYTES)
-        BIF_ERROR(p, BADARG);
-    bin = erts_create_magic_binary(sizeof(ErtsRealmEndpoint), realm_endpoint_destructor);
-    ep = ERTS_MAGIC_BIN_DATA(bin);
-    sys_memzero(ep, sizeof(*ep));
-    ep->to_host = to_host;
-    ep->max_messages = max_messages;
-    ep->max_bytes = max_bytes;
-    erts_mtx_lock(&realm->owner->lock);
-    if (realm_closed_locked(realm)) {
-        erts_mtx_unlock(&realm->owner->lock);
-        erts_bin_free(bin);
-        return am_closed;
-    }
-    for (r = realm; r; r = r->parent) {
-        if (r->used_endpoints >= ERTS_REALM_ENDPOINTS) {
-            erts_mtx_unlock(&realm->owner->lock);
-            erts_bin_free(bin);
-            BIF_ERROR(p, SYSTEM_LIMIT);
-        }
-    }
-    erts_ref_realm(realm);
-    ep->realm = realm;
-    for (r = realm; r; r = r->parent)
-        r->used_endpoints++;
-    ep->next = realm->endpoints;
-    if (ep->next)
-        ep->next->prev = ep;
-    realm->endpoints = ep;
-    erts_mtx_unlock(&realm->owner->lock);
-    hp = HAlloc(p, ERTS_MAGIC_REF_THING_SIZE);
-    return erts_mk_magic_ref(&hp, &MSO(p), bin);
-}
-
-Eterm
-erts_realm_endpoint_send(Process *p, Eterm handle, Eterm payload)
-{
-    ErtsRealmEndpoint *ep = realm_endpoint_get(handle);
-    ErtsRealmEndpointMessage *msg;
-    ErtsRealm *realm;
-    byte *base;
-    Uint offset, bits, size;
-    Eterm result;
-
-    if (!ep || p->realm != (ep->to_host ? ep->realm : &erts_host_realm)
-        || !is_bitstring(payload))
-        BIF_ERROR(p, BADARG);
-    ERTS_GET_BITSTRING(payload, base, offset, bits);
-    if ((bits & 7) || bits / 8 > ERTS_REALM_ENDPOINT_MESSAGE_BYTES)
-        BIF_ERROR(p, BADARG);
-    size = bits / 8;
-    realm = ep->realm;
-    /* Copy only immutable bytes; no PIDs, funs, resources, or term decoding.
-     * Allocation is outside the lock. Admission is rechecked before commit. */
-    msg = erts_alloc_fnf(ERTS_ALC_T_REALM_MSG, sizeof(*msg) + size);
-    if (!msg)
-        BIF_ERROR(p, SYSTEM_LIMIT);
-    msg->size = size;
-    msg->next = NULL;
-    erts_copy_bits_fwd(base, offset, msg->data, 0, bits);
-    BUMP_REDS(p, size / 64);
-    erts_mtx_lock(&realm->owner->lock);
-    if (ep->revoked || realm_closed_locked(realm))
-        result = am_closed;
-    else if (ep->messages >= ep->max_messages || size > ep->max_bytes - ep->bytes)
-        result = am_full;
-    else {
-        if (ep->tail)
-            ep->tail->next = msg;
-        else
-            ep->head = msg;
-        ep->tail = msg;
-        ep->messages++;
-        ep->bytes += size;
-        realm->queued_endpoint_messages++;
-        result = am_ok;
-    }
-    erts_mtx_unlock(&realm->owner->lock);
-    if (result != am_ok)
-        erts_free(ERTS_ALC_T_REALM_MSG, msg);
-    return result;
-}
-
-Eterm
-erts_realm_endpoint_receive(Process *p, Eterm handle)
-{
-    ErtsRealmEndpoint *ep = realm_endpoint_get(handle);
-    ErtsRealm *realm;
-    ErtsRealmEndpointMessage *msg;
-    Eterm binary, *hp;
-
-    if (!ep || p->realm != (ep->to_host ? &erts_host_realm : ep->realm))
-        BIF_ERROR(p, BADARG);
-    realm = ep->realm;
-    erts_mtx_lock(&realm->owner->lock);
-    if (ep->revoked || realm_closed_locked(realm)) {
-        realm_endpoint_clear_locked(ep);
-        realm_prune_locked(realm);
-        erts_mtx_unlock(&realm->owner->lock);
-        return am_closed;
-    }
-    if (!ep->head) {
-        erts_mtx_unlock(&realm->owner->lock);
-        return am_empty;
-    }
-    msg = realm_endpoint_pop_locked(ep);
-    erts_mtx_unlock(&realm->owner->lock);
-    binary = erts_new_binary_from_data(p, msg->size, msg->data);
-    BUMP_REDS(p, msg->size / 64);
-    erts_free(ERTS_ALC_T_REALM_MSG, msg);
-    hp = HAlloc(p, 3);
-    return TUPLE2(hp, am_ok, binary);
-}
-
-Eterm
-erts_realm_endpoint_revoke(Process *p, Eterm handle)
-{
-    ErtsRealmEndpoint *ep = realm_endpoint_get(handle);
-    ErtsRealm *realm;
-    if (!ep || p->realm != &erts_host_realm)
-        BIF_ERROR(p, BADARG);
-    realm = ep->realm;
-    erts_mtx_lock(&realm->owner->lock);
-    realm_endpoint_clear_locked(ep);
-    realm_prune_locked(realm);
-    erts_mtx_unlock(&realm->owner->lock);
-    return am_ok;
-}
 
 int ERTS_WRITE_UNLIKELY(erts_default_spo_flags) = SPO_ON_HEAP_MSGQ;
 int ERTS_WRITE_UNLIKELY(erts_sched_compact_load);
@@ -1407,7 +759,6 @@ erts_init_process(int ncpu, int proc_tab_size, int legacy_proc_tab)
 {
 
     erts_init_proc_lock(ncpu);
-    erts_atomic_init_nob(&realm_id_counter, 0);
 
     init_proclist_alloc();
 
@@ -1430,8 +781,6 @@ void
 erts_late_init_process(void)
 {
     int ix;
-
-    erts_host_realm.identity = realm_create_identity();
 
     erts_spinlock_init(&erts_sched_stat.lock, "sched_stat", NIL,
         ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_SCHEDULER);
@@ -9674,9 +9023,6 @@ erts_internal_suspend_process_2(BIF_ALIST_2)
     ErtsMonitorSuspend *msp;
     ErtsMonitorData *mdp;
 
-    if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1))
-        BIF_ERROR(BIF_P, BADARG);
-
     if (BIF_P->common.id == BIF_ARG_1)
 	BIF_RET(am_badarg); /* We are not allowed to suspend ourselves */
 
@@ -9837,9 +9183,6 @@ resume_process_1(BIF_ALIST_1)
     ErtsMonitor *mon;
     ErtsMonitorSuspend *msp;
     erts_aint_t mstate;
-
-    if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1))
-        BIF_ERROR(BIF_P, BADARG);
  
     if (BIF_P->common.id == BIF_ARG_1)
 	BIF_ERROR(BIF_P, BADARG);
@@ -9872,8 +9215,6 @@ resume_process_1(BIF_ALIST_1)
 BIF_RETTYPE
 erts_internal_is_process_executing_dirty_1(BIF_ALIST_1)
 {
-    if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1))
-        BIF_ERROR(BIF_P, BADARG);
     if (is_not_internal_pid(BIF_ARG_1))
 	BIF_ERROR(BIF_P, BADARG);
     else {
@@ -11975,12 +11316,6 @@ request_system_task(Process *c_p, Eterm requester, Eterm target,
     Eterm noproc_res, req_type, priority = priority_req;
     int signal = 0;
 
-    /* Both effects and replies require management scope. This also permits
-     * trusted host system-task forwarders to reply to a restricted requester. */
-    if (!erts_realm_process_access(c_p, target, 1)
-        || !erts_realm_process_access(c_p, requester, 1)
-        || (erts_realm_is_restricted(c_p->realm) && !is_internal_pid(requester)))
-        BIF_ERROR(c_p, BADARG);
     if (!rp && !is_internal_pid(target)) {
 	if (!is_external_pid(target))
 	    goto badarg;
@@ -12811,7 +12146,6 @@ erts_free_proc(Process *p)
     ASSERT(0 == erts_proc_read_refc(p));
     if (p->flags & F_DELAYED_DEL_PROC)
 	delete_process(p);
-    erts_deref_realm(p->realm);
     erts_free(ERTS_ALC_T_PROC, (void *) p);
 }
 
@@ -12820,7 +12154,6 @@ typedef struct {
     erts_aint32_t state;
     ErtsRunQueue *run_queue;
     int bound;
-    ErtsRealm *realm;
 } ErtsEarlyProcInit;
 
 static void early_init_process_struct(void *varg, Eterm data)
@@ -12829,8 +12162,6 @@ static void early_init_process_struct(void *varg, Eterm data)
     Process *proc = arg->proc;
 
     proc->common.id = make_internal_pid(data);
-    proc->realm = arg->realm;
-    proc->realm_prev = proc->realm_next = NULL;
     erts_atomic32_init_nob(&proc->xstate, 0);
     proc->dirty_sys_tasks = NULL;
     erts_init_runq_proc(proc, arg->run_queue, arg->bound);
@@ -12846,7 +12177,7 @@ static void early_init_process_struct(void *varg, Eterm data)
 ** Allocate process and find out where to place next process.
 */
 static Process*
-alloc_process(ErtsRunQueue *rq, int bound, erts_aint32_t state, ErtsRealm *realm)
+alloc_process(ErtsRunQueue *rq, int bound, erts_aint32_t state)
 {
     ErtsEarlyProcInit init_arg;
     Process *p;
@@ -12861,8 +12192,6 @@ alloc_process(ErtsRunQueue *rq, int bound, erts_aint32_t state, ErtsRealm *realm
     init_arg.state = state;
     init_arg.run_queue = rq;
     init_arg.bound = bound;
-    init_arg.realm = realm;
-    erts_ref_realm(realm);
 
     ERTS_CT_ASSERT(offsetof(Process,common) == 0);
 
@@ -12870,7 +12199,6 @@ alloc_process(ErtsRunQueue *rq, int bound, erts_aint32_t state, ErtsRealm *realm
 			       &p->common,
 			       (void *) &init_arg,
 			       early_init_process_struct)) {
-        erts_deref_realm(realm);
 	erts_free(ERTS_ALC_T_PROC, p);
 	return NULL;
     }
@@ -13126,7 +12454,6 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
     ErtsProcLocks locks = ERTS_PROC_LOCKS_ALL;
     Eterm node_token_heap[6];
     Eterm group_leader, parent_id, spawn_ref, token;
-    ErtsRealm *realm;
 #ifdef SHCOPY_SPAWN
     erts_shcopy_t info;
     INITIALIZE_SHCOPY(info);
@@ -13194,24 +12521,6 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
 
     ASSERT((qs_flags & FS_ON_HEAP_MSGQ) || (qs_flags & FS_OFF_HEAP_MSGQ));
 
-    if (so->realm) {
-        /* Only an authorized manager may explicitly enter another Realm. */
-        if (!parent || !erts_realm_can_spawn_root(parent->realm, so->realm)) {
-            so->error_code = BADARG;
-            goto error;
-        }
-        realm = so->realm;
-        group_leader = ERTS_INVALID_PID;
-    }
-    else {
-        /* Parentless creation is the existing host distribution path. */
-        realm = parent ? parent->realm : &erts_host_realm;
-        if (!realm) {
-            so->error_code = BADARG;
-            goto error;
-        }
-    }
-
     if (!rq) {
         if (parent)
             rq = erts_get_runq_proc(parent, NULL);
@@ -13223,16 +12532,9 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
     }
     ASSERT(rq);
 
-    if (!realm_reserve_spawn(realm)) {
-        /* All spawn variants, including spawn_request, support this result. */
-        so->error_code = SYSTEM_LIMIT;
-        goto error;
-    }
-
-    p = alloc_process(rq, bound, state, realm); /* All proc locks are locked by this thread
+    p = alloc_process(rq, bound, state); /* All proc locks are locked by this thread
                                             on success */
     if (!p) {
-        realm_cancel_spawn(realm);
 	erts_send_error_to_logger_str(group_leader, "Too many processes\n");
 	so->error_code = SYSTEM_LIMIT;
 	goto error;
@@ -13596,9 +12898,6 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
             trace_proc(p, locks, p, am_getting_linked, parent_id);
     }
 
-    /* Complete admission before releasing the child's main/message locks. */
-    realm_publish_member(p);
-
     /*
      * Check if this process should be initially linked to its parent.
      */
@@ -13902,9 +13201,6 @@ erts_send_local_spawn_reply(Process *parent, ErtsProcLocks parent_locks,
 
 void erts_init_empty_process(Process *p)
 {
-    /* Pseudo-processes have no authority unless an internal caller supplies it. */
-    p->realm = NULL;
-    p->realm_prev = p->realm_next = NULL;
     p->htop = NULL;
     p->stop = NULL;
     p->hend = NULL;
@@ -14180,9 +13476,6 @@ delete_process(Process* p)
 
     if (block_rla_ref)
         erts_unblock_release_literal_area(block_rla_ref);
-
-    /* Includes deferred cleanup after dirty execution; final ref release is later. */
-    realm_remove_member(p);
 }
 
 static ERTS_INLINE void

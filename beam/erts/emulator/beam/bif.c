@@ -87,264 +87,6 @@ static erts_atomic32_t sched_wall_time;
  * each individual BIF does.
  */
 
-static int
-realm_handle_destructor(Binary *bin)
-{
-    ErtsRealm *realm = *(ErtsRealm **) ERTS_MAGIC_BIN_DATA(bin);
-    erts_deref_realm(realm);
-    return 1;
-}
-
-static ErtsRealm *
-get_realm_resource(Eterm handle)
-{
-    Binary *bin;
-    if (!is_internal_magic_ref(handle))
-        return NULL;
-    bin = erts_magic_ref2bin(handle);
-    if (ERTS_MAGIC_BIN_DESTRUCTOR(bin) != realm_handle_destructor)
-        return NULL;
-    return *(ErtsRealm **) ERTS_MAGIC_BIN_DATA(bin);
-}
-
-static ErtsRealm *
-get_realm_handle(Process *p, Eterm handle)
-{
-    ErtsRealm *realm = get_realm_resource(handle);
-    return realm && erts_realm_can_manage(p->realm, realm) ? realm : NULL;
-}
-
-BIF_RETTYPE erts_internal_realm_identity_0(BIF_ALIST_0)
-{
-    if (!BIF_P->realm)
-        BIF_ERROR(BIF_P, BADARG);
-    BIF_RET(erts_realm_identity(BIF_P, BIF_P->realm));
-}
-
-BIF_RETTYPE erts_internal_realm_identity_1(BIF_ALIST_1)
-{
-    ErtsRealm *realm = get_realm_resource(BIF_ARG_1);
-    if (!realm)
-        BIF_ERROR(BIF_P, BADARG);
-    /* Knowledge of a retained handle permits identification, not management. */
-    BIF_RET(erts_realm_identity(BIF_P, realm));
-}
-
-/* Consumes an owned Realm reference. */
-static Eterm
-make_realm_handle(Process *p, ErtsRealm *realm)
-{
-    Binary *bin = erts_create_magic_binary(sizeof(ErtsRealm *), realm_handle_destructor);
-    Eterm *hp;
-    *(ErtsRealm **) ERTS_MAGIC_BIN_DATA(bin) = realm;
-    hp = HAlloc(p, ERTS_MAGIC_REF_THING_SIZE);
-    return erts_mk_magic_ref(&hp, &MSO(p), bin);
-}
-
-BIF_RETTYPE erts_internal_realm_id_0(BIF_ALIST_0)
-{
-    BIF_RET(make_small(erts_realm_id(BIF_P->realm)));
-}
-
-static Eterm
-realm_spawn_with_policy(Process *p, Eterm mod, Eterm fun, Eterm args,
-                        const ErtsRealmPolicy *policy)
-{
-    ErlSpawnOpts so;
-    ErtsRealm *realm;
-    Eterm pid, handle;
-    Eterm *hp;
-    int error;
-
-    if (is_not_atom(mod) || is_not_atom(fun) || erts_list_length(args) < 0)
-        BIF_ERROR(p, BADARG);
-    realm = erts_create_realm(p->realm, policy, &error);
-    if (!realm)
-        BIF_ERROR(p, error);
-
-    ERTS_SET_DEFAULT_SPAWN_OPTS(&so);
-    so.realm = realm;
-    pid = erl_create_process(p, mod, fun, args, &so);
-    if (is_non_value(pid)) {
-        erts_deref_realm(realm);
-        BIF_ERROR(p, so.error_code);
-    }
-    handle = make_realm_handle(p, realm);
-    hp = HAlloc(p, 3);
-    BIF_RET(TUPLE2(hp, handle, pid));
-}
-
-BIF_RETTYPE erts_internal_realm_spawn_3(BIF_ALIST_3)
-{
-    ErtsRealmPolicy policy;
-    erts_realm_default_policy(BIF_P->realm, &policy);
-    return realm_spawn_with_policy(BIF_P, BIF_ARG_1, BIF_ARG_2, BIF_ARG_3, &policy);
-}
-
-static int
-realm_parse_limit(Eterm value, Uint *limit)
-{
-    if (value == am_infinity)
-        *limit = MAX_SMALL;
-    else if (is_small(value) && signed_val(value) > 0)
-        *limit = unsigned_val(value);
-    else
-        return 0;
-    return 1;
-}
-
-static int
-realm_parse_policy(Process *p, Eterm map, ErtsRealmPolicy *policy)
-{
-    const Eterm *value;
-    Sint keys = 0;
-    if (!p->realm || !is_map(map))
-        return 0;
-    erts_realm_default_policy(p->realm, policy);
-    value = erts_maps_get(am_allow_create_realms, map);
-    if (value) {
-        keys++;
-        if (*value != am_true && *value != am_false)
-            return 0;
-        policy->allow_create_realms = *value == am_true;
-    }
-    value = erts_maps_get(am_restrict_process_access, map);
-    if (value) {
-        keys++;
-        if (*value != am_true && *value != am_false)
-            return 0;
-        policy->restrict_process_access = *value == am_true;
-    }
-    value = erts_maps_get(am_max_realms, map);
-    if (value) {
-        keys++;
-        if (!realm_parse_limit(*value, &policy->max_realms))
-            return 0;
-    }
-    value = erts_maps_get(am_max_processes, map);
-    if (value) {
-        keys++;
-        if (!realm_parse_limit(*value, &policy->max_processes))
-            return 0;
-    }
-    /* Typos must not silently discard a security policy. */
-    return keys == erts_map_size(map);
-}
-
-BIF_RETTYPE erts_internal_realm_spawn_4(BIF_ALIST_4)
-{
-    ErtsRealmPolicy policy;
-    if (!realm_parse_policy(BIF_P, BIF_ARG_4, &policy))
-        BIF_ERROR(BIF_P, BADARG);
-    return realm_spawn_with_policy(BIF_P, BIF_ARG_1, BIF_ARG_2, BIF_ARG_3, &policy);
-}
-
-BIF_RETTYPE erts_internal_realm_create_1(BIF_ALIST_1)
-{
-    ErtsRealmPolicy policy;
-    ErtsRealm *realm;
-    int error;
-    if (!realm_parse_policy(BIF_P, BIF_ARG_1, &policy))
-        BIF_ERROR(BIF_P, BADARG);
-    realm = erts_create_realm(BIF_P->realm, &policy, &error);
-    if (!realm)
-        BIF_ERROR(BIF_P, error);
-    BIF_RET(make_realm_handle(BIF_P, realm));
-}
-
-BIF_RETTYPE erts_internal_realm_spawn_root_4(BIF_ALIST_4)
-{
-    ErtsRealm *realm = get_realm_handle(BIF_P, BIF_ARG_1);
-    ErlSpawnOpts so;
-    Eterm pid;
-    if (!realm)
-        BIF_ERROR(BIF_P, BADARG);
-    ERTS_SET_DEFAULT_SPAWN_OPTS(&so);
-    so.realm = realm;
-    pid = erl_create_process(BIF_P, BIF_ARG_2, BIF_ARG_3, BIF_ARG_4, &so);
-    if (is_non_value(pid))
-        BIF_ERROR(BIF_P, so.error_code);
-    BIF_RET(pid);
-}
-
-BIF_RETTYPE erts_internal_realm_endpoint_create_4(BIF_ALIST_4)
-{
-    ErtsRealm *realm = get_realm_handle(BIF_P, BIF_ARG_1);
-    if (BIF_P->realm != &erts_host_realm || !realm
-        || (BIF_ARG_2 != am_to_host && BIF_ARG_2 != am_to_realm)
-        || !is_small(BIF_ARG_3) || signed_val(BIF_ARG_3) <= 0
-        || !is_small(BIF_ARG_4) || signed_val(BIF_ARG_4) <= 0)
-        BIF_ERROR(BIF_P, BADARG);
-    return erts_realm_endpoint_create(BIF_P, realm, BIF_ARG_2 == am_to_host,
-                                      unsigned_val(BIF_ARG_3), unsigned_val(BIF_ARG_4));
-}
-
-BIF_RETTYPE erts_internal_realm_endpoint_send_2(BIF_ALIST_2)
-{
-    return erts_realm_endpoint_send(BIF_P, BIF_ARG_1, BIF_ARG_2);
-}
-
-BIF_RETTYPE erts_internal_realm_endpoint_receive_1(BIF_ALIST_1)
-{
-    return erts_realm_endpoint_receive(BIF_P, BIF_ARG_1);
-}
-
-BIF_RETTYPE erts_internal_realm_endpoint_revoke_1(BIF_ALIST_1)
-{
-    return erts_realm_endpoint_revoke(BIF_P, BIF_ARG_1);
-}
-
-BIF_RETTYPE erts_internal_realm_close_1(BIF_ALIST_1)
-{
-    ErtsRealm *realm = get_realm_handle(BIF_P, BIF_ARG_1);
-    if (!realm)
-        BIF_ERROR(BIF_P, BADARG);
-    erts_close_realm(realm);
-    BIF_RET(am_ok);
-}
-
-BIF_RETTYPE erts_internal_realm_stop_children_1(BIF_ALIST_1)
-{
-    ErtsRealm *realm = get_realm_handle(BIF_P, BIF_ARG_1);
-    ErtsRealm *children[64];
-    Eterm list = NIL, handle, *hp;
-    int count;
-
-    if (!realm)
-        BIF_ERROR(BIF_P, BADARG);
-    count = erts_realm_stop_children(realm, children, sizeof(children)/sizeof(children[0]));
-    if (count < 0)
-        BIF_ERROR(BIF_P, BADARG);
-    while (count--) {
-        handle = make_realm_handle(BIF_P, children[count]);
-        hp = HAlloc(BIF_P, 2);
-        list = CONS(hp, handle, list);
-    }
-    BIF_RET(list);
-}
-
-BIF_RETTYPE erts_internal_realm_stop_members_1(BIF_ALIST_1)
-{
-    ErtsRealm *realm = get_realm_handle(BIF_P, BIF_ARG_1);
-    Eterm pids[64], list = NIL;
-    Eterm *hp;
-    int count, done;
-
-    if (!realm)
-        BIF_ERROR(BIF_P, BADARG);
-    count = erts_realm_stop_members(realm, pids, sizeof(pids)/sizeof(pids[0]), &done);
-    if (count < 0)
-        BIF_ERROR(BIF_P, BADARG);
-    if (done)
-        BIF_RET(am_done);
-    hp = HAlloc(BIF_P, 2 * count);
-    while (count--) {
-        list = CONS(hp, pids[count], list);
-        hp += 2;
-    }
-    BIF_RET(list);
-}
-
 BIF_RETTYPE spawn_3(BIF_ALIST_3)
 {
     ErlSpawnOpts so;
@@ -397,8 +139,6 @@ static BIF_RETTYPE link_opt(Process *c_p, Eterm other, Eterm opts)
     int prio_change = 0;
     Uint32 add_flags = 0, rm_flags = 0;
 
-    if (!erts_realm_process_access(c_p, other, 1))
-        BIF_ERROR(c_p, BADARG);
     if (ERTS_IS_P_TRACED_FL(c_p, F_TRACE_PROCS)) {
 	trace_proc(c_p, ERTS_PROC_LOCK_MAIN, c_p, am_link, other);
     }
@@ -1022,9 +762,6 @@ static BIF_RETTYPE monitor(Process *c_p, Eterm type, Eterm target,
     ErtsMonitorData *mdp;
     BIF_RETTYPE ret_val;
 
-    if (erts_realm_is_restricted(c_p->realm)
-        && (type != am_process || is_external_pid(target)))
-        BIF_ERROR(c_p, BADARG);
     ref = ((add_oflags & ERTS_ML_STATE_ALIAS_MASK)
            ? erts_make_pid_ref(c_p)
            : erts_make_ref(c_p));
@@ -1041,8 +778,6 @@ static BIF_RETTYPE monitor(Process *c_p, Eterm type, Eterm target,
 
         local_process:
 
-            if (!erts_realm_process_access(c_p, id, 1))
-                BIF_ERROR(c_p, BADARG);
             if (id == c_p->common.id) {
                 /* No monitoring of self... */
                 add_oflags = 0;
@@ -1143,9 +878,6 @@ static BIF_RETTYPE monitor(Process *c_p, Eterm type, Eterm target,
                 goto badarg;
             if (is_not_atom(tpl[1]) || is_not_atom(tpl[2]))
                 goto badarg;
-            if (erts_realm_is_restricted(c_p->realm)
-                && tpl[2] != erts_this_dist_entry->sysname)
-                BIF_ERROR(c_p, BADARG);
             if (tpl[2] != am_Noname && !erts_is_this_node_alive())
                 goto badarg;
             target = tpl[1];
@@ -1490,8 +1222,6 @@ unlink_clear_prio(Process *c_p, Uint32 *flagsp)
 /* remove a link from a process */
 BIF_RETTYPE unlink_1(BIF_ALIST_1)
 {
-    if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (ERTS_IS_P_TRACED_FL(BIF_P, F_TRACE_PROCS)) {
         trace_proc(BIF_P, ERTS_PROC_LOCK_MAIN,
@@ -1994,8 +1724,6 @@ static BIF_RETTYPE send_exit_signal_bif(Process *c_p, Eterm id, Eterm reason,
     BIF_RETTYPE ret_val;
     int prio = 0;
 
-    if (!erts_realm_process_access(c_p, id, 1))
-        BIF_ERROR(c_p, BADARG);
     while (is_list(opts)) {
         Eterm *cons = list_val(opts);
         switch (CAR(cons)) {
@@ -2538,9 +2266,6 @@ BIF_RETTYPE erts_internal_process_flag_3(BIF_ALIST_3)
    ErtsProcessFlag3Args *pf3a;
    Uint flag_sz, value_sz;
 
-   if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1))
-       BIF_ERROR(BIF_P, BADARG);
-
    if (BIF_P->common.id == BIF_ARG_1) {
        res = process_flag_aux(BIF_P, NULL, BIF_ARG_2, BIF_ARG_3);
        BIF_RET(res);
@@ -2584,8 +2309,6 @@ BIF_RETTYPE erts_internal_process_flag_3(BIF_ALIST_3)
 
 BIF_RETTYPE register_2(BIF_ALIST_2)   /* (Atom, Pid|Port)   */
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     if (erts_register_name(BIF_P, BIF_ARG_1, BIF_ARG_2)) {
 	BIF_RET(am_true);
     } else {
@@ -2601,8 +2324,6 @@ BIF_RETTYPE register_2(BIF_ALIST_2)   /* (Atom, Pid|Port)   */
 BIF_RETTYPE unregister_1(BIF_ALIST_1)
 {
     int res;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     if (is_not_atom(BIF_ARG_1)) {
 	BIF_ERROR(BIF_P, BADARG);
     }
@@ -2621,8 +2342,6 @@ BIF_RETTYPE unregister_1(BIF_ALIST_1)
 BIF_RETTYPE whereis_1(BIF_ALIST_1)
 {
     Eterm res;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (is_not_atom(BIF_ARG_1)) {
 	BIF_ERROR(BIF_P, BADARG);
@@ -2768,8 +2487,6 @@ do_send(Process *p, Eterm to, Eterm msg, Eterm return_term, Eterm *refp,
         to_proc = to;
         goto send_altact_message;
     } else if (is_external_pid(to) || is_external_ref(to)) {
-        if (erts_realm_is_restricted(p->realm))
-            return SEND_BADARG;
 	dep = external_dist_entry(to);
 	if(dep == erts_this_dist_entry) {
 	    erts_dsprintf_buf_t *dsbufp = erts_create_logger_dsbuf();
@@ -2802,8 +2519,6 @@ do_send(Process *p, Eterm to, Eterm msg, Eterm return_term, Eterm *refp,
 	    goto send_message;
 	}
 
-        if (is_internal_port(id) && erts_realm_is_restricted(p->realm))
-            return SEND_BADARG;
 	pt = erts_port_lookup(id,
 			      (erts_port_synchronous_ops
 			       ? ERTS_PORT_SFLGS_INVALID_DRIVER_LOOKUP
@@ -2835,8 +2550,6 @@ do_send(Process *p, Eterm to, Eterm msg, Eterm return_term, Eterm *refp,
 	return 0;
     } else if (is_internal_port(to)) {
 	int ret_val;
-        if (erts_realm_is_restricted(p->realm))
-            return SEND_BADARG;
 	portid = to;
 
 	pt = erts_port_lookup(portid,
@@ -2910,8 +2623,6 @@ do_send(Process *p, Eterm to, Eterm msg, Eterm return_term, Eterm *refp,
 	/* erts_find_dist_entry will return NULL if there is no dist_entry
 	   but remote_send() will handle that. */
 
-        if (erts_realm_is_restricted(p->realm) && tp[2] != erts_this_dist_entry->sysname)
-            return SEND_BADARG;
 	dep = erts_find_dist_entry(tp[2]);
 
 	if (dep == erts_this_dist_entry) {
@@ -2932,8 +2643,6 @@ do_send(Process *p, Eterm to, Eterm msg, Eterm return_term, Eterm *refp,
                 }
 		goto send_message;
             }
-            if (is_internal_port(id) && erts_realm_is_restricted(p->realm))
-                return SEND_BADARG;
 	    pt = erts_port_lookup(id,
 				  (erts_port_synchronous_ops
 				   ? ERTS_PORT_SFLGS_INVALID_DRIVER_LOOKUP
@@ -2966,8 +2675,6 @@ do_send(Process *p, Eterm to, Eterm msg, Eterm return_term, Eterm *refp,
     
  send_message: {
 	ErtsProcLocks rp_locks = 0;
-        if (!erts_realm_allow_process(p->realm, rp->realm, 0))
-            return SEND_BADARG;
 	if (p == rp)
 	    rp_locks |= ERTS_PROC_LOCK_MAIN;
 	/* send to local process */
@@ -2980,9 +2687,6 @@ do_send(Process *p, Eterm to, Eterm msg, Eterm return_term, Eterm *refp,
     }
 
 send_altact_message: {
-        Eterm pid = is_internal_pid(to_proc) ? to_proc : erts_get_pid_of_ref(to_proc);
-        if (!erts_realm_process_access(p, pid, 0))
-            return SEND_BADARG;
         erts_proc_sig_send_altact_msg(p, p->common.id, to_proc, msg,
                                       SEQ_TRACE_TOKEN(p), prio);
         return 0;
@@ -4396,8 +4100,6 @@ erts_internal_garbage_collect_1(BIF_ALIST_1)
 
 BIF_RETTYPE processes_0(BIF_ALIST_0)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     return erts_ptab_list(BIF_P, &erts_proc);
 }
 
@@ -4409,8 +4111,6 @@ BIF_RETTYPE processes_0(BIF_ALIST_0)
 BIF_RETTYPE erts_internal_processes_next_1(BIF_ALIST_1)
 {
     Eterm res;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     if (is_not_small(BIF_ARG_1)) {
         BIF_ERROR(BIF_P, BADARG);
     }
@@ -4428,8 +4128,6 @@ BIF_RETTYPE erts_internal_processes_next_1(BIF_ALIST_1)
 
 BIF_RETTYPE ports_0(BIF_ALIST_0)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     return erts_ptab_list(BIF_P, &erts_port);
 }
 
@@ -5250,9 +4948,6 @@ erts_set_group_leader(Process *proc, Eterm new_gl)
 
 BIF_RETTYPE erts_internal_group_leader_3(BIF_ALIST_3)
 {
-    if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1)
-        || !erts_realm_process_access(BIF_P, BIF_ARG_2, 1))
-        BIF_ERROR(BIF_P, BADARG);
     if (is_not_pid(BIF_ARG_1))
         BIF_ERROR(BIF_P, BADARG);
     if (is_not_internal_pid(BIF_ARG_2))
@@ -5269,9 +4964,6 @@ BIF_RETTYPE erts_internal_group_leader_3(BIF_ALIST_3)
 
 BIF_RETTYPE erts_internal_group_leader_2(BIF_ALIST_2)
 {
-    if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1)
-        || !erts_realm_process_access(BIF_P, BIF_ARG_2, 1))
-        BIF_RET(am_badarg);
     if (is_not_pid(BIF_ARG_1))
         BIF_RET(am_badarg);
 
@@ -5331,8 +5023,6 @@ BIF_RETTYPE erts_internal_group_leader_2(BIF_ALIST_2)
 BIF_RETTYPE system_flag_2(BIF_ALIST_2)    
 {
     Sint n;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (BIF_ARG_1 == am_multi_scheduling) {
 	if (BIF_ARG_2 == am_block || BIF_ARG_2 == am_unblock

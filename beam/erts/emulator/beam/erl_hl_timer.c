@@ -2568,9 +2568,6 @@ BIF_RETTYPE send_after_3(BIF_ALIST_3)
     ErtsMonotonicTime timeout_pos, tmo;
     int short_time, tres;
 
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-
     tres = parse_timeout_pos(erts_proc_sched_data(BIF_P), BIF_ARG_1,
 			     NULL, 0, &timeout_pos, &short_time, &tmo);
     if (tres != 0) {
@@ -2587,9 +2584,6 @@ BIF_RETTYPE send_after_4(BIF_ALIST_4)
 {
     ErtsMonotonicTime timeout_pos, tmo;
     int short_time, abs, tres;
-
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (!parse_bif_timer_options(BIF_ARG_4, NULL, NULL, &abs)) {
         BIF_P->fvalue = am_badopt;
@@ -2613,9 +2607,6 @@ BIF_RETTYPE start_timer_3(BIF_ALIST_3)
     ErtsMonotonicTime timeout_pos, tmo;
     int short_time, tres;
 
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-
     tres = parse_timeout_pos(erts_proc_sched_data(BIF_P), BIF_ARG_1, NULL,
 			     0, &timeout_pos, &short_time, &tmo);
     if (tres != 0) {
@@ -2632,9 +2623,6 @@ BIF_RETTYPE start_timer_4(BIF_ALIST_4)
 {
     ErtsMonotonicTime timeout_pos, tmo;
     int short_time, abs, tres;
-
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (!parse_bif_timer_options(BIF_ARG_4, NULL, NULL, &abs)) {
         BIF_P->fvalue = am_badopt;
@@ -2655,8 +2643,6 @@ BIF_RETTYPE start_timer_4(BIF_ALIST_4)
 
 BIF_RETTYPE cancel_timer_1(BIF_ALIST_1)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     return access_bif_timer(BIF_P, BIF_ARG_1, 1, 0, 1);
 }
 
@@ -2664,9 +2650,6 @@ BIF_RETTYPE cancel_timer_2(BIF_ALIST_2)
 {
     BIF_RETTYPE ret;
     int async, info;
-
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (parse_bif_timer_options(BIF_ARG_2, &async, &info, NULL))
 	return access_bif_timer(BIF_P, BIF_ARG_1, 1, async, info);
@@ -2677,8 +2660,6 @@ BIF_RETTYPE cancel_timer_2(BIF_ALIST_2)
 
 BIF_RETTYPE read_timer_1(BIF_ALIST_1)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     return access_bif_timer(BIF_P, BIF_ARG_1, 0, 0, 1);
 }
 
@@ -2686,9 +2667,6 @@ BIF_RETTYPE read_timer_2(BIF_ALIST_2)
 {
     BIF_RETTYPE ret;
     int async;
-
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (parse_bif_timer_options(BIF_ARG_2, &async, NULL, NULL))
 	return access_bif_timer(BIF_P, BIF_ARG_1, 0, async, 1);

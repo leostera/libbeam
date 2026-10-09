@@ -67,6 +67,11 @@ class BaselineTests(unittest.TestCase):
             with patch.object(baseline, 'git', return_value=str(root.parent)):
                 with self.assertRaisesRegex(ValueError, 'repository root'):
                     baseline.check_source(root)
+            (source / '.git').touch()
+            with patch.object(baseline, 'git', side_effect=[str(root), '']):
+                with self.assertRaisesRegex(ValueError, 'not a submodule'):
+                    baseline.check_source(root)
+            (source / '.git').unlink()
             (source / 'Makefile').touch()
             with patch.object(baseline, 'git', side_effect=[str(root), '']):
                 with self.assertRaisesRegex(ValueError, 'already configured'):

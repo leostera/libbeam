@@ -109,12 +109,6 @@
          counters_put/3, counters_info/1]).
 
 -export([spawn_system_process/3]).
--export([realm_id/0, realm_identity/0, realm_identity/1,
-         realm_create/1, realm_spawn_root/4,
-         realm_spawn/3, realm_spawn/4, realm_close/1,
-         realm_stop_children/1, realm_stop_members/1, realm_stop/1,
-         realm_endpoint_create/4, realm_endpoint_send/2,
-         realm_endpoint_receive/1, realm_endpoint_revoke/1]).
 
 -export([ets_lookup_binary_info/2, ets_super_user/1, ets_info_binary/1,
          ets_raw_first/1, ets_raw_next/2]).
@@ -917,105 +911,6 @@ counters_info(_Ref) ->
     Args :: list().
 spawn_system_process(_Mod, _Func, _Args) ->
     erlang:nif_error(undefined).
-
-%% Experimental lifecycle primitives, not a security sandbox. Ordinary process
-%% operations and shared VM resources are not yet restricted by Realm.
-%% Canonical identity is distinct from management handles and carries no
-%% authority. Holding an identity does not retain the Realm's resources.
--spec realm_identity() -> reference().
-realm_identity() ->
-    erlang:nif_error(undefined).
-
-%% Any holder of a genuine management handle can identify its Realm, even when
-%% the holder has no management permission. No lookup by identity is provided.
--spec realm_identity(reference()) -> reference().
-realm_identity(_Handle) ->
-    erlang:nif_error(undefined).
-
-%% Diagnostic only; not the public identity representation.
--spec realm_id() -> non_neg_integer().
-realm_id() ->
-    erlang:nif_error(undefined).
-
-%% Prepare policy and grants before running the first process. Creation does
-%% not imply code loading; repeated authorized root spawning is permitted.
--spec realm_create(map()) -> reference().
-realm_create(_Policy) ->
-    erlang:nif_error(undefined).
-
--spec realm_spawn_root(reference(), atom(), atom(), list()) -> pid().
-realm_spawn_root(_Realm, _Mod, _Func, _Args) ->
-    erlang:nif_error(undefined).
-
--spec realm_spawn(atom(), atom(), list()) -> {reference(), pid()}.
-realm_spawn(_Mod, _Func, _Args) ->
-    erlang:nif_error(undefined).
-
-%% Creation is denied by default. Limits are subtree-wide; omitted child limits
-%% inherit their parent's ceilings, not a fresh independent budget.
--spec realm_spawn(atom(), atom(), list(),
-                  #{allow_create_realms => boolean(),
-                    restrict_process_access => boolean(),
-                    max_realms => pos_integer() | infinity,
-                    max_processes => pos_integer() | infinity}) -> {reference(), pid()}.
-realm_spawn(_Mod, _Func, _Args, _Policy) ->
-    erlang:nif_error(undefined).
-
--spec realm_stop_children(reference()) -> [reference()].
-realm_stop_children(_Realm) ->
-    erlang:nif_error(undefined).
-
-%% Initial host-channel profile: unidirectional, pull-based, copied binaries.
-%% Limits: 1..1024 messages, 1..1048576 bytes, 65536 bytes per message, and
-%% 64 retained endpoints per top-level subtree. Only the host creates/revokes.
--spec realm_endpoint_create(reference(), to_host | to_realm,
-                            pos_integer(), pos_integer()) -> reference() | closed.
-realm_endpoint_create(_Realm, _Direction, _Messages, _Bytes) ->
-    erlang:nif_error(undefined).
-
--spec realm_endpoint_send(reference(), binary()) -> ok | full | closed.
-realm_endpoint_send(_Endpoint, _Payload) ->
-    erlang:nif_error(undefined).
-
--spec realm_endpoint_receive(reference()) -> {ok, binary()} | empty | closed.
-realm_endpoint_receive(_Endpoint) ->
-    erlang:nif_error(undefined).
-
--spec realm_endpoint_revoke(reference()) -> ok.
-realm_endpoint_revoke(_Endpoint) ->
-    erlang:nif_error(undefined).
-
--spec realm_close(reference()) -> ok.
-realm_close(_Realm) ->
-    erlang:nif_error(undefined).
-
-%% Bounded snapshot after closure. An empty list can mean spawn or exit cleanup
-%% is still in flight; only 'done' establishes completion.
--spec realm_stop_members(reference()) -> done | [pid()].
-realm_stop_members(_Realm) ->
-    erlang:nif_error(undefined).
-
-%% Shutdown is resumable by another authorized ancestor holding the same handle.
-%% Arbitrary native code is not preemptible, so completion has no hard deadline.
--spec realm_stop(reference()) -> ok.
-realm_stop(Realm) ->
-    ok = realm_close(Realm),
-    realm_stop_loop(Realm).
-
-realm_stop_loop(Realm) ->
-    lists:foreach(fun realm_stop/1, realm_stop_children(Realm)),
-    case realm_stop_members(Realm) of
-        done -> ok;
-        Pids ->
-            Monitors = [{Pid, erlang:monitor(process, Pid)} || Pid <- Pids],
-            lists:foreach(fun(Pid) -> erlang:exit_signal(Pid, kill) end, Pids),
-            lists:foreach(fun({Pid, Ref}) ->
-                receive {'DOWN', Ref, process, Pid, _} -> ok end
-            end, Monitors),
-            %% Avoid spinning on pending admissions or deferred native cleanup.
-            receive after 1 -> ok end,
-            realm_stop_loop(Realm)
-    end.
 
 
 %%

@@ -4301,9 +4301,6 @@ dist_ctrl_get_data_notification_1(BIF_ALIST_1)
     Eterm receiver = NIL;
     Uint32 conn_id;
 
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-
     if (!dep)
         BIF_ERROR(BIF_P, EXC_NOTSUP);
 
@@ -4362,9 +4359,6 @@ dist_ctrl_put_data_2(BIF_ALIST_2)
     Eterm input_handler;
     Uint32 conn_id;
     Binary *bin = NULL;
-
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (is_list(BIF_ARG_2)) {
         BIF_TRAP2(dist_ctrl_put_data_trap,
@@ -4441,9 +4435,6 @@ dist_ctrl_set_opt_3(BIF_ALIST_3)
     Uint32 conn_id;
     BIF_RETTYPE ret;
 
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-
     if (!dep)
         BIF_ERROR(BIF_P, EXC_NOTSUP);
 
@@ -4487,9 +4478,6 @@ dist_ctrl_get_opt_2(BIF_ALIST_2)
     Uint32 conn_id;
     BIF_RETTYPE ret;
 
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-
     if (!dep)
         BIF_ERROR(BIF_P, EXC_NOTSUP);
 
@@ -4527,11 +4515,7 @@ dist_get_stat_1(BIF_ALIST_1)
     Eterm res, *hp, **hpp;
     Uint sz, *szp;
     Uint32 conn_id;
-    DistEntry *dep;
-
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-    dep = erts_dhandle_to_dist_entry(BIF_ARG_1, &conn_id);
+    DistEntry *dep = erts_dhandle_to_dist_entry(BIF_ARG_1, &conn_id);
 
     if (!dep)
         BIF_ERROR(BIF_P, BADARG);
@@ -4572,11 +4556,7 @@ BIF_RETTYPE
 dist_ctrl_input_handler_2(BIF_ALIST_2)
 {
     Uint32 conn_id;
-    DistEntry *dep;
-
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-    dep = erts_dhandle_to_dist_entry(BIF_ARG_1, &conn_id);
+    DistEntry *dep = erts_dhandle_to_dist_entry(BIF_ARG_1, &conn_id);
 
     if (!dep)
         BIF_ERROR(BIF_P, EXC_NOTSUP);
@@ -4623,9 +4603,6 @@ dist_ctrl_get_data_1(BIF_ALIST_1)
 #ifdef DEBUG
     Eterm *hendp;
 #endif
-
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (!dep)
         BIF_ERROR(BIF_P, EXC_NOTSUP);
@@ -5027,9 +5004,6 @@ BIF_RETTYPE setnode_2(BIF_ALIST_2)
     Uint32 creation;
     int success;
 
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-
     /* valid creation ? */
     if(!term_to_Uint32(BIF_ARG_2, &creation))
 	goto error;
@@ -5184,14 +5158,10 @@ BIF_RETTYPE erts_internal_create_dist_channel_3(BIF_ALIST_3)
     Port *pp = NULL;
     int true_nk;
     Eterm *tpl;
-    Process *net_kernel;
-
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-    net_kernel = erts_whereis_process(BIF_P, ERTS_PROC_LOCK_MAIN,
-                                     am_net_kernel,
-                                     ERTS_PROC_LOCK_STATUS,
-                                     ERTS_P2P_FLG_INC_REFC);
+    Process *net_kernel = erts_whereis_process(BIF_P, ERTS_PROC_LOCK_MAIN,
+                                               am_net_kernel,
+                                               ERTS_PROC_LOCK_STATUS,
+                                               ERTS_P2P_FLG_INC_REFC);
 
     if (!net_kernel)
         goto badarg;
@@ -5894,9 +5864,6 @@ BIF_RETTYPE erts_internal_dist_spawn_request_4(BIF_ALIST_4)
     int code;
     Uint32 monitor_oflags = 0, monitor_opts_oflags = 0;
 
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-
     add_monitor = 0;
     add_link = 0;
     ok_result = THE_NON_VALUE;
@@ -6295,22 +6262,16 @@ static BIF_RETTYPE nodes(Process *c_p, Eterm node_types, Eterm options);
 
 BIF_RETTYPE nodes_0(BIF_ALIST_0)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     return nodes(BIF_P, am_visible, THE_NON_VALUE);
 }
 
 BIF_RETTYPE nodes_1(BIF_ALIST_1)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     return nodes(BIF_P, BIF_ARG_1, THE_NON_VALUE);
 }
 
 BIF_RETTYPE nodes_2(BIF_ALIST_2)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     return nodes(BIF_P, BIF_ARG_1, BIF_ARG_2);
 }
 
@@ -6718,8 +6679,6 @@ badarg:
 
 BIF_RETTYPE monitor_node_3(BIF_ALIST_3)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     BIF_RET(monitor_node(BIF_P, BIF_ARG_1, BIF_ARG_2, BIF_ARG_3));
 }
 
@@ -6728,8 +6687,6 @@ BIF_RETTYPE monitor_node_3(BIF_ALIST_3)
 
 BIF_RETTYPE monitor_node_2(BIF_ALIST_2)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     BIF_RET(monitor_node(BIF_P, BIF_ARG_1, BIF_ARG_2, NIL));
 }
 
@@ -6803,8 +6760,6 @@ erts_monitor_nodes(Process *c_p, Eterm on, Eterm options)
     ASSERT(c_p);
     ERTS_LC_ASSERT(erts_proc_lc_my_proc_locks(c_p) == ERTS_PROC_LOCK_MAIN);
 
-    if (erts_realm_is_restricted(c_p->realm))
-        return THE_NON_VALUE;
     if (on != am_true && on != am_false)
 	return THE_NON_VALUE;
 

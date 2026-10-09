@@ -165,8 +165,6 @@ static erts_lc_lock_order_t erts_lock_order[] = {
     {"port_sched_lock",			        "port_id"},
     {"msacc_unmanaged_mutex",                   NULL},
     LEVEL,
-    {"realm",                                   "realm_id"},
-    LEVEL,
 #ifdef __WIN32__
     {"pollwaiter",				"address"},
     {"break_waiter_lock",                       NULL},

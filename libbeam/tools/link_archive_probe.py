@@ -64,22 +64,29 @@ def main():
     p.add_argument('--output', type=Path, required=True, help='new directory outside source worktree')
     args = p.parse_args()
     baseline = json.loads(args.baseline.read_text())
-    if baseline.get('status') != 'passed' or baseline.get('variant') != 'debug-emu':
+    if (baseline.get('kind') != 'snapshot_otp_baseline' or
+            baseline.get('status') != 'passed' or baseline.get('variant') != 'debug-emu'):
         p.error('requires a passed debug-emu baseline')
     root = Path(baseline['source_root']).resolve()
     source, output = root / 'beam', args.output.resolve()
+    if baseline.get('otp_source') != str(source):
+        p.error('baseline does not identify this snapshot source layout')
     if output.exists() or output.is_relative_to(root):
         p.error('output must be new and outside the source worktree')
     if git(root, 'rev-parse', 'HEAD') != baseline['revision']:
         p.error('source revision changed since baseline')
     if git(root, 'status', '--porcelain') != baseline['final_worktree']:
         p.error('source worktree status changed since baseline')
+    import subprocess
+    current_diff = subprocess.check_output(['git', '-C', str(root), 'diff', 'HEAD', '--binary'])
+    if hashlib.sha256(current_diff).hexdigest() != baseline.get('final_diff_sha256'):
+        p.error('source contents changed since baseline')
     makefiles = [m for m in (source / 'erts/emulator').glob('*/Makefile')
                  if (source / 'bin' / m.parent.name / 'libbeam.a').is_file()]
     if len(makefiles) != 1:
         p.error('expected exactly one configured Unix emulator target')
-    helper = source / 'scripts/realm-validation.py'
-    spec = importlib.util.spec_from_file_location('realm_validation', helper)
+    helper = Path(__file__).with_name('otp_validation.py').resolve()
+    spec = importlib.util.spec_from_file_location('otp_validation', helper)
     runner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runner)
     tools = Path(__file__).resolve().parent

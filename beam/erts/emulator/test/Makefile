@@ -105,10 +105,6 @@ MODULES= \
 	process_SUITE \
 	process_max_heap_size_SUITE \
 	pseudoknot_SUITE \
-	realm_SUITE \
-	realm_process_SUITE \
-	realm_api_SUITE \
-	realm_resource_SUITE \
 	receive_SUITE \
 	ref_SUITE \
 	register_SUITE \

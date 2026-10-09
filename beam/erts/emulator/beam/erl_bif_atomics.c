@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Copyright Ericsson AB 2018-2025. All Rights Reserved.
- * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,20 +38,16 @@
 #include "erl_binary.h"
 #include "erl_bif_unique.h"
 #include "erl_map.h"
-#include "erl_process.h"
 
 typedef struct
 {
-    ErtsRealm *realm; /* Immutable owner, retained until final magic-ref release. */
     int is_signed;
     UWord vlen;
     erts_atomic64_t v[1];
 }AtomicsRef;
 
-static int atomics_destructor(Binary *bin)
+static int atomics_destructor(Binary *unused)
 {
-    AtomicsRef *p = ERTS_MAGIC_BIN_DATA(bin);
-    erts_deref_realm(p->realm);
     return 1;
 }
 
@@ -65,10 +60,6 @@ BIF_RETTYPE erts_internal_atomics_new_2(BIF_ALIST_2)
     UWord i, cnt, opts;
     Uint bytes;
     Eterm* hp;
-
-    /* Missing execution context must never become implicit host ownership. */
-    if (!BIF_P->realm)
-        BIF_ERROR(BIF_P, BADARG);
 
     if (!term_to_UWord(BIF_ARG_1, &cnt)) {
         BIF_ERROR(BIF_P, cnt);
@@ -98,8 +89,6 @@ BIF_RETTYPE erts_internal_atomics_new_2(BIF_ALIST_2)
                                       ERTS_ALC_T_ATOMICS,
                                       0);
     p = ERTS_MAGIC_BIN_DATA(mbin);
-    p->realm = BIF_P->realm;
-    erts_ref_realm(p->realm);
     p->is_signed = opts & OPT_SIGNED;
     p->vlen = cnt;
     for (i=0; i < cnt; i++)
@@ -108,7 +97,7 @@ BIF_RETTYPE erts_internal_atomics_new_2(BIF_ALIST_2)
     return erts_mk_magic_ref(&hp, &MSO(BIF_P), mbin);
 }
 
-static ERTS_INLINE int get_ref(Process *caller, Eterm ref, AtomicsRef** pp)
+static ERTS_INLINE int get_ref(Eterm ref, AtomicsRef** pp)
 {
     Binary* mbin;
     if (!is_internal_magic_ref(ref))
@@ -118,15 +107,13 @@ static ERTS_INLINE int get_ref(Process *caller, Eterm ref, AtomicsRef** pp)
     if (ERTS_MAGIC_BIN_DESTRUCTOR(mbin) != atomics_destructor)
         return 0;
     *pp = ERTS_MAGIC_BIN_DATA(mbin);
-    /* Possession, ancestry and the legacy process profile grant no resource use.
-     * The reference pins both the array and its owner throughout this BIF. */
-    return caller->realm && caller->realm == (*pp)->realm;
+    return 1;
 }
 
-static ERTS_INLINE int get_ref_ix(Process *caller, Eterm ref, Eterm ix,
+static ERTS_INLINE int get_ref_ix(Eterm ref, Eterm ix,
                                   AtomicsRef** pp, UWord* ixp)
 {
-    return (get_ref(caller, ref, pp)
+    return (get_ref(ref, pp)
             && term_to_UWord(ix, ixp)
             && --(*ixp) < (*pp)->vlen);
 }
@@ -173,7 +160,7 @@ BIF_RETTYPE atomics_put_3(BIF_ALIST_3)
     UWord ix;
     erts_aint64_t val;
 
-    if (!get_ref_ix(BIF_P, BIF_ARG_1, BIF_ARG_2, &p, &ix)
+    if (!get_ref_ix(BIF_ARG_1, BIF_ARG_2, &p, &ix)
         || !get_value(p, BIF_ARG_3, &val)) {
         BIF_ERROR(BIF_P, BADARG);
     }
@@ -186,7 +173,7 @@ BIF_RETTYPE atomics_get_2(BIF_ALIST_2)
     AtomicsRef* p;
     UWord ix;
 
-    if (!get_ref_ix(BIF_P, BIF_ARG_1, BIF_ARG_2, &p, &ix)) {
+    if (!get_ref_ix(BIF_ARG_1, BIF_ARG_2, &p, &ix)) {
         BIF_ERROR(BIF_P, BADARG);
     }
     return bld_atomic(BIF_P, p, erts_atomic64_read_mb(&p->v[ix]));
@@ -198,7 +185,7 @@ BIF_RETTYPE atomics_add_3(BIF_ALIST_3)
     UWord ix;
     erts_aint64_t incr;
 
-    if (!get_ref_ix(BIF_P, BIF_ARG_1, BIF_ARG_2, &p, &ix)
+    if (!get_ref_ix(BIF_ARG_1, BIF_ARG_2, &p, &ix)
         || !get_incr(p, BIF_ARG_3, &incr)) {
         BIF_ERROR(BIF_P, BADARG);
     }
@@ -212,7 +199,7 @@ BIF_RETTYPE atomics_add_get_3(BIF_ALIST_3)
     UWord ix;
     erts_aint64_t incr;
 
-    if (!get_ref_ix(BIF_P, BIF_ARG_1, BIF_ARG_2, &p, &ix)
+    if (!get_ref_ix(BIF_ARG_1, BIF_ARG_2, &p, &ix)
         || !get_incr(p, BIF_ARG_3, &incr)) {
         BIF_ERROR(BIF_P, BADARG);
     }
@@ -225,7 +212,7 @@ BIF_RETTYPE atomics_exchange_3(BIF_ALIST_3)
     UWord ix;
     erts_aint64_t desired, was;
 
-    if (!get_ref_ix(BIF_P, BIF_ARG_1, BIF_ARG_2, &p, &ix)
+    if (!get_ref_ix(BIF_ARG_1, BIF_ARG_2, &p, &ix)
         || !get_value(p, BIF_ARG_3, &desired)) {
         BIF_ERROR(BIF_P, BADARG);
     }
@@ -239,7 +226,7 @@ BIF_RETTYPE atomics_compare_exchange_4(BIF_ALIST_4)
     UWord ix;
     erts_aint64_t expected, desired, was;
 
-    if (!get_ref_ix(BIF_P, BIF_ARG_1, BIF_ARG_2, &p, &ix)
+    if (!get_ref_ix(BIF_ARG_1, BIF_ARG_2, &p, &ix)
         || !get_value(p, BIF_ARG_3, &expected)
         || !get_value(p, BIF_ARG_4, &desired)) {
         BIF_ERROR(BIF_P, BADARG);
@@ -259,7 +246,7 @@ BIF_RETTYPE atomics_info_1(BIF_ALIST_1)
     Eterm keys[4], values[4], res;
     ErtsHeapFactory factory;
 
-    if (!get_ref(BIF_P, BIF_ARG_1, &p))
+    if (!get_ref(BIF_ARG_1, &p))
         BIF_ERROR(BIF_P, BADARG);
 
     erts_factory_proc_init(&factory, BIF_P);

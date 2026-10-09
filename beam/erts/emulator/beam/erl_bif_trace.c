@@ -302,8 +302,6 @@ erts_bif_trace_init(void)
 Eterm
 erts_internal_trace_pattern_3(BIF_ALIST_3)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     if (!erts_try_seize_code_mod_permission(BIF_P)) {
         ERTS_BIF_YIELD3(BIF_TRAP_EXPORT(BIF_erts_internal_trace_pattern_3),
                         BIF_P, BIF_ARG_1, BIF_ARG_2, BIF_ARG_3);
@@ -317,8 +315,6 @@ Eterm
 erts_internal_trace_pattern_4(BIF_ALIST_4)
 {
     ErtsTraceSession* session;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (!erts_try_seize_code_mod_permission(BIF_P)) {
         ERTS_BIF_YIELD4(BIF_TRAP_EXPORT(BIF_erts_internal_trace_pattern_4),
@@ -610,8 +606,6 @@ erts_trace_cleaner_check_0(BIF_ALIST_1)
 {
     ErtsTraceSession *s, *next;
     Binary* bin;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     /*
      * First release our list of cleaned sessions.
@@ -656,8 +650,6 @@ BIF_RETTYPE
 erts_trace_cleaner_send_trace_clean_signal_1(BIF_ALIST_1)
 {
     const Eterm to = BIF_ARG_1;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (BIF_P != erts_trace_cleaner) {
         BIF_ERROR(BIF_P, EXC_NOTSUP);
@@ -897,8 +889,6 @@ start_trace(Process *c_p,
 
 Eterm erts_internal_trace_3(BIF_ALIST_3)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     if (!erts_try_seize_code_mod_permission(BIF_P)) {
         ERTS_BIF_YIELD3(BIF_TRAP_EXPORT(BIF_erts_internal_trace_3),
                         BIF_P, BIF_ARG_1, BIF_ARG_2, BIF_ARG_3);
@@ -910,8 +900,6 @@ Eterm erts_internal_trace_4(BIF_ALIST_4)
 {
     ErtsTraceSession* session;
     Eterm ret;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (!erts_try_seize_code_mod_permission(BIF_P)) {
         ERTS_BIF_YIELD4(BIF_TRAP_EXPORT(BIF_erts_internal_trace_4),
@@ -1243,8 +1231,6 @@ static void free_session(ErtsTraceSession *session)
 Eterm
 erts_internal_trace_session_create_3(BIF_ALIST_3)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     return trace_session_create(BIF_P, BIF_ARG_1, BIF_ARG_2, BIF_ARG_3);
 }
 
@@ -1293,8 +1279,6 @@ Eterm
 erts_internal_trace_session_destroy_1(BIF_ALIST_1)
 {
     ErtsTraceSession* session;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (!erts_try_seize_code_mod_permission(BIF_P)) {
         ERTS_BIF_YIELD1(BIF_TRAP_EXPORT(BIF_erts_internal_trace_session_destroy_1),
@@ -1403,8 +1387,6 @@ Eterm trace_info_2(BIF_ALIST_2)
 {
     bool to_be_continued = false;
     Eterm ret;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (!erts_try_seize_code_mod_permission(BIF_P)) {
         ERTS_BIF_YIELD2(BIF_TRAP_EXPORT(BIF_trace_info_2),
@@ -1426,8 +1408,6 @@ Eterm erts_internal_trace_info_3(BIF_ALIST_3)
     ErtsTraceSession* session;
     bool to_be_continued = false;
     Eterm ret;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (!erts_try_seize_code_mod_permission(BIF_P)) {
         ERTS_BIF_YIELD3(BIF_TRAP_EXPORT(BIF_erts_internal_trace_info_3),
@@ -3045,8 +3025,6 @@ clean_export_entries(BpFunctions* f)
 BIF_RETTYPE seq_trace_2(BIF_ALIST_2)    
 {
     Eterm res;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     res = erts_seq_trace(BIF_P, BIF_ARG_1, BIF_ARG_2, 1);
     if (is_non_value(res)) {
 	BIF_ERROR(BIF_P, BADARG);
@@ -3250,8 +3228,6 @@ BIF_RETTYPE seq_trace_info_1(BIF_ALIST_1)
  */
 BIF_RETTYPE seq_trace_print_1(BIF_ALIST_1)    
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     if (have_no_seqtrace(SEQ_TRACE_TOKEN(BIF_P))) {
 	BIF_RET(am_false);
     }
@@ -3271,8 +3247,6 @@ BIF_RETTYPE seq_trace_print_1(BIF_ALIST_1)
  */
 BIF_RETTYPE seq_trace_print_2(BIF_ALIST_2)    
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     if (have_no_seqtrace(SEQ_TRACE_TOKEN(BIF_P))) {
 	BIF_RET(am_false);
     }
@@ -3411,8 +3385,6 @@ BIF_RETTYPE erts_internal_system_monitor_1(BIF_ALIST_1)
 {
     ErtsTraceSession *session;
     Eterm res;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (BIF_ARG_1 == am_legacy) {
         session = &erts_trace_session_0;
@@ -3434,8 +3406,6 @@ BIF_RETTYPE erts_internal_system_monitor_3(BIF_ALIST_3)
 {
     ErtsTraceSession *session;
     Eterm res;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (BIF_ARG_1 == am_legacy) {
         session = &erts_trace_session_0;
@@ -3786,8 +3756,6 @@ static Eterm system_profile_get(Process *p) {
 
 BIF_RETTYPE system_profile_0(BIF_ALIST_0)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     BIF_RET(system_profile_get(BIF_P));
 }
 
@@ -3801,9 +3769,6 @@ BIF_RETTYPE system_profile_2(BIF_ALIST_2)
     Process *profiler_p = NULL;
     Port *profiler_port = NULL;
     int ts;
-
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (profiler == am_undefined || list == NIL) {
 	prev = system_profile_get(p);
@@ -3934,8 +3899,6 @@ reply_trace_delivered_all(void *vtdarp)
 BIF_RETTYPE
 trace_delivered_1(BIF_ALIST_1)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (BIF_ARG_1 == am_all || is_internal_pid(BIF_ARG_1)) {
         Eterm *hp, ref;

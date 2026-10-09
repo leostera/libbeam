@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Copyright Ericsson AB 2018-2025. All Rights Reserved.
- * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +38,6 @@
 #include "erl_binary.h"
 #include "erl_bif_unique.h"
 #include "erl_map.h"
-#include "erl_process.h"
 
 /*
  * Each logical counter consists of one 64-bit atomic instance per scheduler
@@ -55,7 +53,6 @@
 
 typedef struct
 {
-    ErtsRealm *realm; /* Immutable owner; ordinary process exit does not revoke. */
     UWord arity;
 #ifdef DEBUG
     UWord ulen;
@@ -68,8 +65,6 @@ typedef struct
 
 static int counters_destructor(Binary *mbin)
 {
-    CountersRef *p = ERTS_MAGIC_BIN_DATA(mbin);
-    erts_deref_realm(p->realm);
     return 1;
 }
 
@@ -86,9 +81,6 @@ BIF_RETTYPE erts_internal_counters_new_1(BIF_ALIST_1)
     UWord ui, vi, cnt;
     Uint bytes, cache_lines;
     Eterm* hp;
-
-    if (!BIF_P->realm)
-        BIF_ERROR(BIF_P, BADARG);
 
     if (!term_to_UWord(BIF_ARG_1, &cnt)) {
         BIF_ERROR(BIF_P, cnt);
@@ -107,8 +99,6 @@ BIF_RETTYPE erts_internal_counters_new_1(BIF_ALIST_1)
                                       ERTS_ALC_T_ATOMICS,
                                       0);
     p = ERTS_MAGIC_BIN_DATA(mbin);
-    p->realm = BIF_P->realm;
-    erts_ref_realm(p->realm);
     p->arity = cnt;
 
 #ifdef DEBUG
@@ -122,7 +112,7 @@ BIF_RETTYPE erts_internal_counters_new_1(BIF_ALIST_1)
     return erts_mk_magic_ref(&hp, &MSO(BIF_P), mbin);
 }
 
-static ERTS_INLINE int get_ref(Process *caller, Eterm ref, CountersRef** pp)
+static ERTS_INLINE int get_ref(Eterm ref, CountersRef** pp)
 {
     Binary* mbin;
     if (!is_internal_magic_ref(ref))
@@ -132,17 +122,17 @@ static ERTS_INLINE int get_ref(Process *caller, Eterm ref, CountersRef** pp)
     if (ERTS_MAGIC_BIN_DESTRUCTOR(mbin) != counters_destructor)
         return 0;
     *pp = ERTS_MAGIC_BIN_DATA(mbin);
-    return caller->realm && caller->realm == (*pp)->realm;
+    return 1;
 }
 
-static ERTS_INLINE int get_ref_cnt(Process *caller, Eterm ref, Eterm index,
+static ERTS_INLINE int get_ref_cnt(Eterm ref, Eterm index,
                                    CountersRef** pp,
                                    erts_atomic64_t** app,
                                    UWord sched_ix)
 {
     CountersRef* p;
     UWord ix, ui, vi;
-    if (!get_ref(caller, ref, &p) || !term_to_UWord(index, &ix) || --ix >= p->arity)
+    if (!get_ref(ref, &p) || !term_to_UWord(index, &ix) || --ix >= p->arity)
         return 0;
     ui = (ix / ATOMICS_PER_CACHE_LINE) * ATOMICS_PER_COUNTER + sched_ix;
     vi = ix % ATOMICS_PER_CACHE_LINE;
@@ -152,21 +142,21 @@ static ERTS_INLINE int get_ref_cnt(Process *caller, Eterm ref, Eterm index,
     return 1;
 }
 
-static ERTS_INLINE int get_ref_my_cnt(Process *caller, Eterm ref, Eterm index,
+static ERTS_INLINE int get_ref_my_cnt(Eterm ref, Eterm index,
                                       CountersRef** pp,
                                       erts_atomic64_t** app)
 {
     ErtsSchedulerData *esdp = erts_get_scheduler_data();
     ASSERT(esdp && !ERTS_SCHEDULER_IS_DIRTY(esdp));
     ASSERT(esdp->no > 0 && esdp->no < ATOMICS_PER_COUNTER);
-    return get_ref_cnt(caller, ref, index, pp, app, esdp->no);
+    return get_ref_cnt(ref, index, pp, app, esdp->no);
 }
 
-static ERTS_INLINE int get_ref_first_cnt(Process *caller, Eterm ref, Eterm index,
+static ERTS_INLINE int get_ref_first_cnt(Eterm ref, Eterm index,
                                          CountersRef** pp,
                                          erts_atomic64_t** app)
 {
-    return get_ref_cnt(caller, ref, index, pp, app, 0);
+    return get_ref_cnt(ref, index, pp, app, 0);
 }
 
 static ERTS_INLINE int get_incr(CountersRef* p, Eterm term, erts_aint64_t *valp)
@@ -194,7 +184,7 @@ BIF_RETTYPE erts_internal_counters_get_2(BIF_ALIST_2)
     erts_aint64_t acc = 0;
     int j;
 
-    if (!get_ref_first_cnt(BIF_P, BIF_ARG_1, BIF_ARG_2, &p, &ap)) {
+    if (!get_ref_first_cnt(BIF_ARG_1, BIF_ARG_2, &p, &ap)) {
         BIF_ERROR(BIF_P, BADARG);
     }
     for (j = ATOMICS_PER_COUNTER; j ; --j) {
@@ -210,7 +200,7 @@ BIF_RETTYPE erts_internal_counters_add_3(BIF_ALIST_3)
     erts_atomic64_t* ap;
     erts_aint64_t incr, sum;
 
-    if (!get_ref_my_cnt(BIF_P, BIF_ARG_1, BIF_ARG_2, &p, &ap)
+    if (!get_ref_my_cnt(BIF_ARG_1, BIF_ARG_2, &p, &ap)
         || !get_incr(p, BIF_ARG_3, &incr)) {
         BIF_ERROR(BIF_P, BADARG);
     }
@@ -228,7 +218,7 @@ BIF_RETTYPE erts_internal_counters_put_3(BIF_ALIST_3)
     erts_aint64_t val;
     int j;
 
-    if (!get_ref_first_cnt(BIF_P, BIF_ARG_1, BIF_ARG_2, &p, &first_ap)
+    if (!get_ref_first_cnt(BIF_ARG_1, BIF_ARG_2, &p, &first_ap)
         || !term_to_Sint64(BIF_ARG_3, &val)) {
         BIF_ERROR(BIF_P, BADARG);
     }
@@ -253,7 +243,7 @@ BIF_RETTYPE erts_internal_counters_info_1(BIF_ALIST_1)
     UWord memory;
     Eterm sz_val, mem_val;
 
-    if (!get_ref(BIF_P, BIF_ARG_1, &p))
+    if (!get_ref(BIF_ARG_1, &p))
         BIF_ERROR(BIF_P, BADARG);
 
     memory = erts_magic_ref2bin(BIF_ARG_1)->orig_size;

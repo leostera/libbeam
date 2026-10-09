@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Copyright Ericsson AB 2018-2026. All Rights Reserved.
- * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,9 +37,6 @@
 #include "bif.h"
 #include "erl_map.h"
 #include "erl_binary.h"
-
-/* Temporary profile denial, not a Realm-local persistent-term namespace.
- * Keep the VM-only helper below separate from caller-facing BIF admission. */
 
 /*
  * Parameters for the hash table.
@@ -317,22 +313,16 @@ static int persistent_term_put_common_bin_dtor(Binary *context_bin)
 
 BIF_RETTYPE persistent_term_put_2(BIF_ALIST_2)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     return put_common(BIF_P, BIF_ARG_1, BIF_ARG_2, am_false);
 }
 
 BIF_RETTYPE persistent_term_put_new_2(BIF_ALIST_2)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     return put_common(BIF_P, BIF_ARG_1, BIF_ARG_2, am_true);
 }
 
 BIF_RETTYPE persistent_term_get_0(BIF_ALIST_0)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     HashTable* hash_table;
     TrapData* trap_data;
     Eterm res = NIL;
@@ -389,10 +379,7 @@ erts_persistent_term_get(Eterm key)
 
 BIF_RETTYPE persistent_term_get_1(BIF_ALIST_1)
 {
-    Eterm result;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-    result = persistent_term_get(BIF_ARG_1);
+    Eterm result = persistent_term_get(BIF_ARG_1);
     if (is_non_value(result)) {
         BIF_ERROR(BIF_P, BADARG);
     }
@@ -402,10 +389,7 @@ BIF_RETTYPE persistent_term_get_1(BIF_ALIST_1)
 
 BIF_RETTYPE persistent_term_get_2(BIF_ALIST_2)
 {
-    Eterm result;
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-    result = persistent_term_get(BIF_ARG_1);
+    Eterm result = persistent_term_get(BIF_ARG_1);
     if (is_non_value(result)) {
         result = BIF_ARG_2;
     }
@@ -432,8 +416,6 @@ static int persistent_term_erase_1_ctx_bin_dtor(Binary *context_bin)
 
 BIF_RETTYPE persistent_term_erase_1(BIF_ALIST_1)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     static const Uint ITERATIONS_PER_RED = 32;
     ErtsPersistentTermErase1Context* ctx;
     Eterm state_mref = THE_NON_VALUE;
@@ -568,8 +550,6 @@ BIF_RETTYPE persistent_term_erase_1(BIF_ALIST_1)
 
 BIF_RETTYPE erts_internal_erase_persistent_terms_0(BIF_ALIST_0)
 {
-    if (BIF_P->realm != &erts_host_realm)
-        BIF_ERROR(BIF_P, BADARG);
     HashTable* old_table;
     HashTable* new_table;
 
@@ -588,8 +568,6 @@ BIF_RETTYPE erts_internal_erase_persistent_terms_0(BIF_ALIST_0)
 
 BIF_RETTYPE persistent_term_info_0(BIF_ALIST_0)
 {
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
     HashTable* hash_table;
     TrapData* trap_data;
     Eterm res = NIL;

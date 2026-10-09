@@ -579,9 +579,6 @@ BIF_RETTYPE registered_0(BIF_ALIST_0)
     Uint need;
     ErtsProcLocks proc_locks = ERTS_PROC_LOCK_MAIN;
 
-    if (erts_realm_is_restricted(BIF_P->realm))
-        BIF_ERROR(BIF_P, BADARG);
-
     ERTS_CHK_HAVE_ONLY_MAIN_PROC_LOCK(BIF_P);
     reg_safe_read_lock(BIF_P, &proc_locks);
     if (!proc_locks)

@@ -6,7 +6,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # 
 # Copyright Ericsson AB 1997-2025. All Rights Reserved.
-# Copyright 2026 Leandro Ostera <leandro@ostera.io>
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -301,20 +300,12 @@ fi
 
 CT_NODENAME=${CT_NODENAME:-test_server}
 
-# A released emulator is installed as beam[.TYPE].smp, even when its source
-# build uses the jit or emu flavor. Keep source-build flags for compiling test
-# data above, but select the installed name when starting released Common Test.
-CT_ERL_AFLAGS="${ERL_AFLAGS}"
-if [ "$TEST_NEEDS_RELEASE" = "true" ]; then
-    CT_ERL_AFLAGS="${CT_ERL_AFLAGS} -emu_flavor smp"
-fi
-
 if [ "${WSLcross}" != "true" ]
 then
     if [ -n "${CTRUN_TIMEOUT}" ]; then
         CTRUN_TIMEOUT="timeout -s ABRT --foreground --preserve-status $((${CTRUN_TIMEOUT}+5))m timeout -s USR1 --foreground --preserve-status ${CTRUN_TIMEOUT}m"
     fi
-    ERL_AFLAGS="${CT_ERL_AFLAGS}" $CTRUN_TIMEOUT \
+    ERL_AFLAGS="${ERL_AFLAGS}" $CTRUN_TIMEOUT \
       "${CT_RUN}" -logdir $MAKE_TEST_CT_LOGS \
         -pa "$ERL_TOP/lib/common_test/test_server" \
         -config "$ERL_TOP/lib/common_test/test_server/ts.config" \
@@ -336,7 +327,7 @@ else
     WIN_MAKE_TEST_CT_LOGS=`w32_path.sh -m "$MAKE_TEST_CT_LOGS"`
     WIN_MAKE_TEST_DIR=`w32_path.sh -m "$MAKE_TEST_DIR"`
     WIN_ERL_TOP=`w32_path.sh -m "$ERL_TOP"`
-    ERL_AFLAGS="${CT_ERL_AFLAGS}" "$CT_RUN.exe" -logdir $WIN_MAKE_TEST_CT_LOGS\
+    "$CT_RUN.exe" -logdir $WIN_MAKE_TEST_CT_LOGS\
         -pa "$WIN_ERL_TOP/lib/common_test/test_server"\
         -config "$WIN_ERL_TOP/lib/common_test/test_server/ts.config"\
         -config "$WIN_ERL_TOP/lib/common_test/test_server/ts.win32.config"\

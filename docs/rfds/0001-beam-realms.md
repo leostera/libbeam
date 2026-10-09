@@ -22,8 +22,11 @@ limitations under the License.
 
 # RFD 0001: BEAM Realms for a single-node edge runtime
 
-- **Status:** Historical experimental implementation; design/public API remain draft.
-  Not an implemented security boundary.
+- **Status:** Archived experiment, removed from active `beam/`. Design/public API
+  remain draft; never an approved security boundary. This RFD and its companion
+  `0001-*` evidence refer to `archive/realm-snapshot` (`eb019d92`). Resolve their
+  source links and commands in that historical checkout, not today's clean-upstream
+  snapshot. None of these implementations or test counts describe today's emulator.
 - **Embedding direction:** [RFD 0002](0002-libbeam-isolates.md) proposes host-managed
   isolates and a C++ library proof. It reframes the next implementation effort;
   it does not complete this RFD's open tasks or acceptance gates. Existing evidence

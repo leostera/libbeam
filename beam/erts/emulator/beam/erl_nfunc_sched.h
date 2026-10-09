@@ -204,7 +204,6 @@ erts_flush_dirty_shadow_proc(Process *sproc)
     ERTS_LC_ASSERT(erts_proc_lc_my_proc_locks(c_p)
 		       & ERTS_PROC_LOCK_MAIN);
 
-    ASSERT(c_p->realm == sproc->realm);
     ASSERT(c_p->stop == sproc->stop);
     ASSERT(c_p->hend == sproc->hend);
     ASSERT(c_p->heap == sproc->heap);
@@ -288,8 +287,6 @@ erts_make_dirty_shadow_proc(ErtsSchedulerData *esdp, Process *c_p)
 
     sproc->next = c_p;
     sproc->common.id = c_p->common.id;
-    /* Borrowed while the real process is pinned by dirty execution. */
-    sproc->realm = c_p->realm;
 
     erts_cache_dirty_shadow_proc(sproc);
 

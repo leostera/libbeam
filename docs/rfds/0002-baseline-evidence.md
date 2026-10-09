@@ -24,7 +24,11 @@ limitations under the License.
 
 ## Scope and result
 
-**P0-01's clean local relocated baseline passes.** This is a standalone OTP build
+**Historical evidence for the archived Realm fork, not today's clean-upstream
+snapshot.** See the [transition record](0002-clean-upstream.md). Paths and commands
+below refer to the pre-transition snapshot; the current driver has no Realm profiles.
+
+**At that checkpoint, P0-01's clean local relocated baseline passed.** This is a standalone OTP build
 and selected regression baseline, not the reduced-profile isolate runtime.
 **P0-02 remains open**; the [initial source findings](0002-engine-seams.md) are not
 a complete ownership/positive-list manifest. **P0-03 remains open**: the C++ probe

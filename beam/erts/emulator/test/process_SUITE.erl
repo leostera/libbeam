@@ -4,7 +4,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%
 %% Copyright Ericsson AB 1997-2026. All Rights Reserved.
-%% Copyright 2026 Leandro Ostera <leandro@ostera.io>
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -6106,6 +6105,8 @@ start_ei_node(Config) when is_list(Config) ->
         ++ "-" ++ integer_to_list(erlang:system_time(second))
         ++ "-" ++ integer_to_list(erlang:unique_integer([positive])),
     Cookie = atom_to_list(erlang:get_cookie()),
+    HostName = get_hostname(),
+    Node = list_to_atom(Name++"@"++HostName),
     Creation = integer_to_list(rand:uniform((1 bsl 15) - 4) + 3),
     Parent = self(),
     Pid = spawn_link(fun () ->
@@ -6117,27 +6118,16 @@ start_ei_node(Config) when is_list(Config) ->
                              io:format("Starting ei_node: ~p ~p~n",
                                        [FwdNodeExe, Args]),
                              Port = erlang:open_port({spawn_executable, FwdNodeExe},
-                                                     [use_stdio, {line, 1024}, {args, Args}]),
-                             Node = receive
-                                 {Port, {data, {eol, "accepting " ++ ActualName}}} ->
-                                     list_to_atom(ActualName)
+                                                     [use_stdio, {args, Args}]),
+                             receive
+                                 {Port, {data, "accepting"}} -> ok
                              end,
-                             Parent ! {ei_node_ready, self(), Node},
                              ei_node_handler_loop(Node, Parent, Port)
                      end),
-    %% EI can canonicalize the hostname differently from inet:gethostname/0.
-    %% Distribution requires exact node-name equality, including hostname case.
-    receive
-        {ei_node_ready, Pid, Node} ->
-            put({ei_node_handler, Node}, Pid),
-            case check_ei_node(Node) of
-                ok -> {ok, Node};
-                Error -> Error
-            end
-    after 10000 ->
-            unlink(Pid),
-            erlang:exit_signal(Pid, kill),
-            {error, ei_node_start_timeout}
+    put({ei_node_handler, Node}, Pid),
+    case check_ei_node(Node) of
+        ok -> {ok, Node};
+        Error -> Error
     end.
 
 check_ei_node(Node) ->
@@ -6213,6 +6203,14 @@ fetch_all_messages(Msgs) ->
         0 ->
             Msgs
     end.
+
+get_hostname() ->
+    get_hostname(atom_to_list(node())).
+
+get_hostname([$@ | HostName]) ->
+    HostName;
+get_hostname([_ | Rest]) ->
+    get_hostname(Rest).
 
 receive_any() ->
     receive M -> M end.

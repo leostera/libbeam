@@ -4,7 +4,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Copyright Ericsson AB 1996-2025. All Rights Reserved.
-# Copyright 2026 Leandro Ostera <leandro@ostera.io>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -143,7 +142,6 @@ MODULES = \
 	pg \
 	pg2 \
 	ram_file \
-	realm \
 	rpc \
 	seq_trace \
 	socket \

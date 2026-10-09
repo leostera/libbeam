@@ -23,8 +23,10 @@ limitations under the License.
 # C++ embedding layer (in development)
 
 This directory contains initial build/link probes and will contain libbeam's public
-host interface, implementation, two-isolate example and integration tests. Core emulator changes belong in
-[`../beam/`](../beam/), not in a second copy of the VM here.
+host interface, implementation, two-isolate example and integration tests.
+[`../beam/`](../beam/) is a tracked OTP snapshot. Edit emulator sources directly
+and commit them alongside embedding changes; there is no submodule or patch series.
+No Realm implementation is part of the active source.
 
 [RFD 0002](../docs/rfds/0002-libbeam-isolates.md) defines the first proof and its
 acceptance criteria. No engine header, CMake target or runnable two-isolate example
@@ -38,8 +40,8 @@ budgets and suspend/resume remain explicit follow-on gates, not implemented cont
 
 ## Build and link probes
 
-Use a fresh detached worktree so that stale pre-relocation outputs cannot influence
-the baseline. These commands are implemented (unlike the RFD's future CMake targets):
+Use a fresh detached **libbeam repository** worktree for reproducible builds.
+These commands are implemented (unlike the RFD's future CMake targets):
 
 ```sh
 git worktree add --detach /tmp/libbeam-baseline-source HEAD
@@ -55,9 +57,10 @@ python3 -B libbeam/tools/link_archive_probe.py \
 ```
 
 Both output directories must be new and outside the source worktree. The baseline
-requires clean, unconfigured sources; it configures/builds OTP, regenerates preloads,
-rebuilds, then runs strict standalone legacy regressions. It does not exercise the
-new reduced profile. It shares the user-wide validation lock and records source/tool
+requires clean, unconfigured sources. It configures/builds `beam/`, regenerates
+preloads, rebuilds, then runs 84 focused upstream cases, 35 resource cases and three
+fresh-VM startup probes. There are no Realm suites or patch-application steps.
+It does not exercise the new reduced profile. It shares the user-wide validation lock and records source/tool
 identity, commands, logs, timeouts and child summaries. The lock does not coordinate
 arbitrary unrelated user processes or other users.
 
@@ -70,6 +73,8 @@ linked `erl_start` symbol and runs the host **without invoking it**. Success is
 The probe is experimental and not a portable library packaging interface yet.
 
 Tests: `python3 -B -m unittest discover -s libbeam/tools -p 'test_*.py' -v`.
+Historical Realm validation evidence predates this migration and does not certify
+these sources; see [the clean-upstream transition](../docs/rfds/0002-clean-upstream.md).
 See [initial source findings](../docs/rfds/0002-engine-seams.md) for why linking is
 already possible but host-safe startup, shutdown and instance ownership need work.
 

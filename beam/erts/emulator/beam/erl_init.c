@@ -376,7 +376,6 @@ erl_first_process_otp(char* mod_name, int argc, char** argv)
      */
 
     erts_init_empty_process(&parent);
-    parent.realm = &erts_host_realm;
     erts_proc_lock(&parent, ERTS_PROC_LOCK_MAIN);
 
     hp = HAlloc(&parent, argc*2 + 4);
@@ -445,9 +444,6 @@ erl_system_process_otp(Eterm parent_pid, char* modname, int off_heap_msgq, int p
 Eterm erts_internal_spawn_system_process_3(BIF_ALIST_3) {
     Eterm mod, func, args, res;
     ErlSpawnOpts so;
-
-    if (BIF_P->realm != &erts_host_realm)
-        BIF_ERROR(BIF_P, BADARG);
 
     mod = BIF_ARG_1;
     func = BIF_ARG_2;

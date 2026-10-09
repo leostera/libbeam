@@ -33,7 +33,8 @@ security boundary approved for untrusted workloads.**
 
 ## Layout
 
-- [`beam/`](beam/): Erlang/OTP source snapshot and experimental emulator changes.
+- [`beam/`](beam/): tracked upstream OTP snapshot plus direct libbeam emulator changes.
+  Edit and commit these files normally; there is no submodule or patch-application step.
 - [`libbeam/`](libbeam/): build/link probes and the planned C++ embedding interface,
   two-isolate host example and tests.
 - [`docs/rfds/`](docs/rfds/): design proposals, contracts and historical evidence.
@@ -50,27 +51,32 @@ The [clean-baseline and archive-link probes](libbeam/README.md#build-and-link-pr
 are implemented starting points; they do not initialize independent isolates.
 
 [RFD 0001](docs/rfds/0001-beam-realms.md) documents the earlier Realm experiment.
-Its ownership/lifetime work informs this direction; its test results are not evidence
-that the new embedding architecture exists. Realm inventory tools and their two
-workflows now use the `beam/` / `docs/rfds/` layout. Historical commands/evidence and
-other inherited upstream workflows have not all been migrated or validated.
-Previously configured local build outputs contain old paths: use a clean worktree
-and the baseline driver instead of reusing those outputs.
+Its implementation has been removed from the active emulator. The complete previous
+snapshot remains at `archive/realm-snapshot` (`eb019d92`) in this repository's history.
+Historical source links and commands refer to that snapshot, not today's `beam/`.
+No Realm APIs, quotas, resource guards or process boundaries are carried forward.
+The old evidence is not acceptance for the clean-upstream implementation.
+
+An ordinary clone includes the source. Build in a fresh detached repository worktree
+as described in [`libbeam/README.md`](libbeam/README.md); do not reuse the old Realm
+build outputs. The active workflow checks Python tooling and snapshot layout only.
+Historical Realm and copied upstream workflows have been removed, not counted as passing.
 
 ## Source provenance and licenses
 
 The OTP baseline is upstream commit `cca4e72510a97cfca6427602d3da8a22d5ff7a33`
-(`30.0-rc0`), with the experimental Realm changes described in the RFDs. This
-repository intentionally starts with one source snapshot rather than OTP's Git
-history; old commit IDs in the historical evidence are not ancestors here.
+(`30.0-rc0`), imported directly from `https://github.com/erlang/otp.git`. The only
+initial libbeam-specific source change separates ordinary OTP startup phases in
+`beam/erts/emulator/beam/erl_init.c`; it provides neither engine lifecycle nor isolates.
+See the [transition record](docs/rfds/0002-clean-upstream.md) for snapshot verification.
+This repository retains its own earlier snapshot history, without importing upstream
+Git history or maintaining a separate patch series.
 
 OTP licenses, attribution and bundled third-party notices remain under
 [`beam/LICENSE.txt`](beam/LICENSE.txt), [`beam/LICENSES/`](beam/LICENSES/) and the
 individual source files. See [`beam/README.md`](beam/README.md) for upstream project
 information.
 
-OTP ignore rules live in `beam/.gitignore`. Generated runtime binaries, configured
-build products and test-output trees are not part of the snapshot. Upstream-shipped
-bootstrap/preloaded BEAM files and intentional binary test fixtures **are** source
-inputs and are retained; locally regenerated `erts_internal.beam` is not included
-in place of its upstream bootstrap version.
+Upstream-shipped bootstrap/preloaded BEAM files and intentional binary fixtures
+remain exactly as upstream tracks them. Locally regenerated BEAMs and build output
+belong only in build worktrees, not source commits.

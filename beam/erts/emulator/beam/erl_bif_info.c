@@ -1289,8 +1289,6 @@ process_info_bif(Process *c_p, Eterm pid, Eterm opt, int always_wrap, int pi2)
     int len;
     Eterm res;
 
-    if (!erts_realm_process_access(c_p, pid, 1))
-        BIF_ERROR(c_p, BADARG);
     ERTS_CT_ASSERT(ERTS_PI_DEF_ARR_SZ > 0);
 
     if (is_atom(opt) || is_tuple_arity(opt, 2)) {
@@ -4059,8 +4057,6 @@ fun_info_mfa_1(BIF_ALIST_1)
 
 BIF_RETTYPE erts_internal_is_process_alive_2(BIF_ALIST_2)
 {
-    if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1))
-        BIF_ERROR(BIF_P, BADARG);
     if (!is_internal_pid(BIF_ARG_1) || !is_internal_ordinary_ref(BIF_ARG_2))
         BIF_ERROR(BIF_P, BADARG);
     if (!erts_proc_sig_send_is_alive_request(BIF_P, BIF_ARG_1, BIF_ARG_2)) {
@@ -4072,8 +4068,6 @@ BIF_RETTYPE erts_internal_is_process_alive_2(BIF_ALIST_2)
 
 BIF_RETTYPE is_process_alive_1(BIF_ALIST_1) 
 {
-    if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1))
-        BIF_ERROR(BIF_P, BADARG);
 
     if (is_internal_pid(BIF_ARG_1)) {
         BIF_RETTYPE result;
@@ -4149,8 +4143,6 @@ BIF_RETTYPE erts_internal_process_display_2(BIF_ALIST_2)
 {
     Eterm res;
 
-    if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1))
-        BIF_ERROR(BIF_P, BADARG);
     if (BIF_ARG_2 != am_backtrace)
         BIF_RET(am_badopt);
 
@@ -4948,8 +4940,6 @@ BIF_RETTYPE erts_debug_get_internal_state_1(BIF_ALIST_1)
 
 BIF_RETTYPE erts_internal_is_system_process_1(BIF_ALIST_1)
 {
-    if (!erts_realm_process_access(BIF_P, BIF_ARG_1, 1))
-        BIF_ERROR(BIF_P, BADARG);
     if (is_internal_pid(BIF_ARG_1)) {
 	Process *rp = erts_proc_lookup(BIF_ARG_1);
 	if (rp && (rp->static_flags & ERTS_STC_FLG_SYSTEM_PROC))

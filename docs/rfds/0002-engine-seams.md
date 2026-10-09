@@ -22,6 +22,12 @@ limitations under the License.
 
 # RFD 0002: initial engine/library seam findings
 
+**Source-transition notice:** the runtime evidence below belongs to the archived
+Realm fork. The current `beam/` starts from a clean upstream snapshot, with only
+the startup phase split carried forward as a direct source change. See the
+[clean-upstream transition](0002-clean-upstream.md) for current evidence;
+historical success is not carried over.
+
 Status: **partial P0-02 investigation and internal startup refactoring, not an
 implemented embedding lifecycle**. Initial source inspection was at
 `8a9327f8788e2766fe737e79082f04c6b0f15d81`. The follow-up extracts internal startup

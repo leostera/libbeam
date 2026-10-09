@@ -19,9 +19,10 @@
 #
 # %CopyrightEnd%
 
-"""Run the experimental Realm validation matrix on a configured POSIX checkout.
+"""Validate standalone upstream OTP; no Realm or isolate acceptance is implied.
 
-Only Python's standard library is required. See rfd/0001-validation.md.
+Derived from the historical validation runner, retaining bounded execution,
+strict CT counts and the shared user-wide lock for compatibility with old jobs.
 """
 
 import argparse
@@ -146,22 +147,25 @@ def plan(args):
                       [str(args.root / "bin/erl"), "-emu_type", build_type,
                        "-emu_flavor", flavor, "-noshell", "-eval", probe],
                       "timeout": min(60, args.test_timeout)})
-        if args.profile in ("all", "realms"):
-            steps.append({"name": variant + "-realms", "command": make +
-                          ["emulator_test", "ARGS=-suite realm_SUITE realm_process_SUITE realm_resource_SUITE"],
-                          "expected": {"realm_SUITE": 45, "realm_process_SUITE": 10, "realm_resource_SUITE": 9},
-                          "timeout": args.test_timeout})
+        if args.profile == "startup":
+            fixture = Path(__file__).resolve().parents[1] / "tests/fixtures/startup_probe.erl"
+            steps.append({"name": variant + "-startup-compile", "command":
+                          [str(args.root / "bin/erlc"), "-o", str(args.output), str(fixture)],
+                          "timeout": 60})
+            for iteration in range(3):
+                probe = (f"#{{build_type := {build_type}, flavor := {flavor}}} = "
+                         "startup_probe:run(),io:format(\"STARTUP_OK~n\"),halt().")
+                steps.append({"name": f"{variant}-startup-{iteration}", "command":
+                              [str(args.root / "bin/erl"), "-emu_type", build_type,
+                               "-emu_flavor", flavor, "-noshell", "-pa", str(args.output),
+                               "-eval", probe], "timeout": 60})
         if args.profile == "resources":
             steps.append({"name": variant + "-resources", "command": make +
-                          ["emulator_test", "ARGS=-suite realm_resource_SUITE atomics_SUITE counters_SUITE persistent_term_SUITE"],
-                          "expected": {"realm_resource_SUITE": 9, "atomics_SUITE": 7, "counters_SUITE": 6,
+                          ["emulator_test", "ARGS=-suite atomics_SUITE counters_SUITE persistent_term_SUITE"],
+                          "expected": {"atomics_SUITE": 7, "counters_SUITE": 6,
                                        "persistent_term_SUITE": 22},
                           "timeout": args.test_timeout})
-        if args.profile == "public-api":
-            steps.append({"name": variant + "-public-api", "command": make +
-                          ["emulator_test", "ARGS=-suite realm_api_SUITE"],
-                          "expected": {"realm_api_SUITE": 5}, "timeout": args.test_timeout})
-        cases = FOCUSED if args.profile in ("all", "focused") else []
+        cases = FOCUSED if args.profile == "focused" else []
         if args.profile == "c-node":
             cases = [("c-node", "-suite process_SUITE -case spawn_against_ei_node",
                       {"process_SUITE": 1})]
@@ -213,11 +217,11 @@ def interrupt(signum, frame):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True, help="new output directory")
     parser.add_argument("--variants", nargs="+", choices=VARIANTS,
                         default=DEFAULT_VARIANTS)
-    parser.add_argument("--profile", choices=("all", "realms", "focused", "c-node", "broad", "public-api", "resources"), default="all")
+    parser.add_argument("--profile", choices=("focused", "c-node", "broad", "resources", "startup"), default="focused")
     parser.add_argument("--broad-suites", nargs="+", choices=BROAD, default=list(BROAD),
                         help="full suites for broad discovery; every result requires review")
     parser.add_argument("--cases", nargs="+", help="isolate cases in exactly one broad suite; still requires review")
@@ -255,17 +259,19 @@ def main():
     args.output.mkdir(parents=True, exist_ok=False)
     env = os.environ.copy()
     # Do not let an installed OTP, extra code paths, or implicit flags alter tests.
-    removed = [key for key in ("ERL_FLAGS", "ERL_AFLAGS", "ERL_ZFLAGS", "ERL_LIBS") if key in env]
+    removed = [key for key in ("ERL_FLAGS", "ERL_AFLAGS", "ERL_ZFLAGS", "ERL_LIBS", "ERL_COMPILER_OPTIONS", "ERL_ROOTDIR") if key in env]
     for key in removed:
         del env[key]
     env["ERL_TOP"] = str(args.root)
     env["PATH"] = str(args.root / "bin") + os.pathsep + env.get("PATH", "")
-    env["CT_NODENAME"] = f"realm_validation_{os.getpid()}"
+    env["CT_NODENAME"] = f"libbeam_validation_{os.getpid()}"
     env["ERL_CRASH_DUMP"] = str(args.output / "erl_crash.dump")
     report = {"schema": 1, "revision": git(args.root, "rev-parse", "HEAD").decode().strip(),
               "worktree": git(args.root, "status", "--porcelain").decode(),
               "tracked_diff_sha256": hashlib.sha256(git(args.root, "diff", "HEAD", "--binary")).hexdigest(),
               "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+              "startup_fixture_sha256": hashlib.sha256((Path(__file__).resolve().parents[1] /
+                  "tests/fixtures/startup_probe.erl").read_bytes()).hexdigest() if args.profile == "startup" else None,
               "root": str(args.root), "platform": platform.platform(),
               "machine": platform.machine(), "python": platform.python_version(),
               "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

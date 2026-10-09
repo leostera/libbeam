@@ -92,8 +92,6 @@ atom allocated_areas
 atom allocator
 atom allocator_sizes
 atom alloc_util_allocators
-atom restrict_process_access
-atom allow_create_realms
 atom allow_passive_connect
 atom already_exists
 atom already_loaded
@@ -189,10 +187,6 @@ atom clear
 atom clock_service
 atom close
 atom closed
-atom empty
-atom full
-atom to_host
-atom to_realm
 atom code
 atom command
 atom commandv
@@ -258,7 +252,6 @@ atom dmonitor_node
 atom DollarDollar='$$'
 atom DollarUnderscore='$_'
 atom dollar_endonly
-atom done
 atom dotall
 atom driver
 atom driver_options
@@ -451,8 +444,6 @@ atom match_spec_result
 atom max
 atom maximum
 atom max_heap_size
-atom max_processes
-atom max_realms
 atom mbuf_size
 atom md5
 atom memory

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Copyright Ericsson AB 2021-2025. All Rights Reserved.
- * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,9 +62,7 @@ static void *ei_node_executor(void *unused)
     if (pfd < 0)
 	fail1("ei_publish");
 
-    /* DNS canonicalization may change hostname spelling/case. Report the
-     * exact node name used in the handshake instead of making BEAM guess it. */
-    printf("accepting %s\n", ei_thisnodename(&cnode));
+    printf("accepting");
     fflush(stdout);
 
     while (!0)  {

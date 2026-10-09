@@ -40,7 +40,6 @@
 #endif
 
 typedef struct process Process;
-typedef struct ErtsRealm_ ErtsRealm;
 
 #define ERTS_PROCESS_LOCK_ONLY_PROC_LOCK_TYPE__
 #include "erl_process_lock.h" /* Only pull out important types... */
@@ -1138,12 +1137,6 @@ struct process {
 
     Uint32 static_flags;        /* Flags that do *not* change */
 
-    /* Immutable after publication. Real processes own a reference. */
-    ErtsRealm *realm;
-    /* Intrusive membership, protected by the Realm lock. */
-    Process *realm_prev;
-    Process *realm_next;
-
     /* This is the place, where all fields that differs between memory
      * architectures, have gone to.
      */
@@ -1554,8 +1547,6 @@ extern int ERTS_WRITE_UNLIKELY(erts_default_spo_flags);
 typedef struct {
     int flags;
     int error_code;		/* Error code returned from create_process(). */
-    /* Internal override for host-authorized root creation; NULL inherits. */
-    ErtsRealm *realm;
     Eterm mref;			/* Monitor ref returned (if SPO_MONITOR was given).
                                    (output if local; input if distributed) */
 
@@ -1595,7 +1586,6 @@ typedef struct {
 #define ERTS_SET_DEFAULT_SPAWN_OPTS(SOP)                                \
     do {                                                                \
         (SOP)->flags = erts_default_spo_flags;                          \
-        (SOP)->realm = NULL;                                           \
         (SOP)->opts = NIL;                                              \
         (SOP)->tag = am_spawn_reply;                                    \
         (SOP)->monitor_tag = THE_NON_VALUE;                             \
@@ -2171,36 +2161,6 @@ erts_send_local_spawn_reply(Process *parent, ErtsProcLocks parent_locks,
                             Process *child, Eterm tag, Eterm ref,
                             Eterm result, Eterm token);
 Eterm erl_create_process(Process*, Eterm, Eterm, Eterm, ErlSpawnOpts*);
-
-/* Experimental Realm identity support; does not enforce isolation. */
-typedef struct {
-    int allow_create_realms;
-    int restrict_process_access;
-    Uint max_realms;
-    Uint max_processes;
-} ErtsRealmPolicy;
-
-extern ErtsRealm erts_host_realm;
-void erts_realm_default_policy(ErtsRealm *parent, ErtsRealmPolicy *policy);
-ErtsRealm *erts_create_realm(ErtsRealm *parent, const ErtsRealmPolicy *policy, int *error);
-int erts_realm_can_manage(ErtsRealm *caller, ErtsRealm *target);
-int erts_realm_is_restricted(ErtsRealm *realm);
-int erts_realm_allow_process(ErtsRealm *caller, ErtsRealm *target, int management);
-int erts_realm_process_access(Process *caller, Eterm target, int management);
-int erts_realm_can_spawn_root(ErtsRealm *caller, ErtsRealm *target);
-void erts_ref_realm(ErtsRealm *realm);
-void erts_deref_realm(ErtsRealm *realm);
-Uint erts_realm_id(ErtsRealm *realm);
-Eterm erts_realm_identity(Process *p, ErtsRealm *realm);
-void erts_close_realm(ErtsRealm *realm);
-int erts_realm_stop_members(ErtsRealm *realm, Eterm *pids, Uint capacity, int *done);
-/* Returned children own references, transferred to handles by the caller. */
-int erts_realm_stop_children(ErtsRealm *realm, ErtsRealm **children, Uint capacity);
-Eterm erts_realm_endpoint_create(Process *p, ErtsRealm *realm, int to_host,
-                                 Uint max_messages, Uint max_bytes);
-Eterm erts_realm_endpoint_send(Process *p, Eterm handle, Eterm payload);
-Eterm erts_realm_endpoint_receive(Process *p, Eterm handle);
-Eterm erts_realm_endpoint_revoke(Process *p, Eterm handle);
 void erts_set_self_exiting(Process *, Eterm);
 void erts_do_exit_process(Process*, Eterm);
 void erts_continue_exit_process(Process *);
