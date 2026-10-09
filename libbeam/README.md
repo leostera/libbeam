@@ -103,7 +103,10 @@ callbacks are unsupported. Trusted fixtures only; not a reduced-profile runtime.
 The probe checks nine spawn-port denials, deleted command/signal APIs, absence of
 node bootstrap services and forbidden native symbols, no children at acknowledgement,
 and preserved host signal dispositions, mask and alternate stack. Retained FD
-EOF/close and float operations are exercised too.
+EOF/close and float operations are exercised too. Four additional PTY cases check
+that intentional process exit does not change host stdin flags or terminal
+attributes; see [terminal-ownership evidence](../docs/rfds/0002-terminal-ownership.md).
+Those executable-host tests are not engine-destruction evidence.
 Its three BINDIR cases are absent, nonexistent, and a sentinel-writing canary helper;
 none should execute a helper or command. See the
 [current reduction evidence](../docs/rfds/0002-single-runtime.md) and

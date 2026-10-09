@@ -47,6 +47,40 @@ print("HOST_CONTROL_OK engine_shutdown=false isolates_created=0 process_exit=tru
             self.assertEqual(result['status'], 'passed')
             self.assertFalse(result['engine_shutdown'])
 
+    def test_terminal_observer_accepts_preserved_state(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for nonblocking in (False, True):
+                result = probe.run_terminal_host(
+                    [sys.executable, '-c', 'print("TERMINAL_VM_READY")'],
+                    root, os.environ, root / 'terminal.log', nonblocking=nonblocking)
+                self.assertTrue(result['stdin_flags_preserved'])
+                self.assertTrue(result['stdin_termios_preserved'])
+
+    def test_terminal_observer_detects_blocking_reset(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with self.assertRaisesRegex(RuntimeError, 'mutated host terminal'):
+                probe.run_terminal_host([sys.executable, '-c',
+                    'import os; os.set_blocking(0, True); print("TERMINAL_VM_READY")'],
+                    root, os.environ, root / 'terminal.log', nonblocking=True)
+
+    def test_terminal_observer_detects_termios_mutation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with self.assertRaisesRegex(RuntimeError, 'mutated host terminal'):
+                probe.run_terminal_host([sys.executable, '-c',
+                    'import termios; a=termios.tcgetattr(0); a[3]^=termios.ECHO; '
+                    'termios.tcsetattr(0, termios.TCSANOW, a); print("TERMINAL_VM_READY")'],
+                    root, os.environ, root / 'terminal.log', nonblocking=False)
+
+    def test_terminal_observer_times_out(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with self.assertRaises(TimeoutError):
+                probe.run_terminal_host([sys.executable, '-c', 'import time;time.sleep(60)'],
+                    root, os.environ, root / 'terminal.log', nonblocking=True, timeout=0.1)
+
     def test_missing_markers_times_out(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

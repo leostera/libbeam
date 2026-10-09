@@ -94,6 +94,10 @@ recorded. No regenerated bootstrap binaries belong in the source commit. The
 existing bootstrap/package artifacts have not been certified as a closed profile;
 removing startup constructors does not prove absence of every unused OTP module.
 
+The subsequent [terminal-ownership cut](0002-terminal-ownership.md) removes the
+remaining native break console and process-exit terminal reset, including a
+reproduced host-FD mutation. The evidence above remains the earlier checkpoint.
+
 ## What remains, and why
 
 | Surface | Current decision |

@@ -26,7 +26,6 @@
 #  include "config.h"
 #endif
 
-#define ERTS_WANT_BREAK_HANDLING
 
 #include <stddef.h> /* offsetof() */
 #include "sys.h"
@@ -3248,10 +3247,6 @@ aux_thread(void *vix)
 
 	if (!aux_work) {
 
-#ifdef ERTS_BREAK_REQUESTED
-            if (ix == 0 && ERTS_BREAK_REQUESTED)
-                erts_do_break_handling();
-#endif
 
 	    if (thr_prgr_active)
 		erts_thr_progress_active(tpd, thr_prgr_active = 0);

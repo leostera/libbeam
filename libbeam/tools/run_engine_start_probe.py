@@ -8,6 +8,8 @@ import fcntl
 import hashlib
 import json
 import os
+import pty
+import termios
 from pathlib import Path
 import shlex
 import shutil
@@ -29,6 +31,8 @@ REMOVED_NATIVE_SYMBOLS = {
     'erts_sys_unix_later_init', 'sys_init_signal_stack', 'os_set_signal_2',
     'erl_drv_steal_main_thread', 'erl_drv_stolen_main_thread_join',
     'spawn_driver', 'forker_driver', 'spawn_driver_entry', 'forker_driver_entry',
+    'sys_tty_reset', 'sys_get_key', 'do_break', 'erts_do_break_handling',
+    'erts_break_requested', 'erl_sys_initial_tty_mode', 'using_oldshell',
 }
 
 
@@ -101,6 +105,52 @@ def run_host(command, cwd, env, log, timeout=60):
         os.close(write_fd)
 
 
+def run_terminal_host(command, cwd, env, log, *, nonblocking, exit_code=0, timeout=30):
+    """Observe the host-owned PTY through its shared open file description.
+
+    Only stdin is a terminal; stdout/stderr stay in the bounded evidence log.
+    Process exit is intentional here, not evidence of engine destruction.
+    """
+    master, slave = pty.openpty()
+    process = None
+    start = time.monotonic()
+    try:
+        os.set_blocking(slave, not nonblocking)
+        attrs = termios.tcgetattr(slave)
+        attrs[3] &= ~(termios.ECHO | termios.ICANON)
+        termios.tcsetattr(slave, termios.TCSANOW, attrs)
+        before = termios.tcgetattr(slave)
+        flags = fcntl.fcntl(slave, fcntl.F_GETFL)
+        with log.open('wb') as output:
+            process = subprocess.Popen(command, cwd=cwd, env=env, stdin=slave,
+                                       stdout=output, stderr=subprocess.STDOUT,
+                                       start_new_session=True)
+            while process.poll() is None:
+                if log.stat().st_size > 1024 * 1024:
+                    raise RuntimeError('terminal host output limit exceeded')
+                if time.monotonic() - start > timeout:
+                    raise TimeoutError('terminal host deadline exceeded')
+                time.sleep(0.02)
+        if log.stat().st_size > 1024 * 1024:
+            raise RuntimeError('terminal host output limit exceeded')
+        if (process.returncode != exit_code or
+                log.read_text(errors='replace').splitlines().count('TERMINAL_VM_READY') != 1):
+            raise RuntimeError('terminal bytecode/exit witness failed')
+        if (fcntl.fcntl(slave, fcntl.F_GETFL) != flags or
+                termios.tcgetattr(slave) != before):
+            raise RuntimeError('runtime mutated host terminal state')
+        return {'status': 'passed', 'returncode': process.returncode,
+                'stdin_flags_preserved': True, 'stdin_termios_preserved': True,
+                'nonblocking': nonblocking, 'engine_shutdown': False}
+    except BaseException:
+        if process is not None:
+            runner.stop_group(process)
+        raise
+    finally:
+        os.close(slave)
+        os.close(master)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--root', type=Path, required=True, help='configured OTP source (beam/)')
@@ -135,6 +185,9 @@ def main():
                  source / 'erts/emulator/beam/erl_bif_info.c',
                  source / 'erts/emulator/beam/bif.tab',
                  source / 'erts/emulator/beam/io.c',
+                 source / 'erts/emulator/beam/break.c',
+                 source / 'erts/emulator/nifs/common/prim_tty_nif.c',
+                 source / 'erts/emulator/beam/erl_process.c',
                  source / 'erts/emulator/beam/global.h',
                  source / 'erts/emulator/beam/erl_driver.h',
                  source / 'erts/emulator/Makefile.in',
@@ -234,6 +287,18 @@ def main():
                     step['status'] = 'failed'
                     raise RuntimeError('unsupported executable or forker ran')
                 runner.save(output, report)
+            terminal_vm = archive.parent / 'beam.debug.emu'
+            report['terminal_vm_sha256'] = hashlib.sha256(terminal_vm.read_bytes()).hexdigest()
+            for nonblocking in (False, True):
+                for exit_code in (0, 17):
+                    name = f'terminal-{int(nonblocking)}-{exit_code}'
+                    terminal_command = [str(terminal_vm)] + command[1:command.index('-s')] + [
+                        '-eval', f'io:format("TERMINAL_VM_READY~n"), halt({exit_code}).']
+                    step = {'name': name, 'command': terminal_command, 'status': 'running'}
+                    report['steps'].append(step)
+                    step.update(run_terminal_host(terminal_command, output, env,
+                        output / f'{name}.log', nonblocking=nonblocking, exit_code=exit_code))
+                    runner.save(output, report)
             report['host_sha256'] = hashlib.sha256(host.read_bytes()).hexdigest()
             report['archive_sha256'] = hashlib.sha256(copied.read_bytes()).hexdigest()
             report['status'] = 'started_and_returned_not_shutdown'

@@ -34,7 +34,9 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
-#include <termios.h>
+#ifdef HAVE_FCNTL_H
+#include <fcntl.h>
+#endif
 #include <ctype.h>
 #include <sys/utsname.h>
 #include <sys/select.h>
@@ -43,20 +45,10 @@
 #include <sys/bsdtypes.h>
 #endif
 
-#include <termios.h>
-#ifdef HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
-#ifdef HAVE_SYS_IOCTL_H
-#include <sys/ioctl.h>
-#endif
-
 #ifdef ADDRESS_SANITIZER
 #  include <sanitizer/asan_interface.h>
 #endif
 
-#define ERTS_WANT_BREAK_HANDLING
-#define WANT_NONBLOCKING    /* must define this to pull in defs from sys.h */
 #include "sys.h"
 #include "erl_thr_progress.h"
 
@@ -83,7 +75,6 @@
 #include "erl_osenv.h"
 #include "erl_dyn_lock_check.h"
 extern int  driver_interrupt(int, int);
-extern void do_break(void);
 
 extern void erl_sys_args(int*, char**);
 
@@ -114,22 +105,6 @@ static int crashdump_companion_cube_fd = -1;
 
 /* This is used by both the drivers and general I/O, must be set early */
 static int max_files = -1;
-
-/* 
- * a few variables used by the break handler 
- */
-erts_atomic32_t erts_break_requested;
-#define ERTS_SET_BREAK_REQUESTED \
-  erts_atomic32_set_nob(&erts_break_requested, (erts_aint32_t) 1)
-#define ERTS_UNSET_BREAK_REQUESTED \
-  erts_atomic32_set_nob(&erts_break_requested, (erts_aint32_t) 0)
-
-
-/* set early so the break handler has access to initial mode */
-struct termios erl_sys_initial_tty_mode;
-static int replace_intr = 0;
-/* assume yes initially, ttsl_init will clear it */
-int using_oldshell = 1;
 
 UWord sys_page_size;
 UWord sys_large_page_size;
@@ -171,19 +146,6 @@ erts_sys_misc_mem_sz(void)
     Uint res = erts_check_io_size();
     res += erts_atomic_read_mb(&sys_misc_mem_sz);
     return res;
-}
-
-/*
- * reset the terminal to the original settings on exit
- */
-void sys_tty_reset(int exit_code)
-{
-  if (using_oldshell && !replace_intr) {
-    SET_BLOCKING(0);
-  }
-  else if (isatty(0) && isatty(1)) {
-    tcsetattr(0,TCSANOW,&erl_sys_initial_tty_mode);
-  }
 }
 
 #ifdef __tile__
@@ -372,7 +334,6 @@ erts_sys_pre_init(void)
     erts_init_sys_time_sup();
 
 
-    erts_atomic32_init_nob(&erts_break_requested, 0);
     erts_atomic32_init_nob(&have_prepared_crash_dump, 0);
 
 
@@ -421,11 +382,6 @@ erl_sys_init(void)
 #endif
 
 
-    /* we save this so the break handler can set and reset it properly */
-    /* also so that we can reset on exit (break handler or not) */
-    if (isatty(0)) {
-	tcgetattr(0,&erl_sys_initial_tty_mode);
-    }
 }
 
 /* signal handling */
@@ -717,48 +673,6 @@ void os_version(int *pMajor, int *pMinor, int *pBuild) {
 #endif
 }
 
-void erts_do_break_handling(void)
-{
-    struct termios temp_mode;
-    int saved = 0;
-
-    /*
-     * Most functions that do_break() calls are intentionally not thread safe;
-     * therefore, make sure that all threads but this one are blocked before
-     * proceeding!
-     */
-    erts_thr_progress_block();
-
-    /* during break we revert to initial settings */
-    /* this is done differently for oldshell */
-    if (using_oldshell && !replace_intr) {
-      SET_BLOCKING(1);
-    }
-    else if (isatty(0)) {
-      tcgetattr(0,&temp_mode);
-      tcsetattr(0,TCSANOW,&erl_sys_initial_tty_mode);
-      saved = 1;
-    }
-
-    /* call the break handling function, reset the flag */
-    do_break();
-
-    ERTS_UNSET_BREAK_REQUESTED;
-
-    fflush(stdout);
-
-    /* after break we go back to saved settings */
-    if (using_oldshell && !replace_intr) {
-      SET_NONBLOCKING(1);
-    }
-    else if (saved) {
-      tcsetattr(0,TCSANOW,&temp_mode);
-    }
-
-    erts_thr_progress_unblock();
-}
-
-
 /* Fills in the systems representation of the Beam process identifier.
 ** The Pid is put in STRING representation in the supplied buffer,
 ** no interpretatione of this should be done by the rest of the
@@ -876,33 +790,6 @@ void sys_preload_end(Preload* p)
 {
     /* Nothing */
 }
-
-/* Read a key from console, used by break.c
-   Here we assume that all schedulers are stopped so that erl_poll
-   does not interfere with the select below.
-*/
-int sys_get_key(int fd) {
-    int c, ret;
-    unsigned char rbuf[64] = {0};
-    fd_set fds;
-
-    fflush(stdout);		/* Flush query ??? */
-
-    FD_ZERO(&fds);
-    FD_SET(fd,&fds);
-
-    ret = select(fd+1, &fds, NULL, NULL, NULL);
-
-    if (ret == 1) {
-        do {
-            c = read(fd,rbuf,64);
-        } while (c < 0 && errno == EAGAIN);
-        if (c <= 0)
-            return c;
-    }
-    return rbuf[0];
-}
-
 
 extern int erts_initialized;
 void

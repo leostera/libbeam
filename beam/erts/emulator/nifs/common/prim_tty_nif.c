@@ -1244,16 +1244,9 @@ static ERL_NIF_TERM tty_window_size_nif(ErlNifEnv* env, int argc, const ERL_NIF_
 static ERL_NIF_TERM tty_select_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[]) {
     TTYResource *tty;
 
-#ifndef __WIN32__
-    extern int using_oldshell; /* set this to let the rest of erts know */
-#endif
-
     if (!enif_get_resource(env, argv[0], tty_rt, (void **)&tty))
         return enif_make_badarg(env);
 
-#ifndef __WIN32__
-    using_oldshell = 0;
-#endif
     debug("Select on %d\r\n", tty->ifd);
     enif_select(env, tty->ifd, ERL_NIF_SELECT_READ, tty, NULL, argv[1]);
 

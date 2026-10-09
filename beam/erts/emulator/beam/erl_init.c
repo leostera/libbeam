@@ -2758,7 +2758,6 @@ __decl_noreturn void __noreturn erts_exit_epilogue(int flush)
 {
     int n = erts_exit_code;
 
-    sys_tty_reset(n);
 
 #ifdef ERTS_GCOV
     flush = !0; /* otherwise we get no results... */
