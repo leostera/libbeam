@@ -156,7 +156,7 @@ def main():
     mode.add_argument('--write', action='store_true')
     args = parser.parse_args()
     try:
-        path = args.root / 'rfd/0001-native-surfaces.tsv'
+        path = args.root.resolve().parent / 'docs/rfds/0001-native-surfaces.tsv'
         generated = inventory(args.root)
         if args.write:
             path.write_text(generated)

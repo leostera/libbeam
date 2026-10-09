@@ -22,15 +22,16 @@ name: Realm inventory drift and tooling
 on:
   pull_request:
     paths:
-      - 'erts/emulator/**'
-      - 'scripts/realm-*.py'
-      - 'scripts/realm-*.sh'
-      - 'scripts/realm_*.erl'
-      - 'scripts/test_realm_*.py'
-      - 'rfd/0001-*.tsv'
-      - 'lib/**/c_src/**'
-      - 'lib/**/src/**'
-      - 'erts/preloaded/src/**'
+      - 'beam/erts/emulator/**'
+      - 'beam/scripts/realm-*.py'
+      - 'beam/scripts/realm-*.sh'
+      - 'beam/scripts/realm_*.erl'
+      - 'beam/scripts/test_realm_*.py'
+      - 'docs/rfds/0001-*.tsv'
+      - 'beam/lib/**/c_src/**'
+      - 'beam/lib/**/src/**'
+      - 'beam/erts/preloaded/src/**'
+      - 'libbeam/tools/**'
       - '.github/workflows/realms-runtime.yaml'
       - '.github/workflows/realms-inventory.yaml'
   workflow_dispatch:
@@ -40,10 +41,16 @@ jobs:
   inventory:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: beam
     steps:
       - uses: actions/checkout@v6
       - name: Test validation and inventory tooling
         run: python3 -B -m unittest discover -s scripts -p 'test_realm_*.py' -v
+      - name: Test clean-baseline driver
+        working-directory: .
+        run: python3 -B -m unittest discover -s libbeam/tools -p 'test_*.py' -v
       - name: Detect native surface and review dependency drift
         run: |
           python3 scripts/realm-inventory.py --check

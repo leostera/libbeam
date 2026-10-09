@@ -41,7 +41,7 @@ def validate(report, revision, machine, variant, profile, runner_sha):
         raise ValueError('schema/revision/status/architecture/runner mismatch')
     if not report['platform'].startswith('Linux-') or not report.get('finished_utc'):
         raise ValueError('not a finished Linux run')
-    if any(not re.fullmatch(r' M erts/preloaded/ebin/[^/]+\.beam', line)
+    if any(not re.fullmatch(r' M (?:beam/)?erts/preloaded/ebin/[^/]+\.beam', line)
            for line in report['worktree'].splitlines()):
         raise ValueError('source worktree changed beyond generated preloads')
     expected = ({'public-api': {'realm_api_SUITE': 5}} if profile == 'api' else

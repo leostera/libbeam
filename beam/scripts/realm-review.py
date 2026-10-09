@@ -97,7 +97,7 @@ def main():
     args = parser.parse_args()
     root = args.root.resolve()
     try:
-        path = root / 'rfd/0001-operation-reviews.tsv'
+        path = root.parent / 'docs/rfds/0001-operation-reviews.tsv'
         text = path.read_text()
         rows = read_records(text)
         bifs, _ = inv.dispatch_rows((root / inv.BIFS).read_text(), (root / inv.DIRTY).read_text())

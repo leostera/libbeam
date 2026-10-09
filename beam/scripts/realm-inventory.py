@@ -166,10 +166,10 @@ def main():
     mode.add_argument("--check", action="store_true", help="fail if the recorded dispatch inventory drifted")
     mode.add_argument("--write", action="store_true", help="explicitly regenerate the source-fact inventory")
     parser.add_argument("--surface", choices=("bif", "nif-api"), default="bif")
-    parser.add_argument("--output", type=Path, help="default: ROOT/rfd/0001-SURFACE-inventory.tsv")
+    parser.add_argument("--output", type=Path, help="default: ROOT/../docs/rfds/0001-SURFACE-inventory.tsv (ROOT is beam/)")
     args = parser.parse_args()
     root = args.root.resolve()
-    path = args.output or root / f"rfd/0001-{args.surface}-inventory.tsv"
+    path = args.output or root.parent / f"docs/rfds/0001-{args.surface}-inventory.tsv"
     try:
         generated = inventory(root) if args.surface == "bif" else nif_inventory(root)
         if args.write:

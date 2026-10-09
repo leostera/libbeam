@@ -473,13 +473,18 @@ host process group, with evidence preserved. No hosted result is inferred locall
 
 ## 6. Implementation sequence and source investigation
 
-All items below are open. Each implementation slice must have its own tests and
-reviewable commit; a design document does not check off an implementation step.
+Checkmarks cover only the stated evidence, not the complete isolate runtime. Each
+implementation slice needs tests and a reviewable commit; a design document does
+not check off an implementation step. See the [baseline/link evidence](0002-baseline-evidence.md)
+and [initial engine-seam findings](0002-engine-seams.md).
 
-- [ ] **P0-01 — Reproducible relocated baseline.** Build the source under `beam/`
+- [x] **P0-01 — Reproducible relocated baseline.** Build the source under `beam/`
   from a clean checkout; repair tooling paths deliberately. Inventory scripts and
   workflows inherited from the old root layout are not assumed runnable unchanged.
   Preserve standalone `erl` as the baseline compatibility frontend.
+  **Evidence:** clean ARM64 macOS worktree configure/build/preload rebuild; debug
+  interpreter profiles pass 148 + 44 + 5 test executions. Realm tooling/workflows
+  have relocated paths; other inherited upstream workflows remain unvalidated.
 - [ ] **P0-02 — Engine/instance source map.** Classify globals, locks, caches, startup
   order, OS registrations and asynchronous ownership. Start with `erl_init.c`
   (`erl_start`, `erl_init`, bootstrap/system processes), `erl_process.c/.h`,
@@ -490,9 +495,13 @@ reviewable commit; a design document does not check off an implementation step.
   families. Explicitly locate process-fatal paths and startup-only assumptions.
   Produce the versioned positive-list profile manifest and trace its minimal bootstrap
   dependencies, including deny-before-effect coverage for excluded native operations.
+  **Partial:** concrete startup, process-exit and world-global anchors are mapped in
+  the engine-seam note; the exhaustive ownership map/profile manifest is still open.
 - [ ] **P0-03 — Library entry/exit seam.** Split executable setup/CLI behavior from
   engine construction, execution and shutdown. Link a minimal host, return control
   to it, and destroy an engine normally with zero isolates. One engine only initially.
+  **Partial:** a C++ host links OTP's existing archive and returns normally without
+  starting it. This packaging witness does not satisfy engine create/destroy.
 - [ ] **P0-04 — Isolate context and fresh bootstrap.** Introduce explicit owned state,
   staged initialization/unwind and pre-publication membership. Reuse engine scheduler
   infrastructure; test two live contexts and failed creation cleanup before claiming

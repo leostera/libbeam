@@ -53,6 +53,15 @@ class CIReportTests(unittest.TestCase):
     def test_valid_cell_and_generated_preload(self):
         self.assertEqual(ci.validate(fixture(), SHA, 'x86_64', 'opt-jit', 'api', RUNNER), 5)
 
+    def test_relocated_generated_preload_only(self):
+        f = fixture()
+        f['worktree'] = ' M beam/erts/preloaded/ebin/erts_internal.beam\n'
+        self.assertEqual(ci.validate(f, SHA, 'x86_64', 'opt-jit', 'api', RUNNER), 5)
+        for path in ('beam/erts/emulator/beam/bif.c', 'libbeam/src/engine.cpp',
+                     'beam/erts/preloaded/src/erts_internal.erl'):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                ci.validate({**f, 'worktree': ' M ' + path}, SHA, 'x86_64', 'opt-jit', 'api', RUNNER)
+
     def test_provenance_and_source_changes_fail(self):
         for key, value in [('revision', 'b' * 40), ('machine', 'aarch64'), ('status', 'running'),
                            ('platform', 'macOS-ARM64'), ('runner_sha256', 'other'),

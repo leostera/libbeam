@@ -584,22 +584,25 @@ get_license_templates_from_dir(Path) ->
       end, filelib:wildcard(filename:join(Path,"*.txt"))).
 
 get_vendor_paths(RootPath) ->
-    lists:flatmap(fun get_vendor_path/1, filelib:wildcard(filename:join(RootPath, "**/vendor.info"))).
-get_vendor_path(File) ->
+    lists:flatmap(fun(File) -> get_vendor_path(File, RootPath) end,
+                  filelib:wildcard(filename:join(RootPath, "**/vendor.info"))).
+get_vendor_path(File, RootPath) ->
     {ok, B} = file:read_file(File),
     [_ | _] = Vendors = json:decode(re:replace(B, "^//.*", "", [multiline, global, {return, binary}])),
     lists:flatmap(
         fun(V) ->
                 case maps:get(~"path", V) of
                     Path when is_binary(Path) ->
-                        filelib:is_dir(binary_to_list(Path)) orelse
+                        AbsPath = filename:join(RootPath, binary_to_list(Path)),
+                        filelib:is_dir(AbsPath) orelse
                             fail("~ts: path must be a directory or an array of files", [File]),
-                        [filename:absname(Path)];
+                        [filename:absname(AbsPath)];
                     Paths ->
                         [begin
-                            not filelib:is_dir(binary_to_list(P)) orelse
+                            AbsPath = filename:join(RootPath, binary_to_list(P)),
+                            not filelib:is_dir(AbsPath) orelse
                                 fail("~ts: path must be a directory or an array of files", [File]),
-                            filename:absname(P)
+                            filename:absname(AbsPath)
                          end || P <- Paths]
                 end
         end, Vendors).
@@ -686,7 +689,12 @@ get_rootdir(#{ path := Paths }) ->
             true -> Path;
             false -> filename:dirname(Path)
         end,
-    string:trim(cmd("cd " ++ DirPath ++ " && git rev-parse --show-toplevel")).
+    RepoRoot = string:trim(cmd("cd " ++ DirPath ++ " && git rev-parse --show-toplevel")),
+    OtpRoot = filename:join(RepoRoot, "beam"),
+    case filelib:is_dir(filename:join(OtpRoot, "FILE-HEADERS")) of
+        true -> OtpRoot;
+        false -> RepoRoot
+    end.
 
 get_files_from_dir(Dir) ->
     Filenames = cmd("git ls-tree -z -r --name-only HEAD " ++ Dir),

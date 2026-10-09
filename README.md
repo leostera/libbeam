@@ -34,7 +34,8 @@ security boundary approved for untrusted workloads.**
 ## Layout
 
 - [`beam/`](beam/): Erlang/OTP source snapshot and experimental emulator changes.
-- [`libbeam/`](libbeam/): planned C++ embedding interface, host example and tests.
+- [`libbeam/`](libbeam/): build/link probes and the planned C++ embedding interface,
+  two-isolate host example and tests.
 - [`docs/rfds/`](docs/rfds/): design proposals, contracts and historical evidence.
 
 Start with [RFD 0002: libbeam isolates](docs/rfds/0002-libbeam-isolates.md).
@@ -44,14 +45,17 @@ teardown/recreation without restarting the engine. The latency objective is
 single-digit milliseconds to **first execution**, not application completion.
 Concurrent density, execution budgets/eviction and suspend/resume have separate
 tracked gates; 1,000 sequential proof cycles do not prove 1,000 resident isolates.
-Its build commands are proposed interfaces, not commands supported by this checkout.
+Its two-isolate CMake commands are proposed interfaces, not supported targets yet.
+The [clean-baseline and archive-link probes](libbeam/README.md#build-and-link-probes)
+are implemented starting points; they do not initialize independent isolates.
 
 [RFD 0001](docs/rfds/0001-beam-realms.md) documents the earlier Realm experiment.
 Its ownership/lifetime work informs this direction; its test results are not evidence
-that the new embedding architecture exists. Older scripts, workflows and evidence
-use the former repository-root OTP layout and require an explicit relocation pass
-before they can be used as current validation. Previously configured local build
-outputs also contain old paths: use a clean build for relocation validation.
+that the new embedding architecture exists. Realm inventory tools and their two
+workflows now use the `beam/` / `docs/rfds/` layout. Historical commands/evidence and
+other inherited upstream workflows have not all been migrated or validated.
+Previously configured local build outputs contain old paths: use a clean worktree
+and the baseline driver instead of reusing those outputs.
 
 ## Source provenance and licenses
 
