@@ -174,6 +174,13 @@ erl_sys_late_init(void)
 
     sys_signal(SIGPIPE, SIG_IGN); /* Ignore - we'll handle the write failure */
 
+    /* Executable ports are not part of libbeam. Do not create their helper,
+     * sockets or environment state merely to start the embedded runtime. */
+    if (erts_is_embedded()) {
+        erts_sys_unix_later_init();
+        return;
+    }
+
     opts.packet_bytes = 0;
     opts.use_stdio = 1;
     opts.redir_stderr = 0;
@@ -480,6 +487,12 @@ static ErlDrvData spawn_start(ErlDrvPort port_num, char* name,
     char wd_buff[MAXPATHLEN+1];
     char *wd, *cwd;
     int ifd[2], ofd[2], stderrfd;
+
+    /* Defense at the effectful entry as well as the public BIF boundary. */
+    if (erts_is_embedded()) {
+        errno = ENOTSUP;
+        return ERL_DRV_ERROR_ERRNO;
+    }
 
     if (pipe(ifd) < 0) return ERL_DRV_ERROR_ERRNO;
     errno = EMFILE;		/* default for next three conditions */
@@ -1597,6 +1610,11 @@ static ErlDrvData forker_start(ErlDrvPort port_num, char* name,
     size_t bindirsz = sizeof(bindir);
     Uint csp_path_sz;
     char *child_setup_prog;
+
+    if (erts_is_embedded()) {
+        errno = ENOTSUP;
+        return ERL_DRV_ERROR_ERRNO;
+    }
 
     forker_port = erts_drvport2id(port_num);
 

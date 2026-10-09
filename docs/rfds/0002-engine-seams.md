@@ -121,8 +121,9 @@ The system-process regression fixture checks the existing six housekeeping proce
 one high-priority code purger, one high-priority literal-area collector, three dirty
 signal handlers (normal/high/max), and one normal-priority trace cleaner. All have
 off-heap message queues and system-process flags. It separately checks OTP init and
-ordinary spawn/monitor progress. This protects standalone behavior while the startup
-boundary changes; these are not six proposed per-isolate workers.
+ordinary spawn/monitor progress. These were first-refactor diagnostics, not a
+requirement to retain standalone behavior or six proposed per-isolate workers.
+The current direction is to remove runtime behaviors libbeam does not need.
 
 ## 3. Shutdown is process termination, not an object destructor
 
@@ -134,7 +135,8 @@ wrapped in a C++ RAII object.
 
 Required separation:
 
-1. Keep standalone `erl`'s CLI/process-exit behavior as a frontend policy.
+1. Make host-managed lifecycle the product policy. Keep standalone `erl` only where
+   currently needed for build/debug tooling, not as a compatibility requirement.
 2. Give library creation explicit success/failure/unwind instead of CLI usage/exit.
 3. Introduce isolate stop/drain/reclaim without triggering global system-process
    death semantics or engine termination.

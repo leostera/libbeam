@@ -14,15 +14,17 @@ extern "C" {
  *
  * Must run once on the host main thread, with no concurrent startup calls.
  * Uses the normal emulator command-line arguments; retain their mutable storage
- * for the lifetime of the process. BINDIR must name the absolute configured
- * emulator directory (normally supplied by erlexec); ordinary native forker/port
- * support is retained. This is NOT the proposed reduced bytecode profile.
+ * for the lifetime of the process. Embedded startup omits the native forker;
+ * executable ports (spawn/spawn_executable) return notsup before effects.
+ * BINDIR is not required. Other native effects remain: this is NOT a complete
+ * reduced bytecode profile or an approved isolation boundary.
  * Initializes the REAL global OTP runtime and
  * starts its threads, then returns instead of occupying the host main thread.
  * Return does not acknowledge completion of asynchronous OTP boot/application
  * execution. There are no tenant isolates and no local code/atom namespaces.
  *
- * Takes process-wide signal/alternate-stack ownership. CLI errors, boot failure,
+ * Takes process-wide signal/alternate-stack ownership, except that startup
+ * leaves the host's SIGCHLD disposition unchanged. CLI errors, boot failure,
  * halt and fatal runtime errors can still terminate the host. No engine shutdown,
  * signal restoration, restart, unload or physical reclamation is implemented.
  * Runtime threads remain live until PROCESS EXIT. Darwin wx/Cocoa main-thread

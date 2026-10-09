@@ -3,6 +3,11 @@
 
 # RFD 0002: real emulator startup returning to a C++ host
 
+**Historical first-start checkpoint (`5a6f348b`).** The forker/BINDIR dependency
+and SIGCHLD takeover described here have since been removed from embedded startup;
+see [the runtime-reduction record](0002-minimal-runtime.md). The original evidence
+is retained, not a description of every current requirement.
+
 ## Implemented boundary
 
 The POSIX-only experimental native entry

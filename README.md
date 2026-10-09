@@ -27,6 +27,9 @@ independently owned, reduced-profile Erlang execution worlds on demand. A C++ ho
 would manage isolate lifecycle; ordinary Erlang programs would not need isolate-
 management APIs. Tenants supply BEAM bytecode only: no native extensions, ambient
 filesystem/network access or full conventional OTP-node environment is promised.
+We strip OTP down to what libbeam needs; preserving `erl` or full OTP behavior is
+not a goal. Legacy failures matter only when they reveal a problem in required
+runtime behavior or supported language semantics.
 
 **The public C++ Engine/Isolate API and isolate proof are not implemented yet. An
 experimental native startup entry runs BEAM and returns to its host, but cannot
@@ -51,6 +54,9 @@ Its two-isolate CMake commands are proposed interfaces, not supported targets ye
 The [build/link probes](libbeam/README.md#build-and-link-probes) and
 [real-runtime startup-return experiment](docs/rfds/0002-engine-start-evidence.md)
 are implemented starting points; they do not initialize independent isolates.
+Embedded startup now omits the native forker and rejects executable ports; see
+[the first runtime reduction](docs/rfds/0002-minimal-runtime.md). Other native effects
+remain, so this is not yet an enforced bytecode-only profile.
 
 [RFD 0001](docs/rfds/0001-beam-realms.md) documents the earlier Realm experiment.
 Its implementation has been removed from the active emulator. The complete previous

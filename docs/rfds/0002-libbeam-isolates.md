@@ -27,6 +27,11 @@ limitations under the License.
   creation of independently owned, reduced-profile Erlang execution worlds. Expose
   lifecycle to a C++ embedder, not to tenant Erlang programs. The direction is adopted
   for the proof; API details and implementation remain draft.
+- **Runtime scope:** Strip the emulator to the minimum needed for host-managed
+  engines and isolates. Preserving `erl`, full OTP-node behavior, legacy startup,
+  native drivers or process-global administration is not a requirement. Keep legacy
+  machinery only where needed for development/bootstrap, outside the guest contract.
+  Existing OTP regression tests are diagnostic aids, not a mandate for compatibility.
 - **Tenant contract:** BEAM bytecode only, a closed approved native runtime surface,
   and no ambient OS authority. This is a deliberately supported subset, not an
   attempt to instantiate a complete conventional Erlang/OTP node per isolate.
@@ -74,6 +79,13 @@ contracts and tests. There is no existing `ErtsRealm` owner to inherit or migrat
 Nested Realms are not required by this proof.
 
 ## 2. Goals and exclusions
+
+For every failure, ask whether the behavior is needed for libbeam. Fix failures in
+required engine/isolate lifecycle and supported BEAM semantics. If the behavior is
+not needed, remove it or classify it unsupported rather than restoring legacy OTP
+compatibility. A rejected unsupported operation must still fail safely before its
+excluded effects; memory corruption, host termination or leaks in supported paths
+are not ignorable compatibility failures.
 
 ### Goals
 
@@ -483,7 +495,8 @@ and [initial engine-seam findings](0002-engine-seams.md).
   in an external worktree
   from a clean checkout; repair tooling paths deliberately. Inventory scripts and
   workflows inherited from the old root layout are not assumed runnable unchanged.
-  Preserve standalone `erl` as the baseline compatibility frontend.
+  Standalone `erl` may remain as temporary build/debug tooling, but preserving its
+  behavior is not a product requirement or an ongoing compatibility gate.
   **Reset:** previous 148 + 44 + 5 results belong to the archived Realm fork.
   **Fresh evidence:** snapshot `87d63923` configure/build/preload rebuild, 84 focused
   + 35 resource cases, three startup probes and archive link all pass on ARM64 macOS

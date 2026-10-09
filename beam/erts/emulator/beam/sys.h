@@ -826,6 +826,8 @@ extern char *erts_sys_ddll_error(int code);
 /*
  * System interfaces for startup.
  */
+/* Internal process-lifetime embedding mode; not tenant authority. */
+int erts_is_embedded(void);
 void erts_sys_main_thread(void);
 #ifndef __WIN32__
 void erts_sys_prepare_start_return(void);

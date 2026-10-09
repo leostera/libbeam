@@ -64,6 +64,12 @@ def build_plan(source, jobs, configure_args):
     ]
 
 
+def validation_profiles(legacy_diagnostics):
+    # The standalone toolchain smoke remains useful for compiling fixtures.
+    # Full OTP compatibility is not a libbeam acceptance requirement.
+    return ("focused", "resources", "startup") if legacy_diagnostics else ("startup",)
+
+
 def git(root, *args):
     return subprocess.check_output(["git", "-C", str(root), *args]).decode().strip()
 
@@ -87,6 +93,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--legacy-diagnostics", action="store_true",
+                        help="also run selected legacy OTP suites; not an embedding compatibility promise")
     parser.add_argument("--jobs", type=positive, default=4)
     parser.add_argument("--configure-arg", action="append", default=[])
     parser.add_argument("--variant", choices=("opt-jit", "debug-jit", "opt-emu", "debug-emu"),
@@ -115,6 +123,7 @@ def main():
               "driver_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               "runner_sha256": hashlib.sha256(runner_path.read_bytes()).hexdigest(),
               "platform": platform.platform(), "variant": args.variant,
+              "legacy_diagnostics": args.legacy_diagnostics,
               "removed_environment_keys": removed, "steps": [],
               "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     lock_path = Path(tempfile.gettempdir()) / f"otp-realm-validation-{os.getuid()}.lock"
@@ -137,12 +146,12 @@ def main():
                     raise RuntimeError(f"{name}: {step['status']}")
         # Each validation subprocess takes the same lock itself, including its build.
         # Never hold it in this parent while starting a validation subprocess.
-        for profile in ("focused", "resources", "startup"):
+        for index, profile in enumerate(validation_profiles(args.legacy_diagnostics)):
             command = [sys.executable, "-B", str(runner_path), "--root", str(source),
                        "--output", str(output / profile), "--variants", args.variant,
                        "--profile", profile, "--jobs", str(args.jobs),
                        "--build-timeout", str(args.timeout), "--test-timeout", str(args.timeout)]
-            if profile != "focused":
+            if index > 0:
                 command.append("--skip-build")
             print(profile, flush=True)
             step = {"name": profile, "command": command, "status": "running"}

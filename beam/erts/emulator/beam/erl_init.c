@@ -106,6 +106,14 @@ static void start_runtime_threads(void);
 static void erl_start_common(int argc, char **argv, int return_to_host);
 /* Startup is restricted to one host control thread and one attempt per process. */
 static int start_claimed;
+static int embedded_mode;
+
+/* Selected before initialization, immutable after startup on the host thread. */
+int
+erts_is_embedded(void)
+{
+    return embedded_mode;
+}
 
 static erts_atomic_t exiting;
 
@@ -1318,6 +1326,7 @@ erl_start_embedded(int argc, char **argv)
     if (start_claimed)
         return 1;
     start_claimed = 1;
+    embedded_mode = 1;
     sys_init_signal_stack();
     erl_start_common(argc, argv, 1);
     return 0;

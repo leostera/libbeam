@@ -47,6 +47,11 @@ class BaselineTests(unittest.TestCase):
         self.assertEqual(plan[2][1][-1], '--no-commit')
         self.assertEqual(plan[3][1], ['make', '-j4'])
 
+    def test_legacy_compatibility_suites_are_opt_in(self):
+        self.assertEqual(baseline.validation_profiles(False), ('startup',))
+        self.assertEqual(baseline.validation_profiles(True),
+                         ('focused', 'resources', 'startup'))
+
     def test_positive_counts(self):
         self.assertEqual(baseline.positive('4'), 4)
         for value in ('0', '-1'):

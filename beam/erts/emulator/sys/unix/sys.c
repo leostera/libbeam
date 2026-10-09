@@ -819,7 +819,8 @@ erts_sys_unix_later_init(void)
 
     /* Ignore SIGCHLD to ensure orphaned processes don't turn into zombies on
      * death when we're pid 1. */
-    sys_signal(SIGCHLD, SIG_IGN);
+    if (!erts_is_embedded())
+        sys_signal(SIGCHLD, SIG_IGN);
 }
 
 int sys_max_files(void)

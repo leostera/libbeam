@@ -10,13 +10,15 @@ import run_engine_start_probe as probe
 
 
 class EngineStartProbeTests(unittest.TestCase):
-    def test_requires_exactly_one_pair_in_same_pid(self):
+    def test_requires_host_bytecode_and_denial_markers(self):
         host = 'HOST_STARTUP_RETURNED pid=123 second_start=rejected\n'
-        beam = 'BEAM_STARTUP_OK pid=123\n'
+        beam = ('BEAM_STARTUP_OK pid=123\n'
+                'EXECUTABLE_PORTS_DENIED checks=7 forker_port=false\n')
         self.assertTrue(probe.host_markers(host + beam, 123))
         self.assertTrue(probe.host_markers(beam + host, 123))
         for text in (host, beam, host + beam + beam, host + beam.replace('123', '124'),
-                     host + beam + 'BEAM_STARTUP_OK pid=999\n'):
+                     host + beam + 'BEAM_STARTUP_OK pid=999\n',
+                     host + 'BEAM_STARTUP_OK pid=123\n'):
             self.assertFalse(probe.host_markers(text, 123))
 
     def test_private_control_handshake(self):
@@ -24,7 +26,9 @@ class EngineStartProbeTests(unittest.TestCase):
 pid=os.getpid()
 print(f"HOST_STARTUP_RETURNED pid={pid} second_start=rejected", flush=True)
 print(f"BEAM_STARTUP_OK pid={pid}", flush=True)
+print("EXECUTABLE_PORTS_DENIED checks=7 forker_port=false", flush=True)
 assert os.read(int(os.environ['LIBBEAM_PROBE_CONTROL_FD']),1)==b'X'
+print("HOST_NO_CHILDREN sigchld_preserved=true", flush=True)
 print("HOST_CONTROL_OK engine_shutdown=false isolates_created=0 process_exit=true", flush=True)
 '''
         with tempfile.TemporaryDirectory() as temp:

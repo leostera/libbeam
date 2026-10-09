@@ -26,9 +26,11 @@ import otp_validation as runner
 def host_markers(text, pid):
     host = f'HOST_STARTUP_RETURNED pid={pid} second_start=rejected'
     beam = f'BEAM_STARTUP_OK pid={pid}'
+    denied = 'EXECUTABLE_PORTS_DENIED checks=7 forker_port=false'
     lines = [line for line in text.splitlines()
-             if line.startswith(('HOST_STARTUP_RETURNED ', 'BEAM_STARTUP_OK '))]
-    return sorted(lines) == sorted([host, beam])
+             if line.startswith(('HOST_STARTUP_RETURNED ', 'BEAM_STARTUP_OK ',
+                                 'EXECUTABLE_PORTS_DENIED '))]
+    return sorted(lines) == sorted([host, beam, denied])
 
 
 def run_host(command, cwd, env, log, timeout=60):
@@ -60,12 +62,16 @@ def run_host(command, cwd, env, log, timeout=60):
             process.wait(timeout=max(0.1, timeout - (time.monotonic() - start)))
             text = log.read_text(errors='replace')
             terminal = 'HOST_CONTROL_OK engine_shutdown=false isolates_created=0 process_exit=true'
-            if process.returncode != 0 or text.splitlines().count(terminal) != 1:
+            if (process.returncode != 0 or text.splitlines().count(terminal) != 1
+                    or text.splitlines().count('HOST_NO_CHILDREN sigchld_preserved=true') != 1
+                    or not host_markers(text, process.pid)):
                 raise RuntimeError('host control witness failed')
             return {'status': 'passed', 'pid': process.pid, 'returncode': process.returncode,
                     'seconds': round(time.monotonic() - start, 3),
                     'same_pid_bytecode': True, 'second_start': 'rejected',
-                    'engine_shutdown': False, 'isolates_created': 0}
+                    'engine_shutdown': False, 'isolates_created': 0,
+                    'executable_port_denials': 7, 'forker_port': False,
+                    'no_children_at_ack': True, 'sigchld_preserved': True}
     except BaseException:
         if process is not None:
             runner.stop_group(process)
@@ -103,6 +109,8 @@ def main():
                  fixtures / 'startup_probe.erl', fixtures / 'engine_start_probe.erl',
                  source / 'erts/emulator/beam/erl_embed.h',
                  source / 'erts/emulator/beam/erl_init.c', source / 'erts/emulator/beam/sys.h',
+                 source / 'erts/emulator/beam/erl_bif_port.c',
+                 source / 'erts/emulator/sys/unix/sys_drivers.c',
                  source / 'erts/emulator/sys/unix/sys.c']:
         report['inputs'][str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -136,11 +144,8 @@ def main():
             archive = Path(settings['ARCHIVE']).resolve()
             if archive.name != 'libbeam.a' or not archive.is_relative_to(source / 'bin'):
                 raise RuntimeError('unexpected generated archive path')
-            # Direct native entry bypasses erlexec, which normally supplies this
-            # environment value for OTP's ordinary native forker driver.
-            env['BINDIR'] = str(archive.parent)
-            report['bindir'] = env['BINDIR']
-            report['native_forker'] = 'retained_ordinary_otp_support'
+            env.pop('BINDIR', None)
+            report['native_forker'] = 'disabled_in_embedding'
             archive.unlink(missing_ok=True)
             run('archive', make + [str(archive)], cwd)
             copied = output / 'libbeam.debug.emu.a'
@@ -155,10 +160,27 @@ def main():
                        '-root', str(source), '-bindir', str(archive.parent), '-progname', 'libbeam-probe',
                        '--', '-home', str(output), '--', '-noshell', '-noinput', '-pa', str(output),
                        '-s', 'engine_start_probe', 'run']
+            canary_dir = output / 'forker-canary'
+            canary_dir.mkdir()
+            forker_sentinel = output / 'forker-executed'
+            canary = canary_dir / 'erl_child_setup'
+            canary.write_text('#!/bin/sh\nprintf FORKER_STARTED > ' +
+                              shlex.quote(str(forker_sentinel)) + '\nexit 99\n')
+            canary.chmod(0o700)
             for i in range(args.iterations):
-                step = {'name': f'host-{i}', 'command': command, 'status': 'running'}
+                host_env = dict(env)
+                bindir = (None, str(output / 'missing-bindir'), str(canary_dir))[i % 3]
+                if bindir is not None:
+                    host_env['BINDIR'] = bindir
+                sentinel = output / f'exec-{i}.sentinel'
+                host_env['LIBBEAM_PROBE_EXEC_SENTINEL'] = str(sentinel)
+                step = {'name': f'host-{i}', 'command': command, 'status': 'running',
+                        'bindir': bindir}
                 report['steps'].append(step)
-                step.update(run_host(command, output, env, output / f'host-{i}.log'))
+                step.update(run_host(command, output, host_env, output / f'host-{i}.log'))
+                if sentinel.exists() or forker_sentinel.exists():
+                    step['status'] = 'failed'
+                    raise RuntimeError('unsupported executable or forker ran')
                 runner.save(output, report)
             report['host_sha256'] = hashlib.sha256(host.read_bytes()).hexdigest()
             report['archive_sha256'] = hashlib.sha256(copied.read_bytes()).hexdigest()

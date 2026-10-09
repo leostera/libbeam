@@ -66,6 +66,16 @@ BIF_RETTYPE erts_internal_open_port_2(BIF_ALIST_2)
     int err_type, err_num;
     ErtsLink *proc_lnk, *port_lnk;
 
+    /* Reject the unsupported family before option parsing, environment merging,
+     * driver lookup, port creation or native effects. The public erlang wrapper
+     * raises error:notsup for this internal result, as for other error atoms. */
+    if (erts_is_embedded() && is_tuple(BIF_ARG_1)) {
+        Eterm *name = tuple_val(BIF_ARG_1);
+        if (arityval(name[0]) == 2
+            && (name[1] == am_spawn || name[1] == am_spawn_executable))
+            BIF_RET(am_notsup);
+    }
+
     port = open_port(BIF_P, BIF_ARG_1, BIF_ARG_2, &err_type, &err_num);
     if (!port) {
 	if (err_type == -4) {
