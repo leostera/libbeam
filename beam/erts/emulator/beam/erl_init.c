@@ -103,9 +103,9 @@ static void erl_init(int ncpu,
 /* Internal startup phases, not reentrant embedding APIs. */
 static void start_otp_world(char *init, int boot_argc, char **boot_argv);
 static void start_runtime_threads(void);
-static void erl_start_common(int argc, char **argv);
+static void prepare_runtime(int argc, char **argv);
 /* Startup is restricted to one host control thread and one attempt per process. */
-static int start_claimed;
+static enum ErlRuntimeStartupPhase startup_phase = ERL_RUNTIME_UNCLAIMED;
 
 static erts_atomic_t exiting;
 
@@ -313,7 +313,6 @@ erl_init(int ncpu,
     erts_init_node_tables(node_tab_delete_delay);
     init_dist();
     erl_drv_thr_init();
-    erts_init_async();
     erts_init_io(port_tab_sz, port_tab_sz_ignore_files, legacy_port_tab);
     init_load();
     erts_init_bif();
@@ -1295,28 +1294,68 @@ early_init(int *argc, char **argv) /*
 void
 erl_start(int argc, char **argv)
 {
-    start_claimed = 1;
-    erl_start_common(argc, argv);
+    if (startup_phase != ERL_RUNTIME_UNCLAIMED)
+        erts_exit(ERTS_ERROR_EXIT, "Runtime initialization already claimed\n");
+    startup_phase = ERL_RUNTIME_PREPARING;
+    prepare_runtime(argc, argv);
+    start_otp_world(init, boot_argc, boot_argv);
+    start_runtime_threads();
     /* Temporary command-line tool host: keep the process alive until halt.
      * This is the same runtime contract, not an unrestricted legacy mode. */
     erts_sys_main_thread();
 }
 
 #ifndef __WIN32__
-/* Experimental process-lifetime bring-up only; see erl_embed.h. */
+/* Experimental unbooted preparation. No OTP bootstrap or thread launch. */
+int
+erl_prepare_runtime(int argc, char **argv)
+{
+    if (startup_phase != ERL_RUNTIME_UNCLAIMED)
+        return 1;
+    startup_phase = ERL_RUNTIME_PREPARING;
+    prepare_runtime(argc, argv);
+    return 0;
+}
+
+/* Process-lifetime diagnostic host, not the Engine constructor. */
 int
 erl_start_embedded(int argc, char **argv)
 {
-    if (start_claimed)
+    if (erl_prepare_runtime(argc, argv) != 0)
         return 1;
-    start_claimed = 1;
-    erl_start_common(argc, argv);
+    start_otp_world(init, boot_argc, boot_argv);
+    start_runtime_threads();
     return 0;
 }
 #endif
 
+enum ErlRuntimeStartupPhase
+erl_runtime_startup_phase(void)
+{
+    return startup_phase;
+}
+
+int
+erl_prepared_runtime_inventory(ErlPreparedRuntimeInventory *out)
+{
+    if (startup_phase != ERL_RUNTIME_PREPARED)
+        return 1;
+    out->processes = erts_ptab_count(&erts_proc);
+    out->ports = erts_ptab_count(&erts_port);
+    out->loaded_code_bytes = erts_total_code_size;
+    out->init_process_created = erts_init_process_id != ERTS_INVALID_PID;
+    out->system_process_roots = !!erts_code_purger + !!erts_literal_area_collector
+        + !!erts_dirty_process_signal_handler + !!erts_dirty_process_signal_handler_high
+        + !!erts_dirty_process_signal_handler_max + !!erts_trace_cleaner;
+    return 0;
+}
+
+/* Legacy argument parsing is retained temporarily for native diagnostics.
+ * This prepares global substrate/tables, NOT an isolate, and never bootstraps OTP.
+ * A typed, recoverable initializer and ownership-aware cleanup are still needed.
+ */
 static void
-erl_start_common(int argc, char **argv)
+prepare_runtime(int argc, char **argv)
 {
     int i = 1;
     char* arg=NULL;
@@ -2544,19 +2583,17 @@ erl_start_common(int argc, char **argv)
              module_tab_sz,
              export_tab_sz);
 
-    start_otp_world(init, boot_argc, boot_argv);
-    start_runtime_threads();
-
-    /* The runtime always returns to its host. No node signal dispatcher or
-     * main-thread driver pump is part of this fork's execution contract. */
+    startup_phase = ERL_RUNTIME_PREPARED;
 }
 
 /* Populate the conventional, global OTP world before any scheduler runs.
- * This phase remains mandatory for standalone erl. It is not an isolate
- * constructor: code indices, init and housekeeping pointers are still global. */
+ * Only the legacy diagnostic/command-line host requests this phase. Runtime
+ * preparation never calls it. It is not an isolate constructor: code indices,
+ * init and housekeeping pointers are still global. */
 static void
 start_otp_world(char *init, int boot_argc, char **boot_argv)
 {
+    ASSERT(startup_phase == ERL_RUNTIME_PREPARED);
     load_preloaded();
     erts_end_staging_code_ix();
     erts_commit_staging_code_ix();
@@ -2632,7 +2669,7 @@ start_otp_world(char *init, int boot_argc, char **boot_argv)
         erts_proc_inc_refc(erts_trace_cleaner);
 
     }
-
+    startup_phase = ERL_RUNTIME_OTP_BOOTSTRAPPED;
 }
 
 /* Thread launch is separate from OTP-world construction and frontend handoff.
@@ -2641,7 +2678,11 @@ start_otp_world(char *init, int boot_argc, char **boot_argv)
 static void
 start_runtime_threads(void)
 {
+    /* Neither message dispatch nor async workers belong to preparation. */
+    erts_start_sys_msg_dispatcher();
+    erts_start_async_workers();
     erts_start_schedulers();
+    startup_phase = ERL_RUNTIME_THREADS_STARTED;
 
 #ifdef ERTS_ENABLE_LOCK_COUNT
     erts_lcnt_post_startup();

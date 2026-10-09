@@ -166,6 +166,8 @@ void erts_system_profile_clear(Process *c_p);
 
 /* erl_trace.c */
 void erts_init_trace(void);
+/* Thread launch is separate from queue/trace metadata initialization. */
+void erts_start_sys_msg_dispatcher(void);
 void erts_trace_check_exiting(Eterm exiting);
 ErtsTracer erts_set_system_seq_tracer(Process *c_p,
                                       ErtsProcLocks c_p_locks,

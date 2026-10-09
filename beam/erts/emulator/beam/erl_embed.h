@@ -12,6 +12,28 @@
 extern "C" {
 #endif
 
+/* Lifecycle phases, not embedded/standalone modes. Read on the one host control
+ * thread only; concurrent preparation/startup/query is unsupported. */
+enum ErlRuntimeStartupPhase {
+    ERL_RUNTIME_UNCLAIMED,
+    ERL_RUNTIME_PREPARING,
+    ERL_RUNTIME_PREPARED,
+    ERL_RUNTIME_OTP_BOOTSTRAPPED,
+    ERL_RUNTIME_THREADS_STARTED
+};
+enum ErlRuntimeStartupPhase erl_runtime_startup_phase(void);
+
+typedef struct {
+    size_t processes;
+    size_t ports;
+    size_t loaded_code_bytes;
+    int init_process_created;
+    int system_process_roots;
+} ErlPreparedRuntimeInventory;
+/* Returns 0 only during PREPARED, before concurrent execution can mutate tables.
+ * Returns 1 otherwise, leaving the caller's output untouched. */
+int erl_prepared_runtime_inventory(ErlPreparedRuntimeInventory *out);
+
 /* Thread handles retained by erts_start_schedulers. Async workers are tracked
  * separately by erl_async.c; this is NOT a census of all engine/native threads.
  * Query only on the startup/control thread, before startup or after it returns.
@@ -63,6 +85,17 @@ void erl_scheduler_thread_inventory(ErlSchedulerThreadInventory *out);
  */
 #if !defined(_WIN32) && !defined(__WIN32__)
 int erl_start_embedded(int argc, char **argv);
+
+/* Experimental unbooted preparation diagnostic. Initializes global substrate
+ * and empty tables, but does NOT load preloaded BEAM code, create init/system
+ * processes, or launch runtime threads. Does not construct an isolate or claim
+ * private namespaces. Existing CLI parsing/native effects/fatal initialization
+ * errors remain; mutable argv must stay alive. Preparation is once per process,
+ * not rollback/restart capable. Returns 0 on preparation, 1 if already claimed.
+ * No reclamation yet: allocated global state remains process-lifetime. Do NOT
+ * use this as the public Engine factory before ownership/cleanup is implemented.
+ */
+int erl_prepare_runtime(int argc, char **argv);
 #endif
 
 #ifdef __cplusplus

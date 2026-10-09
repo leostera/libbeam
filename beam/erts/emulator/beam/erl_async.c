@@ -141,7 +141,7 @@ async_ready_q(Uint sched_id)
 
 
 void
-erts_init_async(void)
+erts_start_async_workers(void)
 {
     async = NULL;
     if (erts_async_max_threads > 0) {

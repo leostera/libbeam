@@ -37,13 +37,12 @@ Reclamation::~Reclamation() = default;
 
 Result<Engine> Engine::create() {
 #ifdef LIBBEAM_LINKED_ERTS
-    ErlSchedulerThreadInventory threads{};
-    erl_scheduler_thread_inventory(&threads);
-    if (threads.total != 0)
-        return Error{ErrorCode::invalid_state, "Engine::create: runtime already started"};
-    // Linking and retaining thread handles are not a stop protocol. In particular,
-    // do not call erl_start_embedded and then unwind through an empty destructor.
-    return missing("Engine::create (ERTS linked; cooperative stop/join still required)");
+    if (erl_runtime_startup_phase() != ERL_RUNTIME_UNCLAIMED)
+        return Error{ErrorCode::invalid_state, "Engine::create: runtime initialization already claimed"};
+    // Preparation no longer boots OTP or launches threads. Its global allocations
+    // still need ownership/cleanup before a real Engine can safely unwind.
+    // Never use erl_start_embedded (the whole-world diagnostic) as this factory.
+    return missing("Engine::create (ERTS linked; unbooted initialization cleanup still required)");
 #else
     return missing("Engine::create");
 #endif

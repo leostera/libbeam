@@ -4,7 +4,7 @@
 
 // EXPERIMENTAL API: signatures express the target contract below.
 // Operations remain unimplemented. A linked ERTS build also checks native
-// lifecycle state before reporting the missing cooperative stop/join protocol.
+// lifecycle state before reporting missing unbooted initialization cleanup.
 // This API does not yet start BEAM, create worlds, or claim a stable public ABI.
 #include <chrono>
 #include <cstddef>

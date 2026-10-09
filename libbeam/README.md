@@ -30,7 +30,10 @@ The [implementation plan](../docs/rfds/0002-example-implementation-plan.md) trac
 the real engine, private worlds, execution and reclamation work ahead.
 [Native archive integration](../docs/rfds/0002-native-api-link.md) now connects the
 C++ target to actual ERTS and retains joinable scheduler-thread handles. The public
-factory still refuses startup until cooperative stop/join and cleanup exist.
+factory still refuses initialization until ownership/cleanup exists.
+[Unbooted preparation](../docs/rfds/0002-unbooted-preparation.md) now initializes
+native substrate without starting OTP processes or workers. The engine path must
+not reuse whole-world startup.
 [`../beam/`](../beam/) is a tracked OTP snapshot. Edit emulator sources directly
 and commit them alongside embedding changes; there is no submodule or patch series.
 No Realm implementation is part of the active source.

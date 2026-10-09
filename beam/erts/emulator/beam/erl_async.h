@@ -36,7 +36,8 @@ void *erts_get_async_ready_queue(Uint sched_id);
 #define ERTS_ASYNC_READY_DIRTY 1
 #define ERTS_ASYNC_READY_NEED_THR_PRGR 2
 
-void erts_init_async(void);
+/* Allocates queues AND starts workers; call during thread launch, not prepare. */
+void erts_start_async_workers(void);
 void erts_exit_flush_async(void);
 
 #endif /* ERL_ASYNC_H__ */

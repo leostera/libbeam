@@ -312,7 +312,7 @@ static void enqueue_sys_msg(enum ErtsSysMsgType type,
 			    Eterm msg,
 			    ErlHeapFragment *bp,
                             ErtsTraceSession*);
-static void init_sys_msg_dispatcher(void);
+static void init_sys_msg_queue(void);
 
 static void init_tracer_nif(void);
 static int tracer_cmp_fun(void*, void*);
@@ -337,7 +337,7 @@ void erts_init_trace(void) {
     erts_system_profile_clear(NULL);
     system_seq_tracer = erts_tracer_nil;
     erts_atomic_init_nob(&system_logger, am_logger);
-    init_sys_msg_dispatcher();
+    init_sys_msg_queue();
     init_tracer_nif();
 }
 
@@ -2900,17 +2900,23 @@ erts_debug_foreach_sys_msg_in_q(void (*func)(Eterm,
 
 
 static void
-init_sys_msg_dispatcher(void)
+init_sys_msg_queue(void)
 {
-    erts_thr_opts_t thr_opts = ERTS_THR_OPTS_DEFAULT_INITER;
-    thr_opts.detached = 1;
-    thr_opts.name = "erts_smsg_disp";
     init_smq_element_alloc();
     sys_message_queue = NULL;
     sys_message_queue_end = NULL;
     erts_cnd_init(&smq_cnd);
     erts_mtx_init(&smq_mtx, "sys_msg_q", NIL,
         ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_DEBUG);
+}
+
+void
+erts_start_sys_msg_dispatcher(void)
+{
+    /* Queue preparation must not launch a process-lifetime worker. */
+    erts_thr_opts_t thr_opts = ERTS_THR_OPTS_DEFAULT_INITER;
+    thr_opts.detached = 0;
+    thr_opts.name = "erts_smsg_disp";
     erts_thr_create(&sys_msg_dispatcher_tid,
 			sys_msg_dispatcher_func,
 			NULL,

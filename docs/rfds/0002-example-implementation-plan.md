@@ -18,10 +18,11 @@ operation. The example turns that into a visible error and nonzero exit status.
 implementation work.
 
 **Current frontier: `Engine::create`.** The native build can now link ERTS and
-query its real thread inventory, but the public API does not start a VM or construct
-an isolate. No successful reply or lifecycle status is simulated. See
-[native linking and retained thread handles](0002-native-api-link.md) for partial
-M1 progress and the remaining cooperative stop/join blocker.
+prepare native substrate without booting OTP or starting workers in a dedicated
+diagnostic, but the public API does not yet initialize an owned Engine or construct
+an isolate. See [unbooted preparation](0002-unbooted-preparation.md) for evidence and
+the remaining unbooted-state ownership/cleanup gate. No successful handle or
+lifecycle completion is simulated.
 The opaque implementation structs contain no runtime state and are never allocated
 by the failing factories. Their default destructors are safe only for this empty
 scaffold; they are not a future ownership strategy.
@@ -59,18 +60,23 @@ claimed for this scaffold-only change.
 
 **API:** `Engine::create`, `Engine::shutdown`, move/destructor behavior.
 
-**Partial progress:** native archive/dependency integration and retained joinable
-scheduler/auxiliary/poll/supervision handles are implemented and startup-tested.
-The public factory remains closed pending safe stop/join and cleanup. M1 is not
-complete; joinable creation alone is not thread termination or reclamation.
+**Partial progress:** native archive integration, retained joinable scheduler-family
+handles, and a preparation-only native entry are implemented. Preparation is now
+separate from OTP bootstrap and worker launch; its witness observes zero processes,
+ports, loaded BEAM code, system-process roots and new OS threads. M1 is not complete:
+global preparation allocations still lack scoped ownership and reclamation.
 
-- Integrate one actual emulator archive into the library target. Reuse the existing
-  returning-startup experiment as source material, not as proof of destruction.
-- Separate engine-owned schedulers, async/poll/auxiliary workers, clocks and shared
-  immutable metadata from guest worlds. Any temporary bootstrap world is explicitly
-  engine-owned, not an isolate or a substitute for private namespaces.
-- Add startup readiness/error reporting, staged initialization and recoverable
-  unwind. Define a coordinated stop/wakeup/join protocol for runtime threads.
+- Integrate one actual emulator archive. **Do not call whole-world startup from
+  Engine creation**, or boot a temporary OTP world inside the Engine. The old
+  returning-startup probe is diagnostic evidence only, not the implementation path.
+- Separate shared native infrastructure from world-specific tables. The current
+  unbooted diagnostic still initializes global tables; move private namespace
+  construction to isolate contexts as M2 proceeds.
+- Make unbooted initialization owned, typed and recoverable. Do not make destruction
+  of the old running OTP world a prerequisite for this work.
+- Activate shared execution workers explicitly without implicit `init`, Kernel,
+  code-server, logging or application bootstrap. Add readiness/error reporting and
+  coordinated stop/wakeup/join ownership for those workers.
 - Establish ownership during error unwinding **before** returning a real Engine:
   the example will immediately encounter another unfinished operation and unwind.
   Never retain the scaffold's empty destructor around a live emulator, silently
@@ -206,8 +212,9 @@ density, budgets or suspend/resume gates. The first workload remains trusted.
 
 ## Current next action
 
-Work on M1's engine ownership/stop seam and its zero-isolate host-survival test,
-while mapping M2/M3's private-world dependencies. Do not advance the example by
+Work on ownership and cleanup of M1's unbooted substrate, while moving M2/M3's
+world-specific namespace initialization out of shared preparation. Engine execution
+workers must be explicitly owned and activated without booting an OTP world. Do not advance the example by
 returning a default Engine, empty Isolate, canned reply or successful no-op teardown.
 Keep the existing native startup probe as diagnostic evidence until the new API
 can meet its actual ownership contract.

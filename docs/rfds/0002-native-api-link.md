@@ -3,6 +3,11 @@
 
 # Native API linking and retained scheduler thread handles
 
+Historical checkpoint at `4141efd3`. Its proposal to tackle running-world stop/join
+first is superseded by [unbooted preparation](0002-unbooted-preparation.md): Engine
+initialization must not reuse OTP-world startup, nor wait for that world's teardown.
+The evidence and factory diagnostic below describe this earlier checkpoint.
+
 This is a **partial M1** implementation from the
 [example-driven plan](0002-example-implementation-plan.md), not a working Engine
 factory, engine destruction, or an isolate milestone.

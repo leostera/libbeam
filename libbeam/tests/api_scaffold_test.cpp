@@ -23,7 +23,8 @@ int main() {
 #ifdef LIBBEAM_TEST_NATIVE
     ErlSchedulerThreadInventory threads{};
     erl_scheduler_thread_inventory(&threads);
-    if (threads.total != 0 || error->message.find("ERTS linked") == std::string::npos)
+    if (threads.total != 0 || erl_runtime_startup_phase() != ERL_RUNTIME_UNCLAIMED ||
+        error->message.find("ERTS linked") == std::string::npos)
         return 2; // Safe preflight must not start scheduler threads.
 #endif
     return 0;

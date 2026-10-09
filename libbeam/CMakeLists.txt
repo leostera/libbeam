@@ -23,6 +23,8 @@ if(LIBBEAM_ERTS_PACKAGE)
     add_executable(engine_start_probe examples/engine_start_probe.cpp)
     target_link_libraries(engine_start_probe PRIVATE libbeam::libbeam libbeam_erts)
     target_compile_definitions(engine_start_probe PRIVATE LIBBEAM_PROBE_CPP_PREFLIGHT=1)
+    add_executable(engine_prepare_probe examples/engine_prepare_probe.cpp)
+    target_link_libraries(engine_prepare_probe PRIVATE libbeam::libbeam libbeam_erts)
 endif()
 
 add_executable(two_isolates examples/two_isolates.cpp)
@@ -35,6 +37,14 @@ if(BUILD_TESTING)
     if(LIBBEAM_ERTS_PACKAGE)
         target_link_libraries(api_scaffold_test PRIVATE libbeam_erts)
         target_compile_definitions(api_scaffold_test PRIVATE LIBBEAM_TEST_NATIVE=1)
+        foreach(workers IN ITEMS 0 1 4)
+            add_test(NAME native_prepare_without_otp_async_${workers}
+                COMMAND engine_prepare_probe -S 2:2 -SDcpu 1:1 -SDio 1 -A ${workers}
+                -i libbeam_boot_must_not_run -- -root /libbeam-missing-root --
+                -boot /libbeam-missing-boot -s libbeam_boot_must_not_run run)
+            set_tests_properties(native_prepare_without_otp_async_${workers} PROPERTIES
+                TIMEOUT 20)
+        endforeach()
     endif()
     add_test(NAME api_scaffold_reports_missing_engine COMMAND api_scaffold_test)
 endif()
