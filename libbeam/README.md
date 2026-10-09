@@ -30,6 +30,10 @@ example executable and integration tests. Core emulator changes belong in
 acceptance criteria. No engine header, CMake target or runnable example exists yet.
 The initial interface is intended to manage one engine and multiple freshly created
 isolates with bounded binary requests/results and explicit stop/reclamation.
+Tenants run a positive-list BEAM-bytecode profile, not a complete OTP node; no
+arbitrary native extensions or ambient OS capabilities are part of that contract.
+First-execution latency is distinct from completion time. CPU/deadline/memory
+budgets and suspend/resume remain explicit follow-on gates, not implemented controls.
 
 Keep HTTP routing and deployment orchestration above this library. Do not implement
 "isolates" by spawning `erl` subprocesses, assigning prebooted instances or renaming

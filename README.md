@@ -23,8 +23,10 @@ limitations under the License.
 # libbeam
 
 An experimental project to turn BEAM into an embeddable engine that creates fresh,
-independently owned Erlang execution worlds on demand. A C++ host would manage
-isolate lifecycle; ordinary Erlang programs would not need isolate-management APIs.
+independently owned, reduced-profile Erlang execution worlds on demand. A C++ host
+would manage isolate lifecycle; ordinary Erlang programs would not need isolate-
+management APIs. Tenants supply BEAM bytecode only: no native extensions, ambient
+filesystem/network access or full conventional OTP-node environment is promised.
 
 **The embedding API and isolate proof are not implemented yet. This is not a
 security boundary approved for untrusted workloads.**
@@ -38,8 +40,11 @@ security boundary approved for untrusted workloads.**
 Start with [RFD 0002: libbeam isolates](docs/rfds/0002-libbeam-isolates.md).
 It specifies the first executable proof: one native host, two simultaneously live
 isolates with conflicting same-name modules, independent local state, and safe
-teardown/recreation without restarting the engine. Its build commands are proposed
-interfaces, not commands supported by the current checkout.
+teardown/recreation without restarting the engine. The latency objective is
+single-digit milliseconds to **first execution**, not application completion.
+Concurrent density, execution budgets/eviction and suspend/resume have separate
+tracked gates; 1,000 sequential proof cycles do not prove 1,000 resident isolates.
+Its build commands are proposed interfaces, not commands supported by this checkout.
 
 [RFD 0001](docs/rfds/0001-beam-realms.md) documents the earlier Realm experiment.
 Its ownership/lifetime work informs this direction; its test results are not evidence

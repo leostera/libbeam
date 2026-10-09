@@ -23,9 +23,13 @@ limitations under the License.
 # RFD 0002: libbeam — an embeddable BEAM engine with fresh isolates
 
 - **Status:** Draft architecture and executable-proof specification. Not implemented.
-- **Decision proposed:** Separate process-wide engine initialization from creation of
-  independently owned Erlang execution worlds. Expose lifecycle to a C++ embedder,
-  not to tenant Erlang programs.
+- **Architectural direction:** Separate process-wide engine initialization from
+  creation of independently owned, reduced-profile Erlang execution worlds. Expose
+  lifecycle to a C++ embedder, not to tenant Erlang programs. The direction is adopted
+  for the proof; API details and implementation remain draft.
+- **Tenant contract:** BEAM bytecode only, a closed approved native runtime surface,
+  and no ambient OS authority. This is a deliberately supported subset, not an
+  attempt to instantiate a complete conventional Erlang/OTP node per isolate.
 - **First deliverable:** A native executable linked against libbeam that creates two
   fresh isolates, runs conflicting same-name modules concurrently in lifetime,
   destroys one without disturbing the other, then creates a fresh replacement.
@@ -51,8 +55,9 @@ policy and negative-test evidence, but code and several services remain global.
 
 This RFD changes the center of the design:
 
-> Initialize one engine. Instantiate a fresh Erlang world on demand. Let ordinary
-> Erlang code behave as though that world is its entire BEAM.
+> Initialize one engine. Instantiate a fresh, reduced-profile Erlang world on
+> demand. Preserve ordinary semantics for supported operations, without exposing
+> a filesystem, native extension loader or the full conventional node environment.
 
 We call that world an **isolate**. The embedder, not a tenant program, creates,
 configures, loads and destroys it. There is no mandatory tenant `isolate:create`
@@ -81,8 +86,12 @@ new isolate before integrating it. Nested Realms are not required by this proof.
 6. Stopping and reclaiming an isolate does not halt the host or another isolate.
 7. An orchestrator can deliver bounded events and observe results without owning
    or retaining raw BEAM heap pointers.
-8. Creation, activation, execution and physical destruction costs are measured
-   separately; no V8-equivalent latency or density is assumed.
+8. Target single-digit-millisecond time to **first application execution**, not
+   completion, with local precompiled artifacts and an initialized engine. Measure
+   creation, load/bootstrap, scheduling delay, execution and destruction separately.
+9. Support thousands of simultaneously resident small isolates as a scale objective,
+   not an inference from a sequential creation loop. No V8-equivalent density is
+   assumed; memory and CPU contention must be measured.
 
 ### Not part of the first proof
 
@@ -90,8 +99,10 @@ new isolate before integrating it. Nested Realms are not required by this proof.
 - A public, stable ABI, several independent engines in one process, or engine
   reinitialization after its final shutdown.
 - Distributed Erlang, live migration, cross-isolate PIDs or transparent links.
-- Full OTP application compatibility, Elixir/Gleam acceptance, interactive shell,
-  debugger, arbitrary NIF/driver loading, ports or direct OS effects.
+- Full OTP application compatibility or Elixir/Gleam ecosystem acceptance.
+- A shell, debugger, ambient filesystem, raw networking, subprocesses, arbitrary
+  ports, native extension loading or VM-wide administration. These are excluded
+  from the tenant model, not merely postponed until after P0.
 - Production CPU/memory fairness, security certification or recovery from every
   engine bug, fatal allocator failure and unsafe native operation.
 - Snapshots of running applications, fork-based cloning, a separate OS process per
@@ -100,6 +111,59 @@ new isolate before integrating it. Nested Realms are not required by this proof.
 An immutable bootstrap image or reusable compilation artifact may be shared.
 That is different from assigning an already-running instance to a tenant. A first
 proof must not rely on a pool to conceal instance creation cost.
+
+### Supported execution profile: positive list, not an OTP node
+
+The host supplies validated BEAM module bytes and an explicit bootstrap. It does
+not supply an implicit OS user, working directory, filesystem, environment-variable
+namespace, shell, node cookie or unrestricted network. The host itself may use
+these facilities; that does not grant them to tenant code.
+
+| Area | P0 support contract |
+| --- | --- |
+| Language execution | Selected supported BEAM instructions and pure built-ins needed by the proof: ordinary terms, arithmetic, pattern matching, binaries, exceptions and GC; unsupported artifact/instruction versions fail validation |
+| Processes | Local spawn, messaging, links, monitors, exits, receive and reduction-based scheduling; immutable isolate membership |
+| Code | Host-provisioned modules, isolate-local resolution, direct/dynamic calls and local/external funs; no tenant code-loading authority |
+| Local state | Isolate-local registration, named/private ETS, persistent terms, atomics/counters and the bounded local timer behavior exercised by P0 |
+| Libraries/services | Only an enumerated bootstrap and selected bytecode dependencies; no automatic full Kernel/stdlib/application-controller boot |
+| Host integration | Bounded binary invocation/results initially; later effects require explicit capabilities, separate ownership and cancellation contracts |
+| Native implementation | Only built-ins and statically provisioned runtime facilities explicitly approved for this profile; these remain trusted engine code |
+
+A versioned profile manifest must enumerate actual modules/MFAs, instructions,
+internal helpers, native registrations, bootstrap processes, limits and denial
+behavior before implementation claims profile acceptance. This table defines
+requirements, not a completed allowlist. New native facilities are opt-in changes
+to the engine's trusted surface, never tenant-supplied extensions. Pure BEAM code
+is not inherently harmless: it can call effectful built-ins unless the runtime
+mediates them.
+
+**Excluded capabilities:** tenant NIF/shared-library loading (including loading from
+an in-memory blob), native drivers, executable ports and subprocesses, direct file
+access, raw sockets/DNS, distribution activation, OS environment/process control,
+debug/tracing escapes and tenant access to engine/isolate management. A tenant may
+ship its own bytecode module named `file`; the name does not grant native authority.
+Likewise, platform-module names and internal BIF exports are not authority.
+
+Enforcement belongs at effectful native/dispatch entry points, including special
+instructions and already-linked helpers. Hiding an Erlang wrapper is insufficient.
+Trusted bootstrap exceptions require explicit execution provenance, not permission
+based on a module name or a temporary process-global bypass flag.
+
+**Failure contract:** malformed or unsupported bytecode is rejected by the host load
+operation with a structured error before publication. Calls to absent library
+modules have ordinary `undef` behavior; attempts to use excluded engine-native
+operations raise `notsup` before side effects, translated to an exception completion
+at the host boundary. Existing ordinary argument errors still need per-entry
+specification. No accidental host file access, process exit, indefinite wait or
+silent success is an acceptable unsupported-operation result. If a compatibility
+facade is later shipped (for example returning `{error, enotsup}` for a file API),
+its exact MFA/error contract must be listed and tested in the profile manifest.
+
+BEAM bytecode compatibility is not application compatibility. Erlang/Elixir/Gleam
+applications that depend on excluded services may fail, intentionally. Supporting
+more libraries later means adding audited bytecode dependencies or explicit host
+capabilities, not promising the entire conventional BEAM environment. Preserve
+normal semantics for the supported subset rather than silently redefining them.
 
 ## 3. Architecture and ownership
 
@@ -129,7 +193,7 @@ The wrapper is not the isolation implementation. Core changes belong in `beam/`;
 | Runtime-created atoms | Isolate-local namespace/lifetime; immutable predefined atoms may use a common representation if proven safe |
 | Registration, ETS, persistent terms, atomics/counters | Isolate-owned state, not global state hidden by result filtering |
 | Logical timers and deferred callbacks | Retain originating isolate, validate destination, cancel/drain during teardown; physical timer infrastructure may be shared |
-| Bootstrap/OTP service processes | Per-isolate where their state belongs to the Erlang world |
+| Minimal bootstrap and selected service processes | Per-isolate where state belongs to that world; no obligation to instantiate the full OTP boot tree |
 | Host I/O and service access | Explicit host-granted capability; no ambient authority merely because native code can reach the OS |
 | Allocator arenas, caches, JIT artifacts and thread progress | Ownership/lifetime audit required; physical sharing must not imply shared mutable application state |
 
@@ -212,6 +276,42 @@ Required semantics:
   effects. Engine invariant failure or fatal OOM may still be process-fatal; the
   trusted proof is not crash containment for arbitrary native code.
 
+### Execution control: stop/evict first, suspend/resume separately
+
+The host controls lifetime and eventual budgets; tenant bytecode does not configure
+or widen its own allowances. Runtime controls and orchestration policy are separate.
+
+| Control | Contract and milestone |
+| --- | --- |
+| Stop / evict | Mandatory P0 operation: close admission, terminate the world and reclaim it through safe cleanup. Eviction is a host policy reason for stop, not a resumable state |
+| CPU allowance | Subsequent gate: aggregate actual execution across all isolate processes/schedulers and approved native work; reductions are scheduling checkpoints, not exact elapsed CPU time |
+| Wall-clock deadline | Subsequent integrated policy gate: count elapsed time for a named invocation or the isolate lifetime, with the scope explicit; waiting for I/O consumes elapsed time but not equivalent CPU |
+| Memory allowance | Subsequent aggregate-accounting gate; P0 transport bounds alone do not bound heaps, atoms, native allocations or code |
+| Suspend / resume | Subsequent lifecycle gate, not required to demonstrate P0. Suspend stops guest execution but retains state/memory; resume makes it runnable again |
+| Idle eviction | Host policy using activity/lifetime signals; running background Erlang processes are not automatically safe to evict just because no host call is pending |
+
+A deadline is not the same as its enforcement latency. P0's runner can request stop
+and detect failure with an external watchdog; that is not proof of an implemented
+CPU limiter or an integrated deadline service. Budget exhaustion must eventually
+cause an explicit terminal status or suspension policy, not disappear into host
+queueing. Killing the whole host is a test harness failure mechanism, not isolate
+eviction.
+
+Bytecode-only tenants eliminate arbitrary uploaded native code, but approved
+built-ins may still do expensive work. Audit them for bounded execution, yielding,
+cancellation or controlled async execution. Do not promise prompt stop/suspension
+until the longest non-preemptible paths have evidence and documented limits.
+
+The suspend/resume gate must define: a safe-point acknowledgement (not merely setting
+an unscheduled flag), handling of already-running/async native work, continuing
+wall-clock deadlines, timer expiry and bounded pending I/O completions, admission
+while suspended, memory retention, and stop of a suspended isolate. No guest callback
+may run while suspension is acknowledged. Unbounded accumulation is not permitted;
+there is no implication that physical timers or external I/O stop with the guest.
+This is not a snapshot/persistence mechanism or a replacement for eviction under
+memory pressure. P0 must not expose a fake working suspend API; unsupported optional
+controls report that status explicitly.
+
 ### Lifecycle and reclamation
 
 ```text
@@ -256,9 +356,12 @@ library packaging, symbol visibility and a stable ABI follow later.
 ### P0 runtime profile
 
 Start on one documented development platform with a debug interpreter build and
-one shared scheduler. The host explicitly provisions a minimal bootstrap sufficient
-for the listed operations. Enumerate the exact preloaded modules, internal processes,
-BIFs and native facilities required; this is not silently equivalent to full OTP.
+one shared scheduler. Implement the positive-list profile in section 2 and enumerate
+its exact preloaded modules, internal processes, BIFs and native facilities. Provision
+only the bootstrap needed for the listed operations, from host-supplied bytes; no
+filesystem-backed code server or complete OTP boot is assumed. For P0, reject modules
+with `on_load` callbacks before publication to keep startup/rollback and the first-
+execution boundary explicit. Supporting `on_load` later is a separate profile change.
 
 Tenant-visible isolate lifecycle APIs, distribution activation, dynamic native
 loading, arbitrary ports/OS I/O, tracing/debug escape hatches and host-global controls
@@ -319,6 +422,22 @@ The host harness must assert:
 12. **Host survival:** Stop and reclaim all isolates, release buffers and handles,
     shut down the engine, then execute a host-side assertion before returning normally
     from `main`. Isolate shutdown must never stand in for process exit.
+13. **Unsupported effects fail closed:** Exercise absent file/socket library calls
+    (ordinary `undef`) and excluded engine-native operations (`notsup`), including
+    dynamic NIF loading, executable ports, `halt`, internal/indirect entry points and
+    attempts to access a host-owned temporary sentinel file. Confirm the host remains
+    alive and the sentinel is unchanged; use a sandboxed proof host. Include
+    instrumented deny-before-effect assertions for read paths: an unchanged file
+    alone does not prove it was not read. Test negative paths identified in the
+    profile manifest, not merely modules absent from the bundle. A missing required
+    denial case fails the proof; it is not a skip.
+14. **First-execution instrumentation:** Correlate host admission through isolate
+    construction/load/bootstrap to the scheduler reaching the first application
+    instruction. Timestamp before executing it. Report the first result separately;
+    a fixture that deliberately performs a slow bytecode loop after entry must not
+    make entry latency equal to completion latency. No user code runs during P0
+    loading (`on_load` is rejected). Report instrumentation overhead and clock
+    resolution; this debug functional test does not satisfy the optimized latency gate.
 
 P0 proves these operations only. Full Erlang language/OTP compatibility, complete
 cross-boundary adversarial coverage and multi-scheduler execution remain separate
@@ -369,6 +488,8 @@ reviewable commit; a design document does not check off an implementation step.
   `erl_proc_sig_queue.c`, `erl_nif.c`, driver/port infrastructure and emulator dispatch.
   Paths here are relative to `beam/erts/emulator/beam/`; wildcard names denote source
   families. Explicitly locate process-fatal paths and startup-only assumptions.
+  Produce the versioned positive-list profile manifest and trace its minimal bootstrap
+  dependencies, including deny-before-effect coverage for excluded native operations.
 - [ ] **P0-03 — Library entry/exit seam.** Split executable setup/CLI behavior from
   engine construction, execution and shutdown. Link a minimal host, return control
   to it, and destroy an engine normally with zero isolates. One engine only initially.
@@ -385,13 +506,17 @@ reviewable commit; a design document does not check off an implementation step.
   deferred work. A profile denial cannot satisfy a P0 operation promised as local.
 - [ ] **P0-07 — Embedding transport and lifecycle.** Implement bounded binary calls,
   completion ownership, cancellation, stale-work rejection and stop/reclaim semantics.
-  Scope/reject host-fatal tenant operations and ensure B survives A's teardown.
+  Scope/reject host-fatal and excluded tenant effects; ensure B survives A's eviction.
+  Report pending physical reclamation honestly. Do not claim CPU-budget enforcement
+  or suspension from successful process preemption or a host watchdog.
 - [ ] **P0-08 — Full executable witness.** Deliver the C++ host, independently compiled
   bundles, strict runner and 1,000-cycle sentinel test above. Record supported platform,
-  build flavor and all unsupported operations. No security approval implied.
+  build flavor, first-execution instrumentation and all profile denial cases.
+  This includes all 14 P0 assertions; no security or density approval is implied.
 - [ ] **P0-09 — Measurements and review.** Record phase-separated results and review
   leaks, host-global assumptions and blockers. Decide go/no-go for the next stage
-  based on evidence rather than a claimed V8-equivalent startup budget.
+  based on evidence. Keep functional proof, latency and simultaneous-density gates
+  distinct. A successful P0 does not automatically satisfy the target below.
 
 Particularly difficult seams are atom IDs embedded in terms/code, export and fun
 entry lifetime, code purger/literal collector ownership, scheduler-safe teardown,
@@ -405,8 +530,8 @@ Measure independently:
 
 - Cold host/engine startup (including process initialization).
 - Fresh empty-isolate construction in an already initialized engine.
-- Bootstrap, module load/link and top-level application activation.
-- First response and subsequent request execution.
+- Bootstrap, module load/link, scheduling delay and **first application instruction**.
+- Application initialization, first response and subsequent request execution.
 - Logical stop and eventual physical reclamation, including tail latency.
 - Incremental physical memory and isolate-accounted memory at increasing live counts.
 - Host responsiveness and B latency while A creates, runs and stops.
@@ -414,14 +539,71 @@ Measure independently:
 Use repeated fresh creations, keep raw data and report p50/p99 with sample counts,
 clock resolution, dispersion and caching conditions. Separate first-ever code-cache
 use from later reuse of immutable artifacts. Record debug results as debug results;
-optimized measurements are necessary before performance decisions. No maximum
-startup time or memory target has yet been agreed.
+optimized measurements are necessary before performance decisions.
 
-After P0, gates include optimized interpreter/JIT (both supported architectures),
-multi-scheduler/dirty execution, real OTP supervision/application trees, independently
-versioned Erlang/Elixir/Gleam stacks, OS/native capability mediation, aggregate budgets
-and fairness, OOM/fuzz/sanitizer coverage, independent security review, portable library
-packaging and orchestration integration. Each needs explicit acceptance criteria.
+### First-execution target, not a completion deadline
+
+The adopted performance objective is **less than 10 ms p99 from accepted creation
+request to first application instruction**, with an already initialized engine and
+precompiled module bytes available locally. This includes private state construction,
+loading/linking (and JIT work where used), required bootstrap and scheduling delay.
+It must not stop at handle allocation or mean merely that the isolate is runnable.
+Admission queue time and end-to-end request-to-first-execution are also reported;
+rejected requests are counted, not silently omitted from a success claim.
+
+```text
+creation requested -> admitted -> construct -> load/bootstrap -> scheduled -> first instruction
+       | admission wait |<--------------- target measurement ---------------->|
+       |<-------------------- end-to-end report ------------------------------>|
+                                                                              | application work
+                                                                              | may take seconds
+```
+
+Code acquisition before the request and one-time engine boot are separate metrics.
+Do not fetch/compile code or execute tenant initialization before the timed interval
+and call that fresh startup. Shared immutable caches are allowed, but cold-artifact
+and reused-artifact conditions must be distinguished. In P0 the measured entry is
+the first application instruction because load-time execution is prohibited. Future
+profiles permitting `on_load` or other tenant initialization must report both the
+first tenant instruction and requested entrypoint, with initialization in the latter's
+elapsed time; they must not silently preserve incomparable benchmark labels.
+
+This is an objective, **not an achieved result or an unconditional real-time guarantee**.
+Hardware, artifact size/profile, scheduler count, resident population, creation rate,
+CPU/memory load and sample count must be pinned before a latency acceptance run.
+The initial acceptance scenario should include 1,000 resident small isolates, not
+only an empty engine. An empty-instance sub-millisecond result is useful but does
+not substitute for first-execution latency. No per-isolate memory budget is agreed
+yet; measure before setting it. Application completion has an independent policy.
+
+### Simultaneous density and controls: follow-on tracking
+
+The 1,000-cycle P0 test is sequential churn, **not** 1,000 live isolates. Keep these
+additional gates open rather than expanding P0 into an entire production platform:
+
+- [ ] **S1 — Optimized first-execution latency.** Implement the timestamped benchmark
+  above, pin its workload/hardware envelope and evaluate the <10 ms p99 objective.
+  Preserve all samples, errors and admission statistics, including cold-cache runs.
+- [ ] **S2 — Concurrent residency and churn.** Measure 2, 100 and at least 1,000
+  simultaneously live small isolates, each with distinct mutable state. Report
+  incremental memory, shared caches, threads, first-execution/response tails and
+  reclamation. Create/destroy additional isolates while residents remain responsive.
+  Thousands of resident instances is not a claim of thousands of CPU cores.
+- [ ] **S3 — Execution budgets and eviction.** Implement scoped wall-clock deadlines,
+  aggregate CPU/memory accounting and host-configured exhaustion policy. Validate
+  preemption/cancellation of approved native paths, time-to-stop and physical release
+  while other isolates make progress. Bound admitted work and test saturation.
+- [ ] **S4 — Suspend/resume.** Implement and test the safe-point, timer, I/O, queue,
+  budget and memory-retention semantics in section 4. Test stop while suspended and
+  resume after expiry; do not call suspension memory reclamation or persistence.
+
+Additional gates include optimized interpreter/JIT across supported architectures,
+multi-scheduler/dirty execution, selected compatible supervision/application libraries
+and independently versioned Erlang/Elixir/Gleam bundles **within the reduced profile**,
+explicit host-capability mediation, fairness, OOM/fuzz/sanitizer coverage, independent
+security review, portable packaging and orchestration integration. Full conventional
+OTP/OS compatibility and tenant native extensions are not default future requirements.
+Each profile expansion needs its own compatibility and security decision.
 
 The host can eventually provide a worker-style service interface and route events
 between isolates. A separate HTTP/orchestration project should consume libbeam's
@@ -439,6 +621,14 @@ Cloudflare implementation details:
 - [I/O context ownership](https://github.com/cloudflare/workerd/blob/f4ebbae6562718e53afbc3bba0f882266bd89529/src/workerd/io/io-context.h): context destruction cancels associated I/O; wrong-context resource use is rejected.
 - [Built-in compilation cache](https://github.com/cloudflare/workerd/blob/f4ebbae6562718e53afbc3bba0f882266bd89529/src/workerd/jsg/compile-cache.h): immutable reusable compilation data is different from reused mutable application state.
 - [Security warning](https://github.com/cloudflare/workerd/blob/f4ebbae6562718e53afbc3bba0f882266bd89529/README.md): workerd alone is not the full hardened production sandbox.
+
+Cloudflare's public [Workers architecture documentation](https://developers.cloudflare.com/workers/reference/how-workers-works/#isolates)
+says a single runtime can run hundreds or thousands of isolates. That is a useful
+density reference, not a hardware-independent per-process capacity guarantee.
+The [128 MB memory limit](https://developers.cloudflare.com/workers/platform/limits/#memory)
+is an allowance, not a reservation or measured startup footprint; the
+[one-second global-scope startup limit](https://developers.cloudflare.com/workers/platform/limits/#worker-startup-time)
+is not isolate-creation latency. None of these establishes libbeam performance.
 
 No workerd/V8 creation benchmark was performed in that source study. Nor does this
 RFD assume V8's single-executor isolate scheduling should replace BEAM's process
