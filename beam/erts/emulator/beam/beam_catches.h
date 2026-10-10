@@ -32,9 +32,17 @@
 
 #define BEAM_CATCHES_NIL	(-1)
 
-void beam_catches_init(void);
-void beam_catches_start_staging(void);
-void beam_catches_end_staging(int commit);
+typedef struct ErtsCatchNamespace ErtsCatchNamespace;
+ErtsCatchNamespace *erts_catch_namespace_create(void);
+int erts_catch_namespace_check_staging(ErtsCatchNamespace *, ErtsCodeIndex, ErtsCodeIndex);
+int erts_catch_namespace_start_staging(ErtsCatchNamespace *, ErtsCodeIndex, ErtsCodeIndex);
+int erts_catch_namespace_end_staging(ErtsCatchNamespace *, ErtsCodeIndex);
+unsigned erts_catch_namespace_cons(ErtsCatchNamespace *, ErtsCodeIndex, ErtsCodePtr, unsigned, ErtsCodePtr **);
+ErtsCodePtr erts_catch_namespace_car(ErtsCatchNamespace *, ErtsCodeIndex, unsigned);
+void erts_catch_namespace_delmod(ErtsCatchNamespace *, unsigned, const BeamCodeHeader *, unsigned, ErtsCodeIndex);
+int erts_catch_namespace_can_discard(ErtsCatchNamespace *);
+int erts_catch_namespace_discard(ErtsCatchNamespace *);
+void beam_catches_init(ErtsCatchNamespace *);
 unsigned beam_catches_cons(ErtsCodePtr cp, unsigned cdr, ErtsCodePtr **);
 ErtsCodePtr beam_catches_car(unsigned i);
 void beam_catches_delmod(unsigned head,

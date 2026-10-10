@@ -134,12 +134,13 @@ next frontier: `Isolate::load_module`.
 
 ### M3 — Private BEAM loading, atoms and code resolution
 
-**Export storage:** [owned export tables](0002-owned-export-tables.md) now join
-[external-fun literals](0002-export-literal-ownership.md) in namespace state,
-including for diagnostic loading. Private table identity, staging copies, limits,
-accounting and unpublished disposal are tested, along with real diagnostic
-reloads/concurrent stub lookup. Local funs, records and coordinated code-index
-transactions remain pending; export-table staging is not independent code commit.
+**Code-space ownership:** the [code-space batch](0002-owned-code-space.md) adds
+funs, records, catches, ranges, old-code locks, unsealed tracking and coordinated
+index/permission state to the previously owned atoms/modules/exports/literals.
+Independent metadata commit/abort and guarded disposal are tested; diagnostic
+loading, local closures, native records, catches and stack traces use these same
+components. Private loader/process context propagation, executable/literal
+retirement and public Engine/Isolate construction remain unfinished.
 
 **API:** `Isolate::load_module`.
 

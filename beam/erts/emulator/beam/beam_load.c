@@ -44,6 +44,7 @@
 #include "erl_process_dict.h"
 #include "erl_unicode.h"
 #include "beam_file.h"
+#include "erl_isolate_state.h"
 
 Uint erts_total_code_size;
 
@@ -53,11 +54,11 @@ static int load_code(LoaderState *stp);
 
 /**********************************************************************/
 
-void init_load(void)
+void init_load(ErtsIsolateNamespaceState *owner)
 {
     erts_total_code_size = 0;
-    beam_catches_init();
-    erts_init_ranges();
+    beam_catches_init(erts_isolate_namespace_catches(owner));
+    erts_init_ranges(erts_isolate_namespace_ranges(owner));
 
 #ifdef DEBUG
     {

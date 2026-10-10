@@ -51,31 +51,45 @@ struct bc_pool {
      * protected by the code_ix lock.
      */
 
-    IF_DEBUG(int is_staging;)
+    int is_staging;
 };
 
-static struct bc_pool bccix[ERTS_NUM_CODE_IX];
+struct ErtsCatchNamespace {
+    struct bc_pool pools[ERTS_NUM_CODE_IX];
+    int bound;
+};
+static ErtsCatchNamespace *diagnostic_catches;
 
-void beam_catches_init(void)
+ErtsCatchNamespace *erts_catch_namespace_create(void)
 {
+    ErtsCatchNamespace *owner = erts_alloc(ERTS_ALC_T_CATCHES, sizeof(*owner));
+    struct bc_pool *bccix = owner->pools;
     int i;
+    owner->bound = 0;
 
     bccix[0].tabsize   = DEFAULT_TABSIZE;
     bccix[0].free_list = -1;
     bccix[0].high_mark = 0;
     bccix[0].beam_catches = erts_alloc(ERTS_ALC_T_CATCHES,
 				     sizeof(beam_catch_t)*DEFAULT_TABSIZE);
-    IF_DEBUG(bccix[0].is_staging = 0);
+    bccix[0].is_staging = 0;
     for (i=1; i<ERTS_NUM_CODE_IX; i++) {
 	bccix[i] = bccix[i-1];
     }
-     /* For initial load: */
-    IF_DEBUG(bccix[erts_staging_code_ix()].is_staging = 1);
+    return owner;
 }
 
-
-static void gc_old_vec(beam_catch_t* vec)
+void beam_catches_init(ErtsCatchNamespace *owner)
 {
+    ASSERT(owner && !diagnostic_catches);
+    diagnostic_catches = owner;
+    owner->bound = 1;
+    owner->pools[0].is_staging = 1;
+}
+
+static void gc_old_vec(ErtsCatchNamespace *owner, beam_catch_t* vec)
+{
+    struct bc_pool *bccix = owner->pools;
     int i;
     for (i=0; i<ERTS_NUM_CODE_IX; i++) {
 	if (bccix[i].beam_catches == vec) {
@@ -86,28 +100,44 @@ static void gc_old_vec(beam_catch_t* vec)
 }
 
 
-void beam_catches_start_staging(void)
+static int catch_start(ErtsCatchNamespace *owner, ErtsCodeIndex src, ErtsCodeIndex dst, int apply)
 {
-    ErtsCodeIndex dst = erts_staging_code_ix();
-    ErtsCodeIndex src = erts_active_code_ix();
-    beam_catch_t* prev_vec = bccix[dst].beam_catches;
-
-    ASSERT(!bccix[src].is_staging && !bccix[dst].is_staging);
-
+    struct bc_pool *bccix = owner->pools;
+    beam_catch_t *prev_vec;
+    if (src >= ERTS_NUM_CODE_IX || dst >= ERTS_NUM_CODE_IX || src == dst)
+        return 1;
+    for (int i = 0; i < ERTS_NUM_CODE_IX; ++i)
+        if (bccix[i].is_staging) return 1;
+    if (!apply) return 0;
+    prev_vec = bccix[dst].beam_catches;
     bccix[dst] = bccix[src];
-    gc_old_vec(prev_vec);
-    IF_DEBUG(bccix[dst].is_staging = 1);
+    gc_old_vec(owner, prev_vec);
+    bccix[dst].is_staging = 1;
+    return 0;
 }
 
-void beam_catches_end_staging(int commit)
+int erts_catch_namespace_check_staging(ErtsCatchNamespace *owner, ErtsCodeIndex src, ErtsCodeIndex dst)
 {
-    IF_DEBUG(bccix[erts_staging_code_ix()].is_staging = 0);
+    return catch_start(owner, src, dst, 0);
+}
+int erts_catch_namespace_start_staging(ErtsCatchNamespace *owner, ErtsCodeIndex src, ErtsCodeIndex dst)
+{
+    return catch_start(owner, src, dst, 1);
+}
+int erts_catch_namespace_end_staging(ErtsCatchNamespace *owner, ErtsCodeIndex dst)
+{
+    if (dst >= ERTS_NUM_CODE_IX || !owner->pools[dst].is_staging) return 1;
+    owner->pools[dst].is_staging = 0;
+    return 0;
 }
 
-unsigned beam_catches_cons(ErtsCodePtr cp, unsigned cdr, ErtsCodePtr **cppp)
+unsigned erts_catch_namespace_cons(ErtsCatchNamespace *owner, ErtsCodeIndex ix,
+                                   ErtsCodePtr cp, unsigned cdr, ErtsCodePtr **cppp)
 {
     int i;
-    struct bc_pool* p = &bccix[erts_staging_code_ix()];
+    struct bc_pool *p;
+    if (ix >= ERTS_NUM_CODE_IX || !owner->pools[ix].is_staging) return (unsigned)-1;
+    p = &owner->pools[ix];
 
     ASSERT(p->is_staging);
     /*
@@ -128,7 +158,7 @@ unsigned beam_catches_cons(ErtsCodePtr cp, unsigned cdr, ErtsCodePtr **cppp)
 					 newsize*sizeof(beam_catch_t));
 	    sys_memcpy(p->beam_catches, prev_vec,
 		       p->tabsize*sizeof(beam_catch_t));
-	    gc_old_vec(prev_vec);
+	    gc_old_vec(owner, prev_vec);
 	    p->tabsize = newsize;
 	}
 	i = p->high_mark++;
@@ -143,47 +173,38 @@ unsigned beam_catches_cons(ErtsCodePtr cp, unsigned cdr, ErtsCodePtr **cppp)
     return i;
 }
 
-ErtsCodePtr beam_catches_car(unsigned i)
+ErtsCodePtr erts_catch_namespace_car(ErtsCatchNamespace *owner, ErtsCodeIndex ix, unsigned i)
 {
-    struct bc_pool* p = &bccix[erts_active_code_ix()];
+    struct bc_pool *p;
+    if (ix >= ERTS_NUM_CODE_IX) return NULL;
+    p = &owner->pools[ix];
 
-    if (i >= p->tabsize ) {
+    if (i >= p->high_mark ) {
 	erts_exit(ERTS_ERROR_EXIT, "beam_catches_delmod: index %#x is out of range\r\n", i);
     }
     return p->beam_catches[i].cp;
 }
 
-ErtsCodePtr beam_catches_car_staging(unsigned i)
-{
-    struct bc_pool* p = &bccix[erts_staging_code_ix()];
-
-    if (i >= p->tabsize ) {
-	erts_exit(ERTS_ERROR_EXIT, "beam_catches_delmod: index %#x is out of range\r\n", i);
-    }
-    return p->beam_catches[i].cp;
-}
-
-void beam_catches_delmod(unsigned head,
+void erts_catch_namespace_delmod(ErtsCatchNamespace *owner, unsigned head,
                          const BeamCodeHeader *hdr,
                          unsigned code_bytes,
                          ErtsCodeIndex code_ix)
 {
-    struct bc_pool* p = &bccix[code_ix];
+    struct bc_pool* p = &owner->pools[code_ix];
     const char *code_start;
     unsigned i, cdr;
 
     code_start = (const char*)hdr;
 
-    ASSERT((code_ix == erts_active_code_ix()) != bccix[erts_staging_code_ix()].is_staging);
-
     for(i = head; i != (unsigned)-1;) {
-        const char *catch_addr = (char*)p->beam_catches[i].cp;
+        const char *catch_addr;
 
-        if (i >= p->tabsize) {
+        if (i >= p->high_mark) {
             erts_exit(ERTS_ERROR_EXIT,
                       "beam_catches_delmod: index %#x is out of range\r\n", i);
         }
 
+        catch_addr = (char*)p->beam_catches[i].cp;
         if (!ErtsInArea(catch_addr, code_start, code_bytes)) {
             erts_exit(ERTS_ERROR_EXIT,
                       "beam_catches_delmod: item %#x has cp %p which is not "
@@ -200,4 +221,46 @@ void beam_catches_delmod(unsigned head,
         p->free_list = i;
         i = cdr;
     }
+}
+
+int erts_catch_namespace_can_discard(ErtsCatchNamespace *owner)
+{
+    if (!owner || owner->bound) return 0;
+    for (int ix = 0; ix < ERTS_NUM_CODE_IX; ++ix) {
+        struct bc_pool *p = &owner->pools[ix];
+        if (p->is_staging) return 0;
+        for (unsigned i = 0; i < p->high_mark; ++i)
+            if (p->beam_catches[i].cp) return 0;
+    }
+    return 1;
+}
+int erts_catch_namespace_discard(ErtsCatchNamespace *owner)
+{
+    if (!erts_catch_namespace_can_discard(owner)) return 1;
+    for (int ix = 0; ix < ERTS_NUM_CODE_IX; ++ix) {
+        beam_catch_t *vec = owner->pools[ix].beam_catches;
+        if (!vec) continue;
+        for (int j = ix + 1; j < ERTS_NUM_CODE_IX; ++j)
+            if (owner->pools[j].beam_catches == vec) owner->pools[j].beam_catches = NULL;
+        erts_free(ERTS_ALC_T_CATCHES, vec);
+    }
+    erts_free(ERTS_ALC_T_CATCHES, owner);
+    return 0;
+}
+unsigned beam_catches_cons(ErtsCodePtr cp, unsigned cdr, ErtsCodePtr **cppp)
+{
+    return erts_catch_namespace_cons(diagnostic_catches, erts_staging_code_ix(), cp, cdr, cppp);
+}
+ErtsCodePtr beam_catches_car(unsigned i)
+{
+    return erts_catch_namespace_car(diagnostic_catches, erts_active_code_ix(), i);
+}
+ErtsCodePtr beam_catches_car_staging(unsigned i)
+{
+    return erts_catch_namespace_car(diagnostic_catches, erts_staging_code_ix(), i);
+}
+void beam_catches_delmod(unsigned head, const BeamCodeHeader *hdr, unsigned size, ErtsCodeIndex ix)
+{
+    ASSERT((ix == erts_active_code_ix()) != diagnostic_catches->pools[erts_staging_code_ix()].is_staging);
+    erts_catch_namespace_delmod(diagnostic_catches, head, hdr, size, ix);
 }

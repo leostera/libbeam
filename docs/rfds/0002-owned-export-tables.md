@@ -3,6 +3,10 @@
 
 # Owned export tables
 
+Checkpoint at `d7c3523c`. The [code-space batch](0002-owned-code-space.md) supersedes
+the fun/record/index ownership limitations below; private executable loading and
+execution retirement remain unfinished.
+
 `ErtsIsolateNamespaceState` now owns `ErtsExportNamespace`, alongside its atoms,
 module slots and external-fun literal pool. Diagnostic startup constructs the
 same component and explicitly binds it; fresh states receive empty private tables.

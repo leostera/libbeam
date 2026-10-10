@@ -99,6 +99,7 @@ def run_host(command, cwd, env, log, timeout=60):
                     or text.splitlines().count('HOST_SIGNALS_OK dispositions=9 altstack=true mask=true usr1_delivered=true') != 1
                     or not host_markers(text, process.pid)
                     or text.splitlines().count('ATOM_STORAGE_OK copied_names=true empty_binary=true') != 1
+                    or text.splitlines().count('CODE_SPACE_EXECUTION_OK local_funs=true native_records=true catches_and_stacktraces=true diagnostic_world=true') != 1
                     or text.splitlines().count('EXPORT_TABLE_OK reload_and_stub_lookup=true private_execution=false') != 1
                     or text.splitlines().count('EXPORT_LITERAL_OK gc_roundtrip_and_dispatch=true') != 1
                     or thread_handle_marker(text) is None
@@ -205,6 +206,16 @@ def main():
                  source / 'erts/emulator/beam/export.c',
                  source / 'erts/emulator/beam/export.h',
                  source / 'erts/emulator/beam/erl_export_namespace.h',
+                 source / 'erts/emulator/beam/erl_code_table.c',
+                 source / 'erts/emulator/beam/erl_code_table.h',
+                 source / 'erts/emulator/beam/erl_fun.c',
+                 source / 'erts/emulator/beam/erl_record.c',
+                 source / 'erts/emulator/beam/beam_catches.c',
+                 source / 'erts/emulator/beam/beam_ranges.c',
+                 source / 'erts/emulator/beam/beam_ranges.h',
+                 source / 'erts/emulator/beam/erl_module_namespace.h',
+                 source / 'erts/emulator/beam/code_ix.c',
+                 tools.parent / 'tests/native_code_space_test.c',
                  tools.parent / 'tests/native_export_namespace_test.c',
                  source / 'erts/emulator/beam/erl_export_literals.c',
                  source / 'erts/emulator/beam/erl_export_literals.h',
@@ -324,6 +335,8 @@ def main():
                 (output / 'compile-settings.log').read_text().splitlines()
                 if line.startswith(('CC=', 'CFLAGS=', 'INCLUDES=')))
             components = [
+                ('code-space', 'native_code_space_test.c',
+                 'NATIVE_CODE_SPACE_OK independent_tables=true coordinated_metadata_transactions=true guarded_disposal=true private_execution=false'),
                 ('export-namespace', 'native_export_namespace_test.c',
                  'NATIVE_EXPORT_NAMESPACE_OK same_mfa_independent=true scoped_staging=true guarded_disposal=true private_execution=false'),
                 ('export-literals', 'native_export_literals_test.c',

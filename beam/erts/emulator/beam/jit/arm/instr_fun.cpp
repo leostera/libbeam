@@ -151,7 +151,7 @@ void BeamGlobalAssembler::emit_handle_call_fun_error() {
  * will land here. */
 void BeamGlobalAssembler::emit_dispatch_save_calls_fun() {
     /* Keep going with the actual code index. */
-    a.mov(TMP1, imm(&the_active_code_index));
+    a.mov(TMP1, imm(erts_diagnostic_active_code_index()));
     a.ldr(TMP1.w(), a64::Mem(TMP1));
 
     branch(emit_setup_dispatchable_call(ARG1, TMP1));

@@ -76,9 +76,13 @@ export_tables() ->
         true = code:soft_purge(export_namespace_probe),
         {module, export_namespace_probe} = code:load_binary(export_namespace_probe, "v1", A),
         1 = F(),
+        code_tables(1),
+        true = erlang:garbage_collect(),
         true = code:soft_purge(export_namespace_probe),
         {module, export_namespace_probe} = code:load_binary(export_namespace_probe, "v2", B),
-        2 = F()
+        2 = F(),
+        code_tables(2),
+        true = erlang:garbage_collect()
     end, lists:seq(1, 4)),
     lists:foreach(fun(Ref) ->
         receive {Ref, done} -> ok after 5000 -> error(export_stub_timeout) end
@@ -87,7 +91,20 @@ export_tables() ->
     true = code:delete(export_namespace_probe),
     true = code:soft_purge(export_namespace_probe),
     1 = F(), % The same external fun resolves again through autoload.
-    io:format("EXPORT_TABLE_OK reload_and_stub_lookup=true private_execution=false~n").
+    io:format("EXPORT_TABLE_OK reload_and_stub_lookup=true private_execution=false~n"),
+    io:format("CODE_SPACE_EXECUTION_OK local_funs=true native_records=true catches_and_stacktraces=true diagnostic_world=true~n").
+
+code_tables(Version) ->
+    Closure = export_namespace_probe:closure(10),
+    Closure = binary_to_term(term_to_binary(Closure)),
+    Expected = 12 + Version,
+    Expected = Closure(2),
+    Record = export_namespace_probe:record_make(7),
+    Record = binary_to_term(term_to_binary(Record)),
+    7 = export_namespace_probe:record_get(Record),
+    {Version, Stack} = export_namespace_probe:catch_value(),
+    true = lists:keymember(export_namespace_probe, 1, Stack),
+    ok.
 
 export_literals() ->
     F = fun lists:reverse/1,

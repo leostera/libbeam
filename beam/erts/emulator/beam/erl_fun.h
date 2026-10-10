@@ -98,7 +98,9 @@ typedef struct erl_fun_thing {
  * C99-style flexible array */
 #define ERL_FUN_SIZE ((sizeof(ErlFunThing)/sizeof(Eterm)))
 
-void erts_init_fun_table(void);
+typedef struct ErtsCodeTable ErtsCodeTable;
+ErtsCodeTable *erts_fun_namespace_create(int limit);
+void erts_init_fun_table(ErtsCodeTable *);
 void erts_fun_info(fmtfn_t, void *);
 int erts_fun_table_sz(void);
 int erts_fun_entries_sz(void);
@@ -129,8 +131,6 @@ void erts_fun_purge_abort_finalize(ErlFunEntry **funs, Uint no);
 void erts_fun_purge_complete(ErlFunEntry **funs, Uint no);
 void erts_dump_fun_entries(fmtfn_t, void *);
 
-void erts_fun_start_staging(void);
-void erts_fun_end_staging(int commit);
 
 #if ERTS_GLB_INLINE_INCL_FUNC_DEF
 

@@ -25,6 +25,9 @@ size_t erts_export_namespace_entry_bytes(ErtsExportNamespace *);
 /* Copies active dispatch/table entries into an inactive slot. Does NOT publish
  * code indices or implement whole-code-space commit/abort. Returns 1 unchanged
  * for invalid state, incompatible entries or insufficient destination capacity. */
+int erts_export_namespace_check_staging(ErtsExportNamespace *, unsigned source, unsigned destination);
+void erts_export_namespace_write_lock(ErtsExportNamespace *);
+void erts_export_namespace_write_unlock(ErtsExportNamespace *);
 int erts_export_namespace_start_staging(ErtsExportNamespace *, unsigned source, unsigned destination);
 int erts_export_namespace_end_staging(ErtsExportNamespace *, unsigned destination);
 /* Exclusive unpublished owner, no borrowed pointers/terms/readers. */

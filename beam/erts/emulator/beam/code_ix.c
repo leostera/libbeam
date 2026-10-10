@@ -28,6 +28,10 @@
 #include "global.h"
 #include "beam_catches.h"
 #include "erl_record.h"
+#include "erl_isolate_state.h"
+#include "erl_code_table.h"
+#include "erl_module_namespace.h"
+#include "beam_ranges.h"
 
 
 #if 0
@@ -45,9 +49,6 @@
  * when thread progress is unblocked. */
 erts_atomic32_t outstanding_blocking_code_barriers;
 
-erts_atomic32_t the_active_code_index;
-erts_atomic32_t the_staging_code_index;
-
 struct code_permission {
     erts_mtx_t lock;
 
@@ -59,7 +60,7 @@ struct code_permission {
     struct code_permission_queue_item *first;
     struct code_permission_queue_item **tail_p;
 
-    const erts_aint32_t xstate_handover_flg;
+    erts_aint32_t xstate_handover_flg; /* Immutable after construction. */
 
 #ifdef ERTS_ENABLE_LOCK_CHECK
     int lc_soft_check;
@@ -74,19 +75,21 @@ struct code_permission_queue_item {
     struct code_permission_queue_item *next;
 };
 
-static struct code_permission code_mod_permission = {
-    .xstate_handover_flg = ERTS_PXSFLG_HANDOVER_CODE_MOD_PERM
+enum CodeSpacePhase { CODE_SPACE_IDLE, CODE_SPACE_STAGING, CODE_SPACE_READY };
+struct ErtsCodeSpace {
+    ErtsIsolateNamespaceState *namespace;
+    erts_atomic32_t active, staging;
+    struct code_permission modification, staging_permission;
+    enum CodeSpacePhase phase;
+    int bound;
 };
-static struct code_permission code_stage_permission = {
-    .xstate_handover_flg = ERTS_PXSFLG_HANDOVER_CODE_STAGE_PERM
-};
+static ErtsCodeSpace *diagnostic_code_space;
 
 static void code_permission_init(struct code_permission* perm,
                                  const char* name)
 {
     erts_mtx_init(&(perm->lock), name, NIL,
-                  (ERTS_LOCK_FLAGS_PROPERTY_STATIC |
-                   ERTS_LOCK_FLAGS_CATEGORY_GENERIC));
+                  ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
     perm->seized = false;
     perm->first = NULL;
     perm->tail_p = &(perm->first);
@@ -97,18 +100,51 @@ static void code_permission_init(struct code_permission* perm,
 static erts_tsd_key_t needs_code_barrier;
 #endif
 
-void erts_code_ix_init(void)
+ErtsCodeSpace *erts_code_space_create(ErtsIsolateNamespaceState *namespace)
 {
+    ErtsCodeSpace *owner = erts_alloc(ERTS_ALC_T_MODULE_TABLE, sizeof(*owner));
+    sys_memset(owner, 0, sizeof(*owner));
+    owner->namespace = namespace;
+    owner->phase = CODE_SPACE_IDLE;
+    erts_atomic32_init_nob(&owner->active, 0);
+    erts_atomic32_init_nob(&owner->staging, 1);
+    owner->modification.xstate_handover_flg = ERTS_PXSFLG_HANDOVER_CODE_MOD_PERM;
+    owner->staging_permission.xstate_handover_flg = ERTS_PXSFLG_HANDOVER_CODE_STAGE_PERM;
+    code_permission_init(&owner->modification, "code_mod_permission");
+    code_permission_init(&owner->staging_permission, "code_stage_permission");
+    return owner;
+}
+ErtsCodeIndex erts_code_space_active(ErtsCodeSpace *owner) { return erts_atomic32_read_nob(&owner->active); }
+ErtsCodeIndex erts_code_space_staging(ErtsCodeSpace *owner) { return erts_atomic32_read_nob(&owner->staging); }
+erts_atomic32_t *erts_diagnostic_active_code_index(void) { return &diagnostic_code_space->active; }
+erts_atomic32_t *erts_diagnostic_staging_code_index(void) { return &diagnostic_code_space->staging; }
+int erts_code_space_can_discard(ErtsCodeSpace *owner)
+{
+    return owner && !owner->bound && owner->phase == CODE_SPACE_IDLE &&
+        !owner->modification.seized && !owner->modification.first &&
+        !owner->staging_permission.seized && !owner->staging_permission.first;
+}
+int erts_code_space_discard(ErtsCodeSpace *owner)
+{
+    if (!erts_code_space_can_discard(owner)) return 1;
+    erts_mtx_destroy(&owner->modification.lock);
+    erts_mtx_destroy(&owner->staging_permission.lock);
+    erts_free(ERTS_ALC_T_MODULE_TABLE, owner);
+    return 0;
+}
+void erts_code_ix_init(ErtsCodeSpace *owner)
+{
+    ASSERT(owner && !diagnostic_code_space);
+    diagnostic_code_space = owner;
+    owner->bound = 1;
+    owner->phase = CODE_SPACE_STAGING;
     /* We start emulator by initializing preloaded modules
      * single threaded with active and staging set both to zero.
      * Preloading is finished by a commit that will set things straight.
      */
     erts_atomic32_init_nob(&outstanding_blocking_code_barriers, 0);
-    erts_atomic32_init_nob(&the_active_code_index, 0);
-    erts_atomic32_init_nob(&the_staging_code_index, 0);
-
-    code_permission_init(&code_mod_permission, "code_mod_permission");
-    code_permission_init(&code_stage_permission, "code_stage_permission");
+    erts_atomic32_set_nob(&owner->active, 0);
+    erts_atomic32_set_nob(&owner->staging, 0);
 
 #ifdef DEBUG
     erts_tsd_key_create(&needs_code_barrier,
@@ -117,67 +153,95 @@ void erts_code_ix_init(void)
     CIX_TRACE("init");
 }
 
+int erts_code_space_start(ErtsCodeSpace *owner, int num_new)
+{
+    ErtsIsolateNamespaceState *ns = owner->namespace;
+    ErtsCodeIndex src = erts_code_space_active(owner), dst = erts_code_space_staging(owner);
+    if (owner->phase != CODE_SPACE_IDLE || num_new < 0) return 1;
+    /* Exclusive staging authority keeps this complete preflight stable. No
+     * child is mutated when a later child refuses capacity/identity/state. */
+    if (erts_catch_namespace_check_staging(erts_isolate_namespace_catches(ns), src, dst) ||
+        erts_code_table_check_staging(erts_isolate_namespace_funs(ns), src, dst) ||
+        erts_export_namespace_check_staging(erts_isolate_namespace_exports(ns), src, dst) ||
+        erts_code_table_check_staging(erts_isolate_namespace_records(ns), src, dst) ||
+        erts_module_namespace_check_staging(erts_isolate_namespace_module_state(ns), src, dst) ||
+        erts_range_namespace_check_staging(erts_isolate_namespace_ranges(ns), src, dst, num_new))
+        return 1;
+    if (erts_catch_namespace_start_staging(erts_isolate_namespace_catches(ns), src, dst) ||
+        erts_code_table_start_staging(erts_isolate_namespace_funs(ns), src, dst) ||
+        erts_export_namespace_start_staging(erts_isolate_namespace_exports(ns), src, dst) ||
+        erts_code_table_start_staging(erts_isolate_namespace_records(ns), src, dst) ||
+        erts_module_namespace_start_staging(erts_isolate_namespace_module_state(ns), src, dst) ||
+        erts_range_namespace_start_staging(erts_isolate_namespace_ranges(ns), src, dst, num_new))
+        erts_exit(ERTS_ABORT_EXIT, "Code-space preflight lost exclusive ownership\n");
+    owner->phase = CODE_SPACE_STAGING;
+    return 0;
+}
+int erts_code_space_end(ErtsCodeSpace *owner, int commit)
+{
+    ErtsIsolateNamespaceState *ns = owner->namespace;
+    ErtsCodeIndex dst = erts_code_space_staging(owner);
+    if (owner->phase != CODE_SPACE_STAGING ||
+        erts_module_namespace_check_end(erts_isolate_namespace_module_state(ns), dst, commit))
+        return 1;
+    /* Borrowed children must not be independently staged while this transaction
+     * owns them. Code/literal retirement and instruction barriers are separate
+     * execution obligations, not inferred from a table-level abort or commit. */
+    if (erts_catch_namespace_end_staging(erts_isolate_namespace_catches(ns), dst) ||
+        erts_code_table_end_staging(erts_isolate_namespace_funs(ns), dst) ||
+        erts_export_namespace_end_staging(erts_isolate_namespace_exports(ns), dst) ||
+        erts_code_table_end_staging(erts_isolate_namespace_records(ns), dst) ||
+        erts_module_namespace_end_staging(erts_isolate_namespace_module_state(ns), dst, commit) ||
+        erts_range_namespace_end_staging(erts_isolate_namespace_ranges(ns), commit))
+        erts_exit(ERTS_ABORT_EXIT, "Code-space transaction lost child ownership\n");
+    owner->phase = commit ? CODE_SPACE_READY : CODE_SPACE_IDLE;
+    return 0;
+}
+int erts_code_space_commit(ErtsCodeSpace *owner)
+{
+    ErtsIsolateNamespaceState *ns = owner->namespace;
+    ErtsExportNamespace *exports = erts_isolate_namespace_exports(ns);
+    ErtsCodeTable *funs = erts_isolate_namespace_funs(ns), *records = erts_isolate_namespace_records(ns);
+    ErtsCodeIndex ix;
+    if (owner->phase != CODE_SPACE_READY) return 1;
+    erts_export_namespace_write_lock(exports);
+    erts_code_table_write_lock(funs);
+    erts_code_table_write_lock(records);
+    ix = erts_code_space_staging(owner);
+    erts_atomic32_set_nob(&owner->active, ix);
+    erts_atomic32_set_nob(&owner->staging, (ix + 1) % ERTS_NUM_CODE_IX);
+    owner->phase = CODE_SPACE_IDLE;
+    erts_code_table_write_unlock(records);
+    erts_code_table_write_unlock(funs);
+    erts_export_namespace_write_unlock(exports);
+    return 0;
+}
 void erts_start_staging_code_ix(int num_new)
 {
-    beam_catches_start_staging();
-    erts_fun_start_staging();
-    export_start_staging();
-    erts_record_start_staging();
-    module_start_staging();
-    erts_start_staging_ranges(num_new);
+    ERTS_LC_ASSERT(!erts_initialized || erts_has_code_stage_permission());
+    if (erts_code_space_start(diagnostic_code_space, num_new))
+        erts_exit(ERTS_ABORT_EXIT, "Cannot stage diagnostic code space\n");
     CIX_TRACE("start");
 }
-
 void erts_end_staging_code_ix(void)
 {
-    beam_catches_end_staging(1);
-    erts_fun_end_staging(1);
-    export_end_staging(1);
-    erts_record_end_staging(1);
-    module_end_staging(1);
-    erts_end_staging_ranges(1);
+    ERTS_LC_ASSERT(erts_active_code_ix() == erts_staging_code_ix() || erts_has_code_stage_permission());
+    if (erts_code_space_end(diagnostic_code_space, 1))
+        erts_exit(ERTS_ABORT_EXIT, "Cannot end diagnostic code space\n");
     CIX_TRACE("end");
 }
-
 void erts_commit_staging_code_ix(void)
 {
-    /* We need these locks as we are about to make the next code index
-     * active. */
-    extern void export_staged_write_lock(void);
-    extern void export_staged_write_unlock(void);
-    extern void fun_staged_write_lock(void);
-    extern void fun_staged_write_unlock(void);
-    extern void record_staged_write_lock(void);
-    extern void record_staged_write_unlock(void);
-    ErtsCodeIndex ix;
-
-    export_staged_write_lock();
-    fun_staged_write_lock();
-    record_staged_write_lock();
-
-    {
-        ix = erts_staging_code_ix();
-        erts_atomic32_set_nob(&the_active_code_index, ix);
-        ix = (ix + 1) % ERTS_NUM_CODE_IX;
-        erts_atomic32_set_nob(&the_staging_code_index, ix);
-    }
-
-    record_staged_write_unlock();
-    fun_staged_write_unlock();
-    export_staged_write_unlock();
-
+    if (erts_code_space_commit(diagnostic_code_space))
+        erts_exit(ERTS_ABORT_EXIT, "Cannot commit diagnostic code space\n");
     erts_tracer_nif_clear();
     CIX_TRACE("activate");
 }
-
 void erts_abort_staging_code_ix(void)
 {
-    beam_catches_end_staging(0);
-    erts_fun_end_staging(0);
-    export_end_staging(0);
-    erts_record_end_staging(0);
-    module_end_staging(0);
-    erts_end_staging_ranges(0);
+    ERTS_LC_ASSERT(erts_active_code_ix() == erts_staging_code_ix() || erts_has_code_stage_permission());
+    if (erts_code_space_end(diagnostic_code_space, 0))
+        erts_exit(ERTS_ABORT_EXIT, "Cannot abort diagnostic code space\n");
     CIX_TRACE("abort");
 }
 
@@ -364,14 +428,14 @@ bool erts_try_seize_code_mod_permission_aux(void (*aux_func)(void *),
                                            void *aux_arg)
 {
     ASSERT(aux_func != NULL);
-    return try_seize_code_permission(&code_mod_permission, NULL,
+    return try_seize_code_permission(&diagnostic_code_space->modification, NULL,
                                      aux_func, aux_arg);
 }
 
 #ifdef ERTS_ENABLE_LOCK_CHECK
 void erts_lc_soften_code_mod_permission_check(void)
 {
-    code_mod_permission.lc_soft_check = 1;
+    diagnostic_code_space->modification.lc_soft_check = 1;
 }
 #endif
 
@@ -382,12 +446,12 @@ bool erts_try_seize_code_mod_permission(Process* c_p)
     if (CWP_DBG_FORCE_TRAP(c_p))
         return false;
 
-    return try_seize_code_permission(&code_mod_permission, c_p, NULL, NULL);
+    return try_seize_code_permission(&diagnostic_code_space->modification, c_p, NULL, NULL);
 }
 
 void erts_release_code_mod_permission(void)
 {
-    release_code_permission(&code_mod_permission, NULL);
+    release_code_permission(&diagnostic_code_space->modification, NULL);
 }
 
 bool erts_try_seize_code_stage_permission(Process* c_p)
@@ -397,11 +461,11 @@ bool erts_try_seize_code_stage_permission(Process* c_p)
     if (CWP_DBG_FORCE_TRAP(c_p))
         return false;
 
-    return try_seize_code_permission(&code_stage_permission, c_p, NULL, NULL);
+    return try_seize_code_permission(&diagnostic_code_space->staging_permission, c_p, NULL, NULL);
 }
 
 void erts_release_code_stage_permission(void) {
-    release_code_permission(&code_stage_permission, NULL);
+    release_code_permission(&diagnostic_code_space->staging_permission, NULL);
 }
 
 bool erts_try_seize_code_load_permission(Process* c_p) {
@@ -411,8 +475,8 @@ bool erts_try_seize_code_load_permission(Process* c_p) {
         return false;
     }
 
-    if (try_seize_code_permission(&code_stage_permission, c_p, NULL, NULL)) {
-        if (try_seize_code_permission(&code_mod_permission, c_p, NULL, NULL)) {
+    if (try_seize_code_permission(&diagnostic_code_space->staging_permission, c_p, NULL, NULL)) {
+        if (try_seize_code_permission(&diagnostic_code_space->modification, c_p, NULL, NULL)) {
             return true;
         }
 
@@ -434,12 +498,12 @@ void erts_reject_code_permissions(Process *p) {
            & (ERTS_PSFLG_EXITING | ERTS_PSFLG_GC));
 
     if (xstate & ERTS_PXSFLG_HANDOVER_CODE_MOD_PERM) {
-        release_code_permission(&code_mod_permission, p);
+        release_code_permission(&diagnostic_code_space->modification, p);
         erts_atomic32_read_band_nob(&p->xstate,
                                     ~ERTS_PXSFLG_HANDOVER_CODE_MOD_PERM);
     }
     if (xstate & ERTS_PXSFLG_HANDOVER_CODE_STAGE_PERM) {
-        release_code_permission(&code_stage_permission, p);
+        release_code_permission(&diagnostic_code_space->staging_permission, p);
         erts_atomic32_read_band_nob(&p->xstate,
                                     ~ERTS_PXSFLG_HANDOVER_CODE_STAGE_PERM);
     }
@@ -506,11 +570,11 @@ int erts_has_code_load_permission(void) {
 }
 
 int erts_has_code_stage_permission(void) {
-    return has_code_permission(&code_stage_permission, NULL);
+    return has_code_permission(&diagnostic_code_space->staging_permission, NULL);
 }
 
 int erts_has_code_mod_permission(void) {
-    return has_code_permission(&code_mod_permission, NULL);
+    return has_code_permission(&diagnostic_code_space->modification, NULL);
 }
 #endif
 

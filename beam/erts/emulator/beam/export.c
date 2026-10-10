@@ -251,7 +251,7 @@ static int export_in_table(ErtsExportNamespace *owner, ExportEntry *entry, unsig
     return 0;
 }
 
-int erts_export_namespace_start_staging(ErtsExportNamespace *owner, unsigned src, unsigned dst)
+static int export_start(ErtsExportNamespace *owner, unsigned src, unsigned dst, int apply)
 {
     int missing = 0;
     if (src >= ERTS_NUM_CODE_IX || dst >= ERTS_NUM_CODE_IX || src == dst)
@@ -270,6 +270,10 @@ int erts_export_namespace_start_staging(ErtsExportNamespace *owner, unsigned src
     }
     if (missing > owner->limit - owner->tables[dst].entries)
         goto refuse;
+    if (!apply) {
+        erts_rwmtx_rwunlock(&owner->lock);
+        return 0;
+    }
     for (int i = 0; i < owner->tables[src].entries; ++i) {
         ExportEntry *entry = (ExportEntry *)erts_index_lookup(&owner->tables[src], i);
         entry->object->dispatch.addresses[dst] = entry->object->dispatch.addresses[src];
@@ -284,6 +288,16 @@ refuse:
     return 1;
 }
 
+int erts_export_namespace_check_staging(ErtsExportNamespace *owner, unsigned src, unsigned dst)
+{
+    return export_start(owner, src, dst, 0);
+}
+int erts_export_namespace_start_staging(ErtsExportNamespace *owner, unsigned src, unsigned dst)
+{
+    return export_start(owner, src, dst, 1);
+}
+void erts_export_namespace_write_lock(ErtsExportNamespace *owner) { erts_rwmtx_rwlock(&owner->lock); }
+void erts_export_namespace_write_unlock(ErtsExportNamespace *owner) { erts_rwmtx_rwunlock(&owner->lock); }
 int erts_export_namespace_end_staging(ErtsExportNamespace *owner, unsigned dst)
 {
     int result = 1;
@@ -348,20 +362,15 @@ void init_export_table(ErtsExportNamespace *owner)
     erts_export_literals_bind(owner->literals);
 }
 
-void export_staged_write_lock(void);
-void export_staged_write_unlock(void);
-void export_staged_write_lock(void) { erts_rwmtx_rwlock(&diagnostic_exports->lock); }
-void export_staged_write_unlock(void) { erts_rwmtx_rwunlock(&diagnostic_exports->lock); }
-
 int erts_export_table_limit(void) { return diagnostic_exports->limit; }
 
 void export_info(fmtfn_t to, void *arg)
 {
     int lock = !ERTS_IS_CRASH_DUMPING;
-    if (lock) export_staged_write_lock();
+    if (lock) erts_export_namespace_write_lock(diagnostic_exports);
     index_info(to, arg, &diagnostic_exports->tables[erts_active_code_ix()]);
     hash_info(to, arg, &diagnostic_exports->tables[erts_staging_code_ix()].htable);
-    if (lock) export_staged_write_unlock();
+    if (lock) erts_export_namespace_write_unlock(diagnostic_exports);
 }
 
 const Export *erts_find_export_entry(Eterm m, Eterm f, unsigned a, ErtsCodeIndex ix)
@@ -449,18 +458,4 @@ const Export *export_get(const Export *e)
 {
     return erts_find_export_entry(e->info.mfa.module, e->info.mfa.function,
                                   e->info.mfa.arity, erts_active_code_ix());
-}
-void export_start_staging(void)
-{
-    if (erts_export_namespace_start_staging(diagnostic_exports, erts_active_code_ix(),
-                                           erts_staging_code_ix()))
-        erts_exit(ERTS_ABORT_EXIT, "Cannot start diagnostic export staging\n");
-}
-void export_end_staging(int commit)
-{
-    /* As before, export stubs remain in inactive tables on abort. Whole-code-space
-     * rollback/publication belongs to the coordinating code-index protocol. */
-    (void) commit;
-    if (erts_export_namespace_end_staging(diagnostic_exports, erts_staging_code_ix()))
-        erts_exit(ERTS_ABORT_EXIT, "Cannot end diagnostic export staging\n");
 }

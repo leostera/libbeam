@@ -240,7 +240,7 @@ void BeamGlobalAssembler::emit_process_main() {
 
         /* Read the active code index, overriding it with
          * ERTS_SAVE_CALLS_CODE_IX when save_calls is enabled (ARG1 != 0). */
-        mov_imm(TMP1, &the_active_code_index);
+        mov_imm(TMP1, erts_diagnostic_active_code_index());
         a.ldr(TMP1.w(), a64::Mem(TMP1));
         a.mov(TMP2, imm(ERTS_SAVE_CALLS_CODE_IX));
         a.cmp(ARG1, ZERO);

@@ -992,7 +992,8 @@ Eterm erts_finish_loading(Binary *loader_state, Process *c_p,
 Eterm erts_preload_module(Process *c_p, ErtsProcLocks c_p_locks,
                           Eterm group_leader, Eterm *mod,
                           const byte *code, Uint size);
-void init_load(void);
+typedef struct ErtsIsolateNamespaceState ErtsIsolateNamespaceState;
+void init_load(ErtsIsolateNamespaceState *);
 const ErtsCodeMFA* erts_find_function_from_pc(ErtsCodePtr pc);
 ErtsCodePtr erts_find_next_code_for_line(const BeamCodeHeader* code_hdr,
                                          unsigned int line,
@@ -1003,17 +1004,16 @@ void erts_set_current_function(FunctionInfo* fi, const ErtsCodeMFA* mfa);
 Eterm erts_make_stub_module(Process* p, Eterm Mod, Eterm Beam, Eterm Info);
 
 /* beam_ranges.c */
-void erts_init_ranges(void);
-void erts_start_staging_ranges(int num_new);
-void erts_end_staging_ranges(int commit);
+typedef struct ErtsRangeNamespace ErtsRangeNamespace;
+void erts_init_ranges(ErtsRangeNamespace *);
 void erts_update_ranges(const BeamCodeHeader* code, Uint size);
 void erts_remove_from_ranges(const BeamCodeHeader* code);
 UWord erts_ranges_sz(void);
 void erts_lookup_function_info(FunctionInfo* fi,
                                ErtsCodePtr pc,
                                int full_info);
-extern ErtsLiteralArea** erts_dump_lit_areas;
-extern Uint erts_dump_num_lit_areas;
+ErtsLiteralArea **erts_diagnostic_dump_literal_areas(void);
+Uint erts_diagnostic_dump_literal_capacity(void);
 
 /* export.c */
 

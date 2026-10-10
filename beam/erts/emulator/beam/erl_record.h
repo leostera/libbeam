@@ -94,7 +94,9 @@ typedef struct {
 #define record_field_count(x)                                           \
     (header_arity(*record_val(x)) - sizeof(ErtsRecordInstance)/sizeof(Eterm) + 1)
 
-void erts_record_init_table(void);
+typedef struct ErtsCodeTable ErtsCodeTable;
+ErtsCodeTable *erts_record_namespace_create(int limit);
+void erts_record_init_table(ErtsCodeTable *);
 
 void erts_record_module_delete(Eterm module);
 
@@ -113,8 +115,6 @@ Eterm erl_get_record_field(Process* p, Eterm src, Eterm id, Eterm field);
 bool erl_get_record_elements(Process* P, Eterm* reg, Eterm src,
                              Uint size, const Eterm* new_p);
 
-void erts_record_start_staging(void);
-void erts_record_end_staging(int commit);
 
 Eterm erl_create_local_native_record(Process* p, Eterm* reg,
                                      Eterm cons, Uint live,

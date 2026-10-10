@@ -809,7 +809,7 @@ init_literal_areas(void)
 
     code_ix = erts_active_code_ix();
 
-    lit_areas = area_p = erts_dump_lit_areas;
+    lit_areas = area_p = erts_diagnostic_dump_literal_areas();
     num_lit_areas = 0;
     for (i = 0; i < module_code_size(code_ix); i++) {
 	modp = module_code(i, code_ix);
@@ -826,7 +826,7 @@ init_literal_areas(void)
     }
 
     num_lit_areas = area_p - lit_areas;
-    ASSERT(num_lit_areas <= erts_dump_num_lit_areas);
+    ASSERT(num_lit_areas <= erts_diagnostic_dump_literal_capacity());
     for (i = 0; i < num_lit_areas; i++) {
         lit_areas[i]->off_heap = 0;
     }

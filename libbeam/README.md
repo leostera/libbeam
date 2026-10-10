@@ -44,11 +44,11 @@ disposal work. [Private atom namespace state](../docs/rfds/0002-owned-atom-state
 now owns atom indices, locks and reclaimable name storage alongside module metadata.
 [Diagnostic startup](../docs/rfds/0002-diagnostic-namespace-state.md) now uses that
 same state-owned atom/module storage; cached global atom-name literals are gone.
-[Export tables](../docs/rfds/0002-owned-export-tables.md) and their
-[external-fun literals](../docs/rfds/0002-export-literal-ownership.md) are now
-namespace-owned too, including diagnostic loading. Local funs, coordinated code
-transactions, private executable loading and process context propagation remain
-unimplemented.
+The [code-space ownership batch](../docs/rfds/0002-owned-code-space.md) now includes
+exports/literals, funs, records, catches, ranges, old-code locks, unsealed tracking
+and coordinated table transactions. Diagnostic execution uses those components.
+Private loader/process context propagation, executable/literal retirement and
+public Engine/Isolate construction remain unfinished.
 [`../beam/`](../beam/) is a tracked OTP snapshot. Edit emulator sources directly
 and commit them alongside embedding changes; there is no submodule or patch series.
 No Realm implementation is part of the active source.

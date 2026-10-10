@@ -151,7 +151,20 @@ const ErtsCodeMFA *erts_code_to_codemfa(ErtsCodePtr I);
 
 /* Called once at emulator initialization.
  */
-void erts_code_ix_init(void);
+typedef struct ErtsCodeSpace ErtsCodeSpace;
+typedef struct ErtsIsolateNamespaceState ErtsIsolateNamespaceState;
+ErtsCodeSpace *erts_code_space_create(ErtsIsolateNamespaceState *);
+void erts_code_ix_init(ErtsCodeSpace *);
+ErtsCodeIndex erts_code_space_active(ErtsCodeSpace *);
+ErtsCodeIndex erts_code_space_staging(ErtsCodeSpace *);
+/* Exclusive staging authority; borrowed children cannot be staged separately
+ * during a transaction. Publication here rotates tables, not execution barriers
+ * or code/literal retirement. The diagnostic execution protocol supplies those. */
+int erts_code_space_start(ErtsCodeSpace *, int num_new);
+int erts_code_space_end(ErtsCodeSpace *, int commit);
+int erts_code_space_commit(ErtsCodeSpace *);
+int erts_code_space_can_discard(ErtsCodeSpace *);
+int erts_code_space_discard(ErtsCodeSpace *);
 
 /* Return active code index.
  * Is guaranteed to be valid until the calling BIF returns.
@@ -314,8 +327,8 @@ int erts_has_code_mod_permission(void);
 #define ASSERT_MFA(MFA)                                                 \
     ASSERT(is_atom((MFA)->module) && is_atom((MFA)->function))
 
-extern erts_atomic32_t the_active_code_index;
-extern erts_atomic32_t the_staging_code_index;
+erts_atomic32_t *erts_diagnostic_active_code_index(void);
+erts_atomic32_t *erts_diagnostic_staging_code_index(void);
 
 #if ERTS_GLB_INLINE_INCL_FUNC_DEF
 
@@ -361,11 +374,11 @@ const ErtsCodeMFA *erts_code_to_codemfa(ErtsCodePtr I)
 
 ERTS_GLB_INLINE ErtsCodeIndex erts_active_code_ix(void)
 {
-    return erts_atomic32_read_nob(&the_active_code_index);
+    return erts_atomic32_read_nob(erts_diagnostic_active_code_index());
 }
 ERTS_GLB_INLINE ErtsCodeIndex erts_staging_code_ix(void)
 {
-    return erts_atomic32_read_nob(&the_staging_code_index);
+    return erts_atomic32_read_nob(erts_diagnostic_staging_code_index());
 }
 
 #endif /* ERTS_GLB_INLINE_INCL_FUNC_DEF */

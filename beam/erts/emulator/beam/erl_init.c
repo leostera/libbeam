@@ -295,16 +295,16 @@ erl_init(ErtsEngine *engine, int ncpu,
     BIN_VH_MIN_SIZE = erts_next_heap_size(BIN_VH_MIN_SIZE, 0);
 
     erts_init_debugger();
-    erts_code_ix_init();
-    erts_init_fun_table();
     diagnostic_namespace = erts_isolate_namespace_create_diagnostic(
         engine, erts_atom_table_size, module_tab_sz, export_tab_sz);
     if (!diagnostic_namespace)
         erts_exit(ERTS_ERROR_EXIT, "Cannot construct diagnostic namespace state\n");
+    erts_code_ix_init(erts_isolate_namespace_code_space(diagnostic_namespace));
     init_atom_table(erts_isolate_namespace_atoms(diagnostic_namespace));
     init_export_table(erts_isolate_namespace_exports(diagnostic_namespace));
-    erts_record_init_table();
-    init_module_table(erts_isolate_namespace_module_slots(diagnostic_namespace));
+    erts_init_fun_table(erts_isolate_namespace_funs(diagnostic_namespace));
+    erts_record_init_table(erts_isolate_namespace_records(diagnostic_namespace));
+    init_module_table(erts_isolate_namespace_module_state(diagnostic_namespace));
     init_register_table();
     init_message();
 #ifdef BEAMASM
@@ -323,7 +323,7 @@ erl_init(ErtsEngine *engine, int ncpu,
     init_dist();
     erl_drv_thr_init();
     erts_init_io(port_tab_sz, port_tab_sz_ignore_files, legacy_port_tab);
-    init_load();
+    init_load(diagnostic_namespace);
     erts_init_bif();
     erts_init_bif_chksum();
     erts_init_bif_binary();

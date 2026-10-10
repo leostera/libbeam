@@ -12,9 +12,21 @@
 extern "C" {
 #endif
 /* Internal unpublished namespace state, not a runnable/public Isolate. Owns
- * private atoms, module metadata, export tables and external-fun literals.
- * Code-index coordination, execution, quotas and recoverable OOM remain pending. */
+ * private atoms, modules, exports/literals, funs, records, catches, ranges and
+ * coordinated code-index table transactions. Loader/process context propagation,
+ * execution retirement, quotas and recoverable OOM remain pending. */
 typedef struct ErtsIsolateNamespaceState ErtsIsolateNamespaceState;
+typedef struct ErtsCodeTable ErtsCodeTable;
+typedef struct ErtsCodeSpace ErtsCodeSpace;
+ErtsCodeSpace *erts_isolate_namespace_code_space(ErtsIsolateNamespaceState *);
+typedef struct ErtsCatchNamespace ErtsCatchNamespace;
+typedef struct ErtsRangeNamespace ErtsRangeNamespace;
+typedef struct ErtsModuleNamespace ErtsModuleNamespace;
+ErtsModuleNamespace *erts_isolate_namespace_module_state(ErtsIsolateNamespaceState *);
+ErtsRangeNamespace *erts_isolate_namespace_ranges(ErtsIsolateNamespaceState *);
+ErtsCatchNamespace *erts_isolate_namespace_catches(ErtsIsolateNamespaceState *);
+ErtsCodeTable *erts_isolate_namespace_funs(ErtsIsolateNamespaceState *);
+ErtsCodeTable *erts_isolate_namespace_records(ErtsIsolateNamespaceState *);
 ErtsIsolateNamespaceState *erts_isolate_namespace_create(ErtsEngine *, int atom_limit, int module_limit);
 /* Diagnostic initializer: only inside native preparation AFTER allocator setup.
  * Uses the same state/storage implementation; permanently retained until a real

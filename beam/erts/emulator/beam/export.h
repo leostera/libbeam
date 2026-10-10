@@ -145,8 +145,6 @@ int export_list_size(ErtsCodeIndex);
 int export_table_sz(void);
 int export_entries_sz(void);
 const Export *export_get(const Export*);
-void export_start_staging(void);
-void export_end_staging(int commit);
 
 #if ERTS_GLB_INLINE_INCL_FUNC_DEF
 

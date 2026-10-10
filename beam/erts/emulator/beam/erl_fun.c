@@ -30,6 +30,7 @@
 #include "erl_fun.h"
 #include "hash.h"
 #include "beam_common.h"
+#include "erl_code_table.h"
 
 #define FUN_INITIAL_SIZE   512
 #define FUN_LIMIT          (512*1024)
@@ -59,8 +60,9 @@ int erts_is_fun_loaded(const ErlFunEntry* fe, ErtsCodeIndex ix)
 
 /* ************************************************************************* */
 
-static HashValue fun_hash(ErlFunEntry *fe)
+static HashValue fun_hash(const void *object)
 {
+    const ErlFunEntry *fe = object;
     HashValue components[2];
 
 #ifdef ARCH_64
@@ -76,16 +78,18 @@ static HashValue fun_hash(ErlFunEntry *fe)
     return components[0] ^ components[1] ^ (HashValue)fe->index;
 }
 
-static int fun_cmp(ErlFunEntry *lhs, ErlFunEntry *rhs)
+static int fun_cmp(const void *a, const void *b)
 {
+    const ErlFunEntry *lhs = a, *rhs = b;
     return !(lhs->module == rhs->module &&
              lhs->index == rhs->index &&
              lhs->arity == rhs->arity &&
              !sys_memcmp(lhs->uniq, rhs->uniq, sizeof(lhs->uniq)));
 }
 
-static void fun_init(ErlFunEntry *dst, const ErlFunEntry *template)
+static void fun_init(void *target, const void *template)
 {
+    ErlFunEntry *dst = target;
     ErtsDispatchable *dispatch = &dst->dispatch;
 
     sys_memcpy(dst, template, sizeof(ErlFunEntry));
@@ -101,10 +105,9 @@ static void fun_init(ErlFunEntry *dst, const ErlFunEntry *template)
     dst->pend_purge_address = NULL;
 }
 
-static void fun_stage(ErlFunEntry *entry,
-                      ErtsCodeIndex src_ix,
-                      ErtsCodeIndex dst_ix)
+static void fun_stage(void *object, ErtsCodeIndex src_ix, ErtsCodeIndex dst_ix)
 {
+    ErlFunEntry *entry = object;
     ErtsDispatchable *dispatch = &entry->dispatch;
 
     /* Fun entries MUST NOT be updated during a purge! */
@@ -113,42 +116,52 @@ static void fun_stage(ErlFunEntry *entry,
     dispatch->addresses[dst_ix] = dispatch->addresses[src_ix];
 }
 
-#define ERTS_CODE_STAGED_PREFIX fun
-#define ERTS_CODE_STAGED_OBJECT_TYPE ErlFunEntry
-#define ERTS_CODE_STAGED_OBJECT_HASH fun_hash
-#define ERTS_CODE_STAGED_OBJECT_COMPARE fun_cmp
-#define ERTS_CODE_STAGED_OBJECT_INITIALIZE fun_init
-#define ERTS_CODE_STAGED_OBJECT_STAGE fun_stage
-#define ERTS_CODE_STAGED_OBJECT_ALLOC_TYPE ERTS_ALC_T_EXPORT
-#define ERTS_CODE_STAGED_TABLE_ALLOC_TYPE ERTS_ALC_T_EXPORT_TABLE
-#define ERTS_CODE_STAGED_TABLE_INITIAL_SIZE FUN_INITIAL_SIZE
-#define ERTS_CODE_STAGED_TABLE_LIMIT FUN_LIMIT
-
-#define ERTS_CODE_STAGED_WANT_FOREACH_ACTIVE
-#define ERTS_CODE_STAGED_WANT_ENTRY_BYTES
-#define ERTS_CODE_STAGED_WANT_TABLE_SIZE
-#define ERTS_CODE_STAGED_WANT_INFO
-
-#include "erl_code_staged.h"
-
-void erts_init_fun_table(void)
+static int fun_unpublished(const void *object)
 {
-    fun_staged_init();
+    const ErlFunEntry *entry = object;
+    if (entry->pend_purge_address) return 0;
+    for (int ix = 0; ix < ERTS_NUM_CODE_IX; ++ix)
+        if (entry->dispatch.addresses[ix] != beam_unloaded_fun) return 0;
+#ifdef BEAMASM
+    if (entry->dispatch.addresses[ERTS_SAVE_CALLS_CODE_IX] != beam_save_calls_fun) return 0;
+#endif
+    return 1;
+}
+
+static int fun_stage_ready(const void *object)
+{
+    return ((const ErlFunEntry *)object)->pend_purge_address == NULL;
+}
+ErtsCodeTable *erts_fun_namespace_create(int limit)
+{
+    ErtsCodeTableOps ops = {fun_hash, fun_cmp, fun_init, fun_stage, fun_unpublished, fun_stage_ready};
+    return erts_code_table_create(sizeof(ErlFunEntry), FUN_INITIAL_SIZE,
+        limit > 0 ? limit : FUN_LIMIT, ERTS_ALC_T_EXPORT, ERTS_ALC_T_EXPORT_TABLE,
+        "fun_staging_lock", ops);
+}
+
+/* Fixed diagnostic boundary; component storage never selects a current world. */
+static ErtsCodeTable *diagnostic_funs;
+void erts_init_fun_table(ErtsCodeTable *owner)
+{
+    ASSERT(owner && !diagnostic_funs);
+    diagnostic_funs = owner;
+    erts_code_table_bind(owner);
 }
 
 void erts_fun_info(fmtfn_t to, void *to_arg)
 {
-    fun_staged_info(to, to_arg);
+    erts_code_table_info(diagnostic_funs, erts_active_code_ix(), erts_staging_code_ix(), to, to_arg);
 }
 
 int erts_fun_table_sz(void)
 {
-    return fun_staged_table_size();
+    return erts_code_table_size(diagnostic_funs);
 }
 
 int erts_fun_entries_sz(void)
 {
-    return fun_staged_entry_bytes();
+    return erts_code_table_entry_bytes(diagnostic_funs);
 }
 
 struct fun_prepare_purge_args {
@@ -156,8 +169,9 @@ struct fun_prepare_purge_args {
     ErtsCodeIndex code_ix;
 };
 
-static void fun_purge_foreach(ErlFunEntry *fe, void *args_)
+static void fun_purge_foreach(void *object, void *args_)
 {
+    ErlFunEntry *fe = object;
     struct fun_prepare_purge_args *args = args_;
     struct erl_module_instance* modp = args->modp;
     const char *mod_start;
@@ -184,7 +198,7 @@ void erts_fun_purge_prepare(struct erl_module_instance* modp)
 
     ERTS_LC_ASSERT(erts_has_code_stage_permission());
 
-    fun_staged_foreach_active(fun_purge_foreach, &args);
+    erts_code_table_foreach(diagnostic_funs, erts_active_code_ix(), fun_purge_foreach, &args);
 }
 
 void erts_fun_purge_abort_prepare(ErlFunEntry **funs, Uint no)
@@ -247,8 +261,9 @@ struct dump_fun_foreach_args {
 };
 
 static void
-dump_fun_foreach(ErlFunEntry *fe, void *_args)
+dump_fun_foreach(void *object, void *_args)
 {
+    ErlFunEntry *fe = object;
     struct dump_fun_foreach_args *args = _args;
 
     erts_print(args->to, args->to_arg, "=fun\n");
@@ -264,10 +279,10 @@ void
 erts_dump_fun_entries(fmtfn_t to, void *to_arg)
 {
     struct dump_fun_foreach_args args = {to, to_arg, erts_active_code_ix()};
-    fun_staged_foreach_active(dump_fun_foreach, &args);
+    erts_code_table_foreach(diagnostic_funs, erts_active_code_ix(), dump_fun_foreach, &args);
 }
 
-static void init_fun_template(fun_template_t *template,
+static void init_fun_template(ErlFunEntry *template,
                               Eterm mod, int old_uniq, int old_index,
                               const byte* uniq, int index, int arity)
 {
@@ -275,7 +290,8 @@ static void init_fun_template(fun_template_t *template,
 
     ASSERT(is_atom(mod));
 
-    object = fun_staged_init_template(template);
+    sys_memset(template, 0, sizeof(*template));
+    object = template;
     object->old_index = old_index;
     object->old_uniq = old_uniq;
     object->index = index;
@@ -291,9 +307,9 @@ ErlFunEntry *erts_fun_entry_put(Eterm mod,
                                 int index,
                                 int arity)
 {
-    fun_template_t template;
+    ErlFunEntry template;
     init_fun_template(&template, mod, old_uniq, old_index, uniq, index, arity);
-    return fun_staged_upsert(&template);
+    return erts_code_table_diagnostic_upsert(diagnostic_funs, &template);
 }
 
 const ErlFunEntry *erts_fun_entry_get_or_make_stub(Eterm mod,
@@ -303,21 +319,7 @@ const ErlFunEntry *erts_fun_entry_get_or_make_stub(Eterm mod,
                                                    int index,
                                                    int arity)
 {
-    fun_template_t template;
+    ErlFunEntry template;
     init_fun_template(&template, mod, old_uniq, old_index, uniq, index, arity);
-    return fun_staged_upsert(&template);
+    return erts_code_table_diagnostic_upsert(diagnostic_funs, &template);
 }
-
-void erts_fun_start_staging(void)
-{
-    ERTS_LC_ASSERT(erts_has_code_stage_permission());
-    fun_staged_start_staging();
-}
-
-void erts_fun_end_staging(int commit)
-{
-    ERTS_LC_ASSERT((erts_active_code_ix() == erts_staging_code_ix()) ||
-                   erts_has_code_stage_permission());
-    fun_staged_end_staging(commit);
-}
-
