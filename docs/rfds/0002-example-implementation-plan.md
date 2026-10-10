@@ -103,6 +103,12 @@ executing after cleanup. No `_Exit` success path. Expected next frontier:
 
 **API:** `Engine::create_isolate` and the ownership beneath Isolate handles.
 
+**Partial storage progress:** [private atom state](0002-owned-atom-state.md) now
+bundles owned atom/index/name storage and module metadata in an engine-affine
+`ErtsIsolateNamespaceState`. Independent local indices and unpublished disposal
+are tested. This is not executable world construction or a public Isolate handle;
+process ownership, exports, code indices and execution remain pending.
+
 - Introduce a real `ErtsIsolate`/code-space context in ERTS: engine affinity,
   generation, lifecycle state, private table roots and retained ownership for
   asynchronous users. Start extracting the atom/module/export/code-index state
@@ -129,7 +135,8 @@ next frontier: `Isolate::load_module`.
 **First storage extraction:** [owned module tables](0002-owned-module-tables.md)
 now use instance-owned index/hash storage and record accounting, including in the
 existing diagnostic loader. Independent same-index records, growth/full handling
-and unpublished metadata disposal are tested. Atom ownership, private executable
+and unpublished metadata disposal are tested. Private atom storage is now owned
+by namespace state (see M2), but contextual atom resolution, private executable
 loading, code-index coordination and process context propagation remain undone;
 this does not satisfy M2/M3's gates.
 

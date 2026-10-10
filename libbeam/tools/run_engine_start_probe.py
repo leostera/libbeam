@@ -199,6 +199,13 @@ def main():
                  source / 'erts/emulator/beam/erl_engine.h',
                  source / 'erts/emulator/beam/erl_engine.c',
                  tools.parent / 'tests/native_module_table_roots_test.c',
+                 tools.parent / 'tests/native_atom_namespace_test.c',
+                 source / 'erts/emulator/beam/atom.c',
+                 source / 'erts/emulator/beam/atom.h',
+                 source / 'erts/emulator/beam/erl_lock_check.c',
+                 source / 'erts/emulator/beam/erl_atom_namespace.h',
+                 source / 'erts/emulator/beam/erl_isolate_state.c',
+                 source / 'erts/emulator/beam/erl_isolate_state.h',
                  source / 'erts/emulator/beam/erl_module_table.h',
                  source / 'erts/emulator/beam/module.c',
                  source / 'erts/emulator/beam/module.h',
@@ -301,22 +308,27 @@ def main():
             compile_settings = dict(line.split('=', 1) for line in
                 (output / 'compile-settings.log').read_text().splitlines()
                 if line.startswith(('CC=', 'CFLAGS=', 'INCLUDES=')))
-            roots_object = output / 'module-roots.o'
-            roots_host = output / 'module-roots'
-            run('compile-module-roots', shlex.split(compile_settings['CC']) +
-                shlex.split(compile_settings['CFLAGS']) + shlex.split(compile_settings['INCLUDES']) +
-                ['-c', str(tools.parent / 'tests/native_module_table_roots_test.c'),
-                 '-o', str(roots_object)], cwd)
-            run('link-module-roots', shlex.split(settings['CXX']) + [str(roots_object),
-                '-o', str(roots_host)] + shlex.split(settings['FLAGS']) + [str(copied)] +
-                shlex.split(settings['LIBS']), cwd)
-            run('module-roots', [str(roots_host), '-S', '2:2', '-SDcpu', '1:1',
-                '-SDio', '1', '-A', '0', '--', '-root', '/libbeam-missing-root',
-                '--', '-boot', '/libbeam-missing-boot'])
-            if (output / 'module-roots.log').read_text().splitlines().count(
-                    'NATIVE_MODULE_ROOT_GUARDS_OK synthetic_markers=12 loaded_beam=0 isolates=0') != 1:
-                raise RuntimeError('module resource-root guard witness missing')
+            components = [
+                ('module-roots', 'native_module_table_roots_test.c',
+                 'NATIVE_MODULE_ROOT_GUARDS_OK synthetic_markers=12 loaded_beam=0 isolates=0'),
+                ('atom-namespace', 'native_atom_namespace_test.c',
+                 'NATIVE_ATOM_NAMESPACE_OK local_indices=true owned_names=true peer_survives=true fresh_state=true global_atoms_unchanged=true loaded_beam=0')]
+            for name, fixture, marker in components:
+                obj = output / (name + '.o')
+                executable = output / name
+                run('compile-' + name, shlex.split(compile_settings['CC']) +
+                    shlex.split(compile_settings['CFLAGS']) + shlex.split(compile_settings['INCLUDES']) +
+                    ['-c', str(tools.parent / 'tests' / fixture), '-o', str(obj)], cwd)
+                run('link-' + name, shlex.split(settings['CXX']) + [str(obj),
+                    '-o', str(executable)] + shlex.split(settings['FLAGS']) + [str(copied)] +
+                    shlex.split(settings['LIBS']), cwd)
+                run(name, [str(executable), '-S', '2:2', '-SDcpu', '1:1',
+                    '-SDio', '1', '-A', '0', '--', '-root', '/libbeam-missing-root',
+                    '--', '-boot', '/libbeam-missing-boot'])
+                if (output / (name + '.log')).read_text().splitlines().count(marker) != 1:
+                    raise RuntimeError(name + ' witness missing')
             report['unpublished_module_root_guard_checks'] = 12
+            report['private_atom_namespace_state_checked'] = True
             run('compile-fixtures', [str(source / 'bin/erlc'), '-o', str(output),
                 str(fixtures / 'startup_probe.erl'), str(fixtures / 'engine_start_probe.erl')])
             command = [str(host), '-S', '2:2', '-SDcpu', '1:1', '-SDio', '1', '--',

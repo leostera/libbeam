@@ -173,6 +173,7 @@ static erts_lc_lock_order_t erts_lock_order[] = {
     {"sys_msg_q", 				NULL},
     {"fun_staging_lock",                        NULL},
     {"atom_tab",				NULL},
+    {"isolate_atom_tab",                         NULL},
     LEVEL,
     {"record_staging_lock",                     NULL},
     {"global_literals",                         NULL},

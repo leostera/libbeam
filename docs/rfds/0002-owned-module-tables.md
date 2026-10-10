@@ -3,6 +3,9 @@
 
 # Owned module-table component
 
+Checkpoint at `6add08e7`. The subsequent [private atom-state work](0002-owned-atom-state.md)
+bundles atom storage and this module component into unpublished isolate namespace state.
+
 First namespace-storage extraction beneath the unchanged two-isolate example.
 **This is not private BEAM loading, an Isolate implementation, or a passing
 application-isolation test.**

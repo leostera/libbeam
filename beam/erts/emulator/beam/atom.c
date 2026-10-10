@@ -31,6 +31,14 @@
 #include "hash.h"
 #include "atom.h"
 #include "erl_global_literals.h"
+#include "erl_atom_namespace.h"
+
+struct ErtsAtomNamespace {
+    IndexTable index;
+    erts_rwmtx_t lock;
+    Uint text_bytes;
+    int limit;
+};
 
 
 #define ATOM_SIZE  3000
@@ -109,6 +117,8 @@ const byte *erts_atom_get_name(const Atom *atom)
     byte *name;
     Uint size;
     Uint offset;
+    if (atom->owned_name)
+        return atom->owned_name;
     ERTS_GET_BITSTRING(atom->u.bin, name, offset, size);
     ASSERT(offset == 0 && (size % 8) == 0);
     (void) size;
@@ -126,10 +136,21 @@ atom_cmp(Atom* tmpl, Atom* obj)
 }
 
 
+static int atom_ordinal(const byte *name, int len)
+{
+    unsigned char c[4] = {0, 0, 0, 0};
+    int i;
+    /* First three bytes + seven bits: leave the sign bit free for comparison. */
+    for (i = 0; i < len && i < 4; ++i)
+        c[i] = name[i];
+    return (c[0] << 23) + (c[1] << 15) + (c[2] << 7) + (c[3] >> 1);
+}
+
 static Atom*
 atom_alloc(Atom* tmpl)
 {
     Atom *obj = (Atom*) erts_alloc(ERTS_ALC_T_ATOM, sizeof(Atom));
+    obj->owned_name = NULL;
 
     {
         Eterm *hp;
@@ -163,25 +184,7 @@ atom_alloc(Atom* tmpl)
     atom_space += tmpl->len;
     
 
-    /*
-     * Precompute ordinal value of first 3 bytes + 7 bits.
-     * This is used by erl_utils.h:erts_cmp_atoms().
-     * We cannot use the full 32 bits of the first 4 bytes,
-     * since we use the sign of the difference between two
-     * ordinal values to represent their relative order.
-     */
-    {
-	unsigned char c[4];
-	int i;
-	int j;
-
-	j = (tmpl->len < 4) ? tmpl->len : 4;
-	for(i = 0; i < j; ++i)
-	    c[i] = tmpl->u.name[i];
-	for(; i < 4; ++i)
-	    c[i] = '\0';
-	obj->ord0 = (c[0] << 23) + (c[1] << 15) + (c[2] << 7) + (c[3] >> 1);
-    }
+    obj->ord0 = atom_ordinal(tmpl->u.name, tmpl->len);
     return obj;
 }
 
@@ -227,8 +230,9 @@ need_convertion:
 /*
  * erts_atom_put_index() may fail. Returns negative indexes for errors.
  */
-int
-erts_atom_put_index(const byte *name, Sint len, ErtsAtomEncoding enc, int trunc)
+static int
+atom_put_index(ErtsAtomNamespace *owner, const byte *name, Sint len,
+               ErtsAtomEncoding enc, int trunc)
 {
     byte utf8_copy[MAX_ATOM_SZ_FROM_LATIN1];
     const byte *text = name;
@@ -236,11 +240,14 @@ erts_atom_put_index(const byte *name, Sint len, ErtsAtomEncoding enc, int trunc)
     Sint no_latin1_chars;
     Atom a;
     int aix;
+    IndexTable *table = owner ? &owner->index : &erts_atom_table;
+    erts_rwmtx_t *lock = owner ? &owner->lock : &atom_table_lock;
 
     ERTS_UNDEF(no_latin1_chars, -1);
 
 #ifdef ERTS_ATOM_PUT_OPS_STAT
-    erts_atomic_inc_nob(&atom_put_ops);
+    if (!owner)
+        erts_atomic_inc_nob(&atom_put_ops);
 #endif
 
     if (len < 0) {
@@ -289,9 +296,9 @@ erts_atom_put_index(const byte *name, Sint len, ErtsAtomEncoding enc, int trunc)
 
     a.len = tlen;
     a.u.name = (byte *) text;
-    atom_read_lock();
-    aix = index_get(&erts_atom_table, (void*) &a);
-    atom_read_unlock();
+    erts_rwmtx_rlock(lock);
+    aix = index_get(table, (void*) &a);
+    erts_rwmtx_runlock(lock);
     if (aix >= 0) {
 	/* Already in table no need to verify it */
 	return aix;
@@ -329,10 +336,27 @@ erts_atom_put_index(const byte *name, Sint len, ErtsAtomEncoding enc, int trunc)
     a.len = tlen;
     a.latin1_chars = (Sint16) no_latin1_chars;
     a.u.name = (byte *) text;
-    atom_write_lock();
-    aix = index_put(&erts_atom_table, (void*) &a);
-    atom_write_unlock();
+    erts_rwmtx_rwlock(lock);
+    /* Recheck under the writer lock: another writer may have interned it. */
+    aix = index_get(table, &a);
+    if (aix < 0) {
+        if (owner && table->entries >= owner->limit)
+            aix = -3;
+        else {
+            aix = index_put(table, &a);
+            if (owner)
+                owner->text_bytes += tlen;
+        }
+    }
+    erts_rwmtx_rwunlock(lock);
     return aix;
+}
+
+int
+erts_atom_put_index(const byte *name, Sint len, ErtsAtomEncoding enc, int trunc)
+{
+    /* Explicit diagnostic-world adapter, not a current-isolate selector. */
+    return atom_put_index(NULL, name, len, enc, trunc);
 }
 
 /*
@@ -498,6 +522,118 @@ init_atom_table(void)
     ASSERT(erts_atom_get_name(atom_tab(ix)));
     }
 
+}
+
+/* Private names never enter the process-global literal registry. Records and
+ * UTF-8 text share one allocation, reclaimed with the owning index/hash table. */
+static Atom *private_atom_alloc(Atom *tmpl)
+{
+    Atom *obj = erts_alloc(ERTS_ALC_T_ATOM, sizeof(*obj) + tmpl->len + 1);
+    byte *text = (byte *)(obj + 1);
+    sys_memcpy(text, tmpl->u.name, tmpl->len);
+    text[tmpl->len] = 0;
+    obj->owned_name = text;
+    obj->u.name = text;
+    obj->len = tmpl->len;
+    obj->latin1_chars = tmpl->latin1_chars;
+    obj->slot.index = -1;
+    obj->ord0 = atom_ordinal(text, tmpl->len);
+    return obj;
+}
+
+static void private_atom_free(Atom *atom)
+{
+    erts_free(ERTS_ALC_T_ATOM, atom);
+}
+
+ErtsAtomNamespace *erts_atom_namespace_create(int limit)
+{
+    ErtsAtomNamespace *owner;
+    HashFunctions f;
+    int i, predefined = 0;
+    while (erl_atom_names[predefined])
+        ++predefined;
+    if (limit < predefined || limit > MAX_ATOM_TABLE_SIZE)
+        return NULL;
+    owner = erts_alloc(ERTS_ALC_T_ATOM_TABLE, sizeof(*owner));
+    owner->text_bytes = 0;
+    owner->limit = limit;
+    erts_rwmtx_init(&owner->lock, "isolate_atom_tab", NIL,
+                   ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
+    f.hash = (H_FUN) atom_hash;
+    f.cmp = (HCMP_FUN) atom_cmp;
+    f.alloc = (HALLOC_FUN) private_atom_alloc;
+    f.free = (HFREE_FUN) private_atom_free;
+    f.meta_alloc = (HMALLOC_FUN) erts_alloc;
+    f.meta_free = (HMFREE_FUN) erts_free;
+    f.meta_print = (HMPRINT_FUN) erts_print;
+    erts_index_init(ERTS_ALC_T_ATOM_TABLE, &owner->index, "isolate_atom_tab",
+                    ATOM_SIZE, limit, f);
+    /* Preserve predefined indices without importing any diagnostic-world atoms. */
+    for (i = 0; i < predefined; ++i) {
+        Atom a;
+        int index;
+        a.len = sys_strlen(erl_atom_names[i]);
+        a.latin1_chars = a.len;
+        a.u.name = (byte *) erl_atom_names[i];
+        index = index_put(&owner->index, &a);
+        ASSERT(index == i);
+        (void) index;
+        owner->text_bytes += a.len;
+    }
+    return owner;
+}
+
+int erts_atom_namespace_put(ErtsAtomNamespace *owner, const unsigned char *name, size_t len)
+{
+    if (len > MAX_ATOM_SZ_LIMIT)
+        return ATOM_MAX_CHARS_ERROR;
+    if (!owner || (!name && len))
+        return ATOM_BAD_ENCODING_ERROR;
+    return atom_put_index(owner, name ? name : (const byte *) "", len,
+                          ERTS_ATOM_ENC_UTF8, 0);
+}
+
+int erts_atom_namespace_name(ErtsAtomNamespace *owner, int index,
+                           unsigned char *out, size_t capacity)
+{
+    int result = -1;
+    erts_rwmtx_rlock(&owner->lock);
+    if (index >= 0 && index < owner->index.entries) {
+        Atom *atom = (Atom *) erts_index_lookup(&owner->index, index);
+        if (capacity >= atom->len && (out || !atom->len)) {
+            if (atom->len)
+                sys_memcpy(out, erts_atom_get_name(atom), atom->len);
+            result = atom->len;
+        }
+    }
+    erts_rwmtx_runlock(&owner->lock);
+    return result;
+}
+
+int erts_atom_namespace_count(ErtsAtomNamespace *owner)
+{
+    int count;
+    erts_rwmtx_rlock(&owner->lock);
+    count = owner->index.entries;
+    erts_rwmtx_runlock(&owner->lock);
+    return count;
+}
+
+size_t erts_atom_namespace_text_bytes(ErtsAtomNamespace *owner)
+{
+    size_t bytes;
+    erts_rwmtx_rlock(&owner->lock);
+    bytes = owner->text_bytes;
+    erts_rwmtx_runlock(&owner->lock);
+    return bytes;
+}
+
+void erts_atom_namespace_discard_unpublished(ErtsAtomNamespace *owner)
+{
+    erts_index_destroy(&owner->index);
+    erts_rwmtx_destroy(&owner->lock);
+    erts_free(ERTS_ALC_T_ATOM_TABLE, owner);
 }
 
 void

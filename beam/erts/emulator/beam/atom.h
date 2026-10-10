@@ -56,6 +56,10 @@ typedef struct atom {
         byte* name;      /* name of atom, used by templates */
         Eterm bin;       /* name of atom, used when atom is in table*/
     } u;
+    /* Private namespace names are inline owned bytes, not global literals.
+     * NULL for diagnostic-world atoms using u.bin. Never dispatch a private
+     * atom through the global atom_tab() / atom-to-binary path. */
+    const byte *owned_name;
 } Atom;
 
 extern IndexTable erts_atom_table;
