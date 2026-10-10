@@ -15,13 +15,14 @@
     "wordsize": 64,
     "dispatch": "OTP NO_JUMP_TABLE numeric specific-instruction words",
     "continuation_words": 1,
+    "local_calls": "Verified function-entry labels/arity and continuation frames; generated local/move/tail calls, Y moves/swaps/initialization; private-entry reduction yields use the native function directory and owned MFA copy",
     "code_generation": "single; no hot reload",
     "native_imports": ["erlang:get_module_info/1", "erlang:get_module_info/2"],
     "native_kind": "heavy; these owned implementations may collect",
     "threading": "explicit-context bounded executor; one lazy joinable POSIX worker per Engine; Engine mutex serializes raw loader/heap/domain access; no tenant TLS",
     "literals": "bounded ETF subset plus ordinary immutable offheap binaries (binary-sources.json); no fun/map admission",
     "engine": "Owned shared native catalog and allocation substrate; C worlds and tasks retain Engine through physical retirement; worker-side orphan/space retirement and host lifetime checks share the mutex; final join follows host unlock",
-    "host_protocol": "C world/call/reclamation ownership and thin C++ adapter; copied binary input/output, reserved capacity, once-only completion and physical selected-world retirement; no additional opcode or BIF admission",
+    "host_protocol": "C world/call/reclamation ownership and thin C++ adapter; copied binary input/output, reserved capacity, once-only completion and physical selected-world retirement; the host protocol itself adds no opcode or BIF capabilities",
     "remaining": "Full A05/A06/A07 breadth and B-cluster stateful process execution/retirement remain outstanding; selected-profile public Isolates are implemented"
   }
 }

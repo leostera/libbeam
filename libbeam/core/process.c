@@ -84,9 +84,21 @@ static int pc_valid(LbProcess *p,const BeamInstr *pc)
 }
 static const LbMFA *entry_mfa(LbProcess *p,const BeamInstr *pc)
 {
-    Export *e;
-    for(e=p->entry_module->space->exports;e;e=e->next)
+    LbCodeSpace *space=p->entry_module->space;
+    LbCodeModule *module; Export *e; size_t i;
+    for(e=space->exports;e;e=e->next)
         if(e->dispatch.addresses[0]==pc) return &e->info.mfa;
+    /* Local calls can yield at non-exported entries. Use the emitted native
+     * function directory, not an export stub or a fabricated scheduling MFA.
+     * memcpy avoids aliasing instruction-word storage as an LbMFA object. */
+    for(module=space->modules;module;module=module->next)
+        for(i=0;i<lb_code_module_function_count(module);++i) {
+            const BeamInstr *info=(const BeamInstr *)module->words[i];
+            if(info+sizeof(LbCodeInfo)/sizeof(BeamInstr)==pc) {
+                memcpy(&p->local_mfa,info+offsetof(LbCodeInfo,mfa)/sizeof(BeamInstr),sizeof(p->local_mfa));
+                return &p->local_mfa;
+            }
+        }
     return NULL;
 }
 #define OpCase(name) case op_##name
@@ -94,6 +106,8 @@ static const LbMFA *entry_mfa(LbProcess *p,const BeamInstr *pc)
 #define ERTS_UNLIKELY(test) (test)
 #define x(i) reg[(i)]
 #define xb(offset) reg[(offset)/sizeof(Eterm)]
+#define yb(offset) E[(offset)/sizeof(Eterm)]
+#define Qb(word) (word)
 #define y(i) E[(i)]
 #define Ib(word) (word)
 #define tb(word) (word)

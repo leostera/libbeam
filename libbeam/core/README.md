@@ -5,7 +5,8 @@ See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md) and the
 [ordinary-binary extension](../../docs/rfds/0003-owned-binaries.md) and
 [C Engine lifecycle](../../docs/rfds/0003-engine-lifecycle.md) and
 [owned asynchronous executor](../../docs/rfds/0003-owned-executor.md) and
-[public Isolates/calls](../../docs/rfds/0003-public-isolates.md).
+[public Isolates/calls](../../docs/rfds/0003-public-isolates.md) and
+[local calls/Y roots](../../docs/rfds/0003-local-calls.md).
 
 This is the C runtime construction boundary, not a whole-ERTS link. It now loads
 and executes ordinary `first_slice.erl` through generated BEAM transformations,
@@ -51,6 +52,9 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   No lazy loading, hot reload, NIF loading or root swapping.
 - `process.c`, `heap.c`: explicit X/Y/continuation/reduction/exception state,
   bounded generated interpreter dispatch and selected copying-GC algorithms.
+  Local calls use verified entry labels and native continuations; private-entry
+  reduction yields resolve real function headers. Saved Y roots survive native
+  allocation and forced copying collection, including allocation failure/retry.
   No per-process workers, scheduler-data TLS, global process table or implicit OTP services.
 - `binary.c`: real immutable refcounted payloads, native BinRef/SubBits layouts,
   owner-local offheap chains, GC sweep and physical release. Literal/metadata

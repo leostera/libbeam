@@ -60,7 +60,8 @@ LbCodeStatus lb_verify_program(LoaderState *st)
          * merely because it has more operands than the generic fixed prefix. */
         switch(op->op) {
         case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_label_1:case genop_line_1:
-        case genop_move_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:
+        case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:
+        case genop_call_2:case genop_call_only_2:case genop_call_last_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
         case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:
         case genop_jump_1:case genop_is_eq_exact_3:case genop_badmatch_1:case genop_case_end_1:break;
@@ -90,6 +91,9 @@ LbCodeStatus lb_verify_program(LoaderState *st)
         switch(op->op) {
         case genop_int_func_start_5:case genop_label_1:case genop_line_1:break;
         case genop_move_2:REQUIRE(source(st,&f,a[0]) && destination(&f,a[1]));break;
+        case genop_swap_2:
+            REQUIRE(source(st,&f,a[0]) && source(st,&f,a[1]));
+            REQUIRE(destination(&f,a[0]) && destination(&f,a[1])); break;
         case genop_test_heap_2:
             REQUIRE(a[0].type==TAG_u && a[1].type==TAG_u && a[0].val>=0 && a[1].val>=0);
             live=(Uint)a[1].val; REQUIRE(roots(&f,live)); trim_live(&f,live); f.heap=(Uint)a[0].val; break;
@@ -112,14 +116,29 @@ LbCodeStatus lb_verify_program(LoaderState *st)
             for(r=2;r<op->arity;++r) REQUIRE(source(st,&f,a[r]));
             REQUIRE(destination(&f,a[0])); f.heap-=(Uint)a[1].val+1; break;
         case genop_return_0:REQUIRE(f.frame==NO_FRAME && defined(f.x,0)); terminal=1;break;
+        case genop_call_2:case genop_call_only_2:case genop_call_last_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
-            REQUIRE(a[0].type==TAG_u && a[1].type==TAG_u && (Uint)a[1].val<st->beam.imports.count);
-            imp=(Uint)a[1].val; live=(Uint)a[0].val;
-            REQUIRE(live==st->beam.imports.entries[imp].arity && roots(&f,live));
-            if(op->op==genop_call_ext_2) { REQUIRE(f.frame!=NO_FRAME); memset(f.x,0,sizeof(f.x)); define(f.x,0); f.heap=0; }
-            else { if(op->op==genop_call_ext_only_2) REQUIRE(f.frame==NO_FRAME);
-                   else REQUIRE(a[2].type==TAG_u && f.frame==(Uint)a[2].val);
-                   terminal=1; }
+            REQUIRE(a[0].type==TAG_u); live=(Uint)a[0].val;
+            if(op->op==genop_call_2 || op->op==genop_call_only_2 || op->op==genop_call_last_3) {
+                size_t target;
+                REQUIRE(a[1].type==TAG_f && a[1].val>0 && (Uint)a[1].val<st->label_count);
+                target=labels[a[1].val];
+                /* A local call must enter a real function with matching arity,
+                 * never an internal branch label or the func_info error path. */
+                REQUIRE(target>0 && target<n && nodes[target-1].op->op==genop_int_func_start_5);
+                REQUIRE(live==(Uint)nodes[target-1].op->a[4].val);
+            } else {
+                REQUIRE(a[1].type==TAG_u && (Uint)a[1].val<st->beam.imports.count);
+                imp=(Uint)a[1].val; REQUIRE(live==st->beam.imports.entries[imp].arity);
+            }
+            REQUIRE(roots(&f,live));
+            if(op->op==genop_call_2 || op->op==genop_call_ext_2) {
+                REQUIRE(f.frame!=NO_FRAME); memset(f.x,0,sizeof(f.x)); define(f.x,0); f.heap=0;
+            } else {
+                if(op->op==genop_call_only_2 || op->op==genop_call_ext_only_2) REQUIRE(f.frame==NO_FRAME);
+                else REQUIRE(a[2].type==TAG_u && f.frame==(Uint)a[2].val);
+                terminal=1;
+            }
             break;
         case genop_is_eq_exact_3:
             REQUIRE(a[0].type==TAG_f && a[0].val>0 && (Uint)a[0].val<st->label_count);

@@ -9,6 +9,7 @@
 struct LbProcess {
     LbCodeModule *entry_module;
     const LbMFA *current;
+    LbMFA local_mfa; /* owned copy of a private function's native word header */
     const BeamInstr *i;
     Eterm reg[MAX_REG];
     Eterm *heap, *htop, *stop, *hend;

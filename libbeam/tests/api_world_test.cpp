@@ -38,12 +38,13 @@ static void reclaim(Isolate& isolate) {
     auto again=stopped.wait_until(deadline()); CHECK(again && again->code==ErrorCode::closed);
 }
 int main(int argc,char** argv) {
-    CHECK(argc==3); auto code=image(argv[1]), large_code=image(argv[2]); auto engine=take(Engine::create());
+    CHECK(argc==4); auto code=image(argv[1]), large_code=image(argv[2]), local_code=image(argv[3]);
+    auto engine=take(Engine::create());
     Bytes kept;
     {
         auto a=take(engine.create_isolate()), b=take(engine.create_isolate());
         CHECK(!a.load_module(view(code)) && !b.load_module(view(code)));
-        CHECK(!b.load_module(view(large_code)));
+        CHECK(!b.load_module(view(large_code)) && !b.load_module(view(local_code)));
         Bytes input(65,0x31);
         fail_next_new=true; error(a.start("async_slice","identity",view(input)),ErrorCode::limit);
         auto first=take(a.start("async_slice","identity",view(input)));
@@ -54,6 +55,10 @@ int main(int argc,char** argv) {
         error(first.wait_until(deadline()),ErrorCode::limit);
         CHECK(!fail_next_new); kept=take(first.wait_until(deadline()));
         CHECK(kept==Bytes(65,0x31)); error(first.wait_until(deadline()),ErrorCode::closed);
+        for(const char* function : {"identity","gc","tail"}) {
+            auto call=take(b.call("local_slice",function,view(kept)));
+            CHECK(take(call.wait_until(deadline()))==kept);
+        }
         auto loop=take(a.call("async_slice","loop",{nullptr,0}));
         error(loop.wait_until(Deadline::min()),ErrorCode::timeout);
         auto peer=take(b.call("async_slice","identity",view(input)));
@@ -101,6 +106,6 @@ int main(int argc,char** argv) {
         auto call=take(survivor.start("async_slice","identity",view(kept)));
         CHECK(take(call.wait_until(deadline()))==kept); reclaim(survivor);
     }
-    std::puts("API_WORLD_EXECUTION_OK real_worker=true copied_io=true copy_failure_retry=true deadlines=true terminal_once=true exceptions=true reclamation=true repeat=32 stateful_acceptance=false");
+    std::puts("API_WORLD_EXECUTION_OK real_worker=true copied_io=true copy_failure_retry=true deadlines=true terminal_once=true exceptions=true reclamation=true local_calls_y_gc=true repeat=32 stateful_acceptance=false");
     return 0;
 }

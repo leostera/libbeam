@@ -12,7 +12,14 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'i_call_ext_only_e i_move_call_ext_only_ec jump_f badmatch_x case_end_x '
          'i_allocate_zero_tt i_allocate_heap_zero_tIt allocate_tt allocate_heap_tIt '
          'i_call_ext_e i_move_call_ext_ce deallocate_Q i_is_eq_exact_immed_frc '
-         'i_is_eq_exact_immed_fxc move_jump_fcr move_jump_fcx').split()
+         'i_is_eq_exact_immed_fxc move_jump_fcr move_jump_fcx '
+         'move_xy move_yr move_yx move_yy move_ry move_cy swap_xx swap_yx swap_yy '
+         'i_call_f i_call_last_fQ i_call_only_f '
+         'move_call_cf move_call_xf move_call_yf move_call_last_cfQ move_call_last_xfQ move_call_last_yfQ '
+         'move_call_only_cf move_call_only_xf '
+         'move_deallocate_return_cQ move_deallocate_return_nQ move_deallocate_return_xQ move_deallocate_return_yQ '
+         'i_call_ext_last_eQ i_move_call_ext_last_eQc '
+         'i_init_y i_init2_yy i_init3_yyy i_init_seq3_y i_init_seq4_y i_init_seq5_y').split()
 
 
 def case(source, name):
@@ -54,6 +61,8 @@ def project(source):
         body=body.replace('I += I[1] + 0', 'I += (Sint)I[1]')
         body=body.replace('(I + (lbl) + 0)', '(I + (Sint)lbl)')
         body=body.replace('I += lbl + 0', 'I += (Sint)lbl')
+        body=body.replace('(I + (call_dest) + 0)', '(I + (Sint)call_dest)')
+        body=body.replace('I += call_dest + 0', 'I += (Sint)call_dest')
         body=body.replace('(E - HTOP) < (need + S_RESERVED)', '(Uint)(E - HTOP) < (need + S_RESERVED)')
         body=body.replace('PROCESS_MAIN_CHK_LOCKS(c_p);', '')
         body=body.replace('ERTS_VERIFY_UNUSED_TEMP_ALLOC(c_p);', '')
