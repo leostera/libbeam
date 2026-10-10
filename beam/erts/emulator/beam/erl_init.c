@@ -302,7 +302,8 @@ erl_init(ErtsEngine *engine, int ncpu,
     if (!diagnostic_namespace)
         erts_exit(ERTS_ERROR_EXIT, "Cannot construct diagnostic namespace state\n");
     init_atom_table(erts_isolate_namespace_atoms(diagnostic_namespace));
-    init_export_table(export_tab_sz);
+    init_export_table(export_tab_sz,
+                      erts_isolate_namespace_export_literals(diagnostic_namespace));
     erts_record_init_table();
     init_module_table(erts_isolate_namespace_module_slots(diagnostic_namespace));
     init_register_table();

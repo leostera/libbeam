@@ -11,6 +11,7 @@ run() ->
     no_executable_ports(),
     no_signal_administration(),
     atom_storage(),
+    export_literals(),
     3.75 = float_div(7.5, 2.0),
     1.25 = binary_to_float(<<"1.25">>),
     <<"1.250">> = float_to_binary(1.25, [{decimals, 3}]),
@@ -52,6 +53,22 @@ no_executable_ports() ->
     expect_undef(fun() -> os:cmd(Command, #{}) end),
     Ports = lists:sort(erlang:ports()),
     io:format("EXECUTABLE_PORTS_DENIED checks=11 forker_port=false~n").
+
+export_literals() ->
+    F = fun lists:reverse/1,
+    F = erlang:make_fun(lists, reverse, 1),
+    Abs = fun erlang:abs/1,
+    {F, Abs} = binary_to_term(term_to_binary({F, Abs})),
+    true = erlang:garbage_collect(),
+    [3,2,1] = F([1,2,3]),
+    3 = Abs(-3),
+    {module, lists} = erlang:fun_info(F, module),
+    "fun lists:reverse/1" = erlang:fun_to_list(F),
+    Parent = self(),
+    spawn(fun() -> Parent ! {external_fun_result, F([1,2])} end),
+    receive {external_fun_result, [2,1]} -> ok
+    after 5000 -> error(external_fun_timeout) end,
+    io:format("EXPORT_LITERAL_OK gc_roundtrip_and_dispatch=true~n").
 
 atom_storage() ->
     Names = [<<>>, <<"libbeam_atom_copy">>, <<0>>, <<255/utf8>>,

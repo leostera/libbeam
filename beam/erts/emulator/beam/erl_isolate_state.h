@@ -6,6 +6,7 @@
 #include "erl_embed.h"
 #include "erl_atom_namespace.h"
 #include "erl_module_table.h"
+#include "erl_export_literals.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -20,6 +21,7 @@ ErtsIsolateNamespaceState *erts_isolate_namespace_create(ErtsEngine *, int atom_
 ErtsIsolateNamespaceState *erts_isolate_namespace_create_diagnostic(ErtsEngine *, int, int);
 /* Borrowed children: do not discard separately or retain beyond their parent. */
 ErtsAtomNamespace *erts_isolate_namespace_atoms(ErtsIsolateNamespaceState *);
+ErtsExportLiterals *erts_isolate_namespace_export_literals(ErtsIsolateNamespaceState *);
 ErtsModuleTable *erts_isolate_namespace_modules(ErtsIsolateNamespaceState *); /* slot zero */
 ErtsModuleTable *erts_isolate_namespace_module_at(ErtsIsolateNamespaceState *, unsigned);
 /* Borrowed fixed slot array for diagnostic adapter initialization only. */

@@ -44,8 +44,9 @@ disposal work. [Private atom namespace state](../docs/rfds/0002-owned-atom-state
 now owns atom indices, locks and reclaimable name storage alongside module metadata.
 [Diagnostic startup](../docs/rfds/0002-diagnostic-namespace-state.md) now uses that
 same state-owned atom/module storage; cached global atom-name literals are gone.
-Private exports/code-index coordination, executable loading and process context
-propagation remain unimplemented.
+[External-fun literal storage](../docs/rfds/0002-export-literal-ownership.md) is now
+namespace-owned too. Export tables/code-index coordination, private executable
+loading and process context propagation remain unimplemented.
 [`../beam/`](../beam/) is a tracked OTP snapshot. Edit emulator sources directly
 and commit them alongside embedding changes; there is no submodule or patch series.
 No Realm implementation is part of the active source.

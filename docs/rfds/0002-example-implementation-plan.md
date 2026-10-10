@@ -134,6 +134,11 @@ next frontier: `Isolate::load_module`.
 
 ### M3 — Private BEAM loading, atoms and code resolution
 
+**Export lifetime dependency:** [external-fun literal ownership](0002-export-literal-ownership.md)
+now belongs to namespace state, including for diagnostic exports. Unpublished
+literal-area disposal and real external-fun bytecode behavior are tested. Export
+staged tables, local funs and transaction ownership remain pending.
+
 **API:** `Isolate::load_module`.
 
 **First storage extraction:** [owned module tables](0002-owned-module-tables.md)

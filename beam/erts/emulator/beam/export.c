@@ -30,7 +30,6 @@
 #include "export.h"
 #include "hash.h"
 #include "jit/beam_asm.h"
-#include "erl_global_literals.h"
 
 #define EXPORT_INITIAL_SIZE   4000
 #define EXPORT_LIMIT          (512*1024)
@@ -43,19 +42,13 @@ static int export_limit = EXPORT_LIMIT;
 #  define IF_DEBUG(x)
 #endif
 
+/* Fixed diagnostic adapter while staged export-table context propagation is
+ * pending. Literal storage belongs to the explicit namespace-state owner. */
+static ErtsExportLiterals *diagnostic_literals;
+
 static void create_shared_lambda(Export *export)
 {
-    ErlFunThing *lambda;
-    struct erl_off_heap_header **ohp;
-
-    lambda = (ErlFunThing*)erts_global_literal_allocate(ERL_FUN_SIZE, &ohp);
-
-    lambda->thing_word = MAKE_FUN_HEADER(export->info.mfa.arity, 0, 1);
-    lambda->entry.exp = export;
-
-    export->lambda = make_fun(lambda);
-
-    erts_global_literal_register(&export->lambda);
+    export->lambda = erts_export_literal_create(diagnostic_literals, export);
 }
 
 static HashValue export_hash(const Export *export)
@@ -130,8 +123,11 @@ static void export_stage(Export *export,
 #include "erl_code_staged.h"
 
 void
-init_export_table(int limit)
+init_export_table(int limit, ErtsExportLiterals *literals)
 {
+    ASSERT(literals && !diagnostic_literals);
+    diagnostic_literals = literals;
+    erts_export_literals_bind(literals);
     if (limit > 0) {
         export_limit = limit;
     }

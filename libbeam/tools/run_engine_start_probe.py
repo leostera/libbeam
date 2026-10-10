@@ -99,6 +99,7 @@ def run_host(command, cwd, env, log, timeout=60):
                     or text.splitlines().count('HOST_SIGNALS_OK dispositions=9 altstack=true mask=true usr1_delivered=true') != 1
                     or not host_markers(text, process.pid)
                     or text.splitlines().count('ATOM_STORAGE_OK copied_names=true empty_binary=true') != 1
+                    or text.splitlines().count('EXPORT_LITERAL_OK gc_roundtrip_and_dispatch=true') != 1
                     or thread_handle_marker(text) is None
                     or text.splitlines().count('HOST_ENGINE_OWNER_OK live_handles_private=true uninitialized_candidate_released=true') != 1):
                 raise RuntimeError('host control witness failed')
@@ -199,6 +200,11 @@ def main():
                  source / 'erts/emulator/beam/erl_embed.h',
                  source / 'erts/emulator/beam/erl_engine.h',
                  source / 'erts/emulator/beam/erl_engine.c',
+                 source / 'erts/emulator/beam/export.c',
+                 source / 'erts/emulator/beam/export.h',
+                 source / 'erts/emulator/beam/erl_export_literals.c',
+                 source / 'erts/emulator/beam/erl_export_literals.h',
+                 tools.parent / 'tests/native_export_literals_test.c',
                  tools.parent / 'tests/native_module_table_roots_test.c',
                  tools.parent / 'tests/native_atom_namespace_test.c',
                  source / 'erts/emulator/beam/atom.c',
@@ -314,6 +320,8 @@ def main():
                 (output / 'compile-settings.log').read_text().splitlines()
                 if line.startswith(('CC=', 'CFLAGS=', 'INCLUDES=')))
             components = [
+                ('export-literals', 'native_export_literals_test.c',
+                 'NATIVE_EXPORT_LITERALS_OK independent_areas=true peer_survives=true bound_retained=true private_execution=false'),
                 ('module-roots', 'native_module_table_roots_test.c',
                  'NATIVE_MODULE_ROOT_GUARDS_OK synthetic_markers=12 loaded_beam=0 isolates=0'),
                 ('atom-namespace', 'native_atom_namespace_test.c',

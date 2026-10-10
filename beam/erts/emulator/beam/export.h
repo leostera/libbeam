@@ -26,6 +26,7 @@
 #include "sys.h"
 #include "index.h"
 #include "code_ix.h"
+#include "erl_export_literals.h"
 
 /*
 ** Export entry
@@ -57,8 +58,8 @@ typedef struct export_
     /* Non-zero if this is a BIF that's traced. */
     int is_bif_traced;
 
-    /* Globally shared external fun for this export entry. This is always a
-     * literal. */
+    /* Namespace-owned external fun for this export entry. Always a literal;
+     * its owner must outlive every process/code reference to it. */
     Eterm lambda;
 
     /* This is a small trampoline function that can be used for lazy code
@@ -122,7 +123,8 @@ typedef struct export_
 #define DBG_CHECK_EXPORT(EP, CX)
 #endif
 
-void init_export_table(int limit);
+Eterm erts_export_literal_create(ErtsExportLiterals *, Export *);
+void init_export_table(int limit, ErtsExportLiterals *);
 void export_info(fmtfn_t, void *);
 int erts_export_table_limit(void);
 
