@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Leandro Ostera <leandro@ostera.io>
+"""Exact generated instruction bodies plus reviewed ownership-boundary edits.
+
+This is an explicit single interpreter capability profile, not an alternate
+bytecode, a fixture opcode parser, or dummy handlers for the remaining cases.
+"""
+import re
+
+NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c move_shift_cxx '
+         'move_return_c move_return_n move_return_x return put_tuple2_xI test_heap_It '
+         'i_call_ext_only_e i_move_call_ext_only_ec jump_f badmatch_x case_end_x '
+         'i_allocate_zero_tt i_allocate_heap_zero_tIt allocate_tt allocate_heap_tIt '
+         'i_call_ext_e i_move_call_ext_ce deallocate_Q i_is_eq_exact_immed_frc '
+         'i_is_eq_exact_immed_fxc move_jump_fcr move_jump_fcx').split()
+
+
+def case(source, name):
+    match = re.search(r'\bOpCase\('+re.escape(name)+r'\):\s*\{', source)
+    if not match: raise RuntimeError('Missing generated case '+name)
+    depth = 1
+    tokens = re.finditer(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|[{}]', source[match.end():], re.S)
+    for token in tokens:
+        if token[0]=='{': depth += 1
+        if token[0]=='}': depth -= 1
+        if depth==0: return source[match.start():match.end()+token.end()]
+    raise RuntimeError('Unbalanced generated case '+name)
+
+
+def group(source, name):
+    marker = source.index('OpCase('+name+'):')
+    start = source.rfind('\n{\n', 0, marker)+1
+    # Shared generated cases carry a common lexical scope and epilogue. Admit
+    # the whole group, never cut its labels or reconstruct the individual ops.
+    end = source.index('\n}\n', marker)+2
+    if start<=0 or end<=marker: raise RuntimeError('Missing shared case group '+name)
+    return source[start:end]
+
+
+def project(source):
+    bodies=[]
+    shared=group(source, 'deallocate_return0')
+    names=NAMES+re.findall(r'OpCase\((\w+)\)',shared)
+    selected=[(name,case(source,name)) for name in NAMES]+[('deallocation group',shared)]
+    for name, body in selected:
+        # No tracing/saved-call/lock instrumentation capability exists in this
+        # serialized interpreter. Remove those paths, not their semantic peers.
+        body=re.sub(r'^\s*DTRACE_\w+\([^;]+;', '', body, flags=re.M)
+        body=re.sub(r'if \(ERTS_PROC_GET_SAVED_CALLS_BUF\(c_p\) && FCALLS > neg_o_reds\) \{\s*save_calls\(c_p, ep\);\s*\} else \{\s*goto context_switch;\s*\}', 'goto context_switch;', body)
+        body=body.replace('erts_active_code_ix()', '0') # one immutable code generation; no hot load
+        # BEAM stores signed relative offsets in unsigned instruction words.
+        # Recover the signed value before C pointer arithmetic (also in asserts).
+        body=body.replace('(I + (I[1]) + 0)', '(I + (Sint)I[1])')
+        body=body.replace('I += I[1] + 0', 'I += (Sint)I[1]')
+        body=body.replace('(I + (lbl) + 0)', '(I + (Sint)lbl)')
+        body=body.replace('I += lbl + 0', 'I += (Sint)lbl')
+        body=body.replace('(E - HTOP) < (need + S_RESERVED)', '(Uint)(E - HTOP) < (need + S_RESERVED)')
+        body=body.replace('PROCESS_MAIN_CHK_LOCKS(c_p);', '')
+        body=body.replace('ERTS_VERIFY_UNUSED_TEMP_ALLOC(c_p);', '')
+        body=re.sub(r'FCALLS -= erts_garbage_collect_nobump\(c_p, need, reg, (.*), FCALLS\);',
+            r'if (!lb_process_collect_live(c_p, need, \1)) goto memory_failure;\n      FCALLS -= (Sint)c_p->last_gc_cost;', body)
+        body=re.sub(r'if \(ERTS_PSFLG_EXITING & erts_atomic32_read_nob\(&c_p->state\)\) \{\s*goto context_switch3;\s*\};', '', body)
+        if name in {'allocate_tt', 'allocate_heap_tIt'}:
+            # Host instruction-budget yields introduce safepoints between
+            # allocate and init_yregs. Keep all physical stack slots valid roots;
+            # the verifier still rejects logical reads before initialization.
+            body=body.replace('*E = NIL;', '*E = NIL;\n    for (unsigned lb_y=1; lb_y<needed; ++lb_y) E[lb_y]=NIL;')
+        if name=='put_tuple2_xI':
+            body=body.replace('ASSERT(arity != 0);',
+                'if (!arity || (Uint)(E-HTOP) < arity+1+S_RESERVED || c_p->heap_reserved < arity+1) goto malformed_code;\n  c_p->heap_reserved -= arity+1;')
+        if 'erts_' in body or 'ERTS_PROC_GET_' in body or 'save_calls(' in body:
+            raise RuntimeError('Unadapted execution dependency in '+name)
+        bodies.append(body)
+    support='\n'.join('case op_'+name+': return 1;' for name in names)
+    return '\n\n'.join(bodies)+'\n',support+'\n'

@@ -3,11 +3,13 @@
 
 # RFD 0003: Build libbeam additively from BEAM components
 
-Status: **Accepted direction; owned image, term/atom and generic-program preparation implemented.**
+Status: **Accepted direction; selected additive BEAM-word execution demonstrated.**
 
-The [A03–A07 checkpoint](0003-loader-program.md) includes real operand/literal
-preparation, not executable loading. Complete transformation/emission, publication
-and execution remain outstanding.
+The [first-execution record](0003-first-execution.md) connects the earlier
+[A03–A07 checkpoint](0003-loader-program.md) to real generated transformations,
+emission, publication, interpreter execution and copying GC for a limited profile.
+Full loader/literal/instruction breadth and Engine/Isolate API integration remain
+outstanding; neither unchanged public acceptance example passes.
 
 See the [A01/A02 term-and-atom admission record](0003-terms-and-atoms.md) for the
 selected BEAM representation, namespace identities, transactional image bindings

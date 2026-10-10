@@ -32,6 +32,8 @@ jobs:
               libbeam/tools/generate_atoms.py libbeam/tools/otp/make_tables \
               libbeam/tools/check_term_representation.py libbeam/tools/generate_opcodes.py \
               libbeam/tools/otp/beam_makeops libbeam/core/otp/loader-sources.json \
+              libbeam/core/otp/execution-sources.json libbeam/tools/project_transform.py \
+              libbeam/tools/project_dispatch.py \
               > "$build/source-hashes.txt"
             find libbeam/core/otp/opcodes -type f -print0 | sort -z | \
               xargs -0 sha256sum >> "$build/source-hashes.txt"
@@ -41,6 +43,23 @@ jobs:
             cmake --build "$build"
             ctest --test-dir "$build" --output-on-failure
           done
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28.3'
+      - name: Execute the selected additive profile (not Engine/Isolate acceptance)
+        shell: bash
+        run: |
+          set -euo pipefail
+          parent=$(mktemp -d "${RUNNER_TEMP}/libbeam-execution.XXXXXX")
+          python3 -B libbeam/tools/run_additive_slice.py --output "$parent/run"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: libbeam-execution-evidence
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/libbeam-execution.*/run/**/*.log
+            ${{ runner.temp }}/libbeam-execution.*/run/**/*.json
       - name: Check ordinary tracked snapshot layout
         run: |
           test -f beam/otp_build

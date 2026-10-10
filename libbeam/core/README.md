@@ -1,76 +1,79 @@
 # Additive C core
 
-See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md).
+See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md) and the
+[first-execution record](../../docs/rfds/0003-first-execution.md).
 
-This directory is the new runtime construction boundary. Its explicit CMake target
-contains bootstrap allocation ownership, the adapted BEAM-file parser, selected
-64-bit BEAM term definitions, owner-local atoms, and the owned generic-operation/
-literal preparation path. It still has no executable code publication or executor.
-It does not include or link whole ERTS and cannot yet execute BEAM code. The public
-Engine factory remains blocked; the existing acceptance examples remain unchanged.
+This is the C runtime construction boundary, not a whole-ERTS link. It now loads
+and executes ordinary `first_slice.erl` through generated BEAM transformations,
+specific-instruction words and generated interpreter cases. Tuple allocation,
+copying GC, literal/atom returns, `module_info/0,1`, bounded yields, exceptions and
+physical code retirement have execution consumers. This is a **limited profile**,
+not full A03–A07 coverage or a functioning public Engine/Isolate API. Both unchanged
+acceptance examples remain blocked at the public factory.
 
-`beam_image.c` prepares an owned, structurally checked image from ordinary BEAM
-bytes: code header, UTF-8 atom names, imports and exports. Unknown chunks remain
-in the owned copy. Image names remain file-local views; `atoms.c` can separately and transactionally
-bind them to real namespace atom words. The image itself leaves code and optional
-payloads uninterpreted. `beam_program.c` separately prepares generic operations,
-supported real literal terms and type/lambda declarations; it is not an executable
-loader. See the [A03–A07 checkpoint](../../docs/rfds/0003-loader-program.md). This is not an
-executable module loader. See the [transplant record](../../docs/rfds/0003-first-loader-slice.md)
-for source hashes, validation differences, lifetime contract and remaining cluster.
+## Boundaries
 
-`term.h` preserves the selected flat 64-bit/non-reservation BEAM tag profile,
-checked small construction, and basic tuple/list storage access. It is an internal
-C interface, not arbitrary-word validation or a heap/GC. `atoms.c` owns copied
-UTF-8 names, stable indices and binding leases; failed batches roll back all their
-new entries/backing. A bare atom Eterm does not carry its namespace: callers must
-preserve context, and bindings check the expected owner. See the
-[term/atom admission record](../../docs/rfds/0003-terms-and-atoms.md).
+- `alloc.c`: serialized fallible allocation domains, exact-base release and busy
+  destruction. Not a guest quota or a performant carrier allocator.
+- `term.h`, `atoms.c`: selected flat 64-bit BEAM terms and private atom namespaces.
+  Bindings retain namespaces. Bare atom words are namespace-relative, not
+  provenance-bearing capabilities. Prepared atom transactions also support
+  allocation-free commit after real code linking; abort restores backing and names.
+- `beam_image.c`: owned IFF bytes, file atoms, imports/exports and code header.
+  Image success alone grants no execution permission.
+- `beam_program.c`: owned generic operations, supported ETF literals and type/lambda
+  declarations. Its standalone preparation API still does not publish executable
+  code. The internal loader leaves atom identities provisional until publication.
+- `beam_transform.c`, `beam_emit.c`, `beam_verify.c`: generated whole transform
+  cases with fallible operation allocation, native word packing/fixups, and
+  profile-specific register/stack/heap dataflow admission. Missing dependencies
+  reject admission; they are never false/success-shaped helper implementations.
+- `code.c`: private export/module lookup, eager resolution of **all** imports,
+  atomic publication, retained entries/frames/import dependencies, and guarded
+  physical retirement. No lazy loading, hot reload, NIF loading or root swapping.
+- `process.c`, `heap.c`: explicit X/Y/continuation/reduction/exception state,
+  bounded generated interpreter dispatch and selected copying-GC algorithms.
+  No workers, scheduler-data TLS, global process table or implicit OTP services.
+- `bif_info.c`, `md5.c`: the two positive-listed `get_module_info` BIFs and actual
+  metadata/checksum behavior, not placeholders for compiler-generated imports.
 
-Predefined identities are built by the admitted OTP `make_tables` generator from
-[`otp/`](otp/) data. Python and Perl are build dependencies; only immutable atom
-outputs are compiled, not generated BIF implementations. Full opcode inputs are
-also pinned under `otp/opcodes/`; their unchanged `beam_makeops` generates the
-matching decoder/transform/emitter/dispatch artifacts. Only immutable metadata is
-compiled so far. No files are read by the runtime for these generation steps.
+All control APIs are serialized. Entry/process handles retain actual code and its
+literal storage. Returned term views borrow the process until its next mutating
+call or destruction. Runtime collection preserves outstanding heap reservations;
+new stack slots are valid roots even at host instruction-budget safepoints.
 
-The literal-table reader uses zlib with explicit domain-backed allocation callbacks.
-Zlib development headers/library are a build dependency. Program preparation has
-an explicit supported ETF subset; notably binaries larger than 64 bytes and maps,
-funs, refs, pids and ports are refused rather than backed by dummy resources.
+## Deliberate limits
 
-`alloc.c` is a serialized construction-time primitive, not a replacement for BEAM's
-heap/GC or a performant general runtime allocator. Callback state is owner-local,
-so tests can fail exact allocation steps without process-global fault injection.
-A domain must be empty before destruction; clients unwind their own constructed
-objects before releasing storage. Bulk-freeing reachable objects is not rollback.
+The current literal/GC profile includes smalls, bignums, atoms, tuples, lists,
+finite binary64 floats and heap bitstrings up to 64 bytes. Maps, offheap/large
+binaries, fun objects, PIDs, ports and refs remain unsupported. Lambda declarations
+are not closure objects. Attributes/compile ETF is decoded for executable
+admission; ordinary line/debug/feature metadata is passive, while executable
+`DbgB` and record `Recs` metadata is refused. Source-line instrumentation is absent.
 
-Future transplants need a provenance/dependency/lifetime record as specified in
-the RFD. Preserve C implementations and licenses; adapt actual ownership paths.
-Next work is the first executable dependency cluster, not a parallel collection
-of unused ownership wrappers.
+Only the explicit generated dispatch profile is admitted, including unused
+functions. Full transform helpers, catch/fun/string/binary instruction consumers,
+broader exception handling, scheduling and the stateful example remain outstanding.
+Retained preparation arenas include temporary operations/backing; density is not
+claimed. The bootstrap allocator supplies backing, not a replacement term format.
 
-Build and test with fresh external outputs under the repository's validation lock:
+Opcode and naming inputs under `otp/` are pinned. Python/Perl run unchanged OTP
+`beam_makeops`/`make_tables` at build time; no generation runs in the runtime.
+Generated numeric BIF identities are not permission grants. Zlib uses explicit
+allocation-domain callbacks. See the provenance records before admitting new code.
+
+## Validation
+
+Use fresh external outputs and the user-wide validation lock. The integrated runner
+acquires it, compiles ordinary fixtures, executes the C core, separately compares
+stock OTP metadata/semantics, checks failure prefixes and physical lifetime, and
+runs Debug/Release, UBSan, representation and reproducibility checks:
 
 ```sh
-build=$(mktemp -d "${TMPDIR:-/tmp}/libbeam-additive.XXXXXX")
-cmake -S libbeam -B "$build" -DBUILD_TESTING=ON
-cmake --build "$build"
-ctest --test-dir "$build" --output-on-failure
+python3 -B libbeam/tools/run_additive_slice.py --output /tmp/unused-core-validation
 ```
 
-For a fresh compiled fixture, comparison with reference OTP, failure-prefix tests,
-mutation/truncation checks, term-macro comparison, atom binding/growth rollback,
-debug/release builds and UBSan, run:
-
-```sh
-python3 -B libbeam/tools/run_additive_slice.py --output /tmp/unused-image-validation
-```
-
-The runner acquires the validation lock and requires a new output directory. It
-records source hashes and the installed reference OTP version; it does not claim
-the reference runtime is our implementation. It requires `erl`, `erlc`, CMake, a C
-compiler, Perl, zlib and `nm` (current tooling targets POSIX hosts).
-
-These are component tests. They do not make `engine_lifecycle` or `two_isolates`
-pass, and they establish neither a security boundary nor complete BEAM validation.
+It requires `erl`, `erlc`, CMake, a C compiler, Python, Perl, zlib and `nm` (POSIX
+host tooling). Compiler-produced BEAM files remain outside source control.
+Component execution is **not** Engine lifecycle or stateful-Isolate acceptance,
+complete Erlang compatibility, a security boundary, or a performance/platform claim.

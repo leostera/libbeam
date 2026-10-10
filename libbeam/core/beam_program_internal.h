@@ -18,6 +18,8 @@ struct LbBeamProgram {
     size_t bytes;
     LbBeamError error;
     int retained;
+    LbAtomTransaction *transaction;
+    Eterm attributes, compile;
     Eterm *file_atoms;
     LbNamePatch *names;
     size_t name_count;
@@ -32,10 +34,13 @@ struct LbBeamProgram {
     LbBeamOp *ops, *free_ops;
     size_t op_count;
 };
+LbBeamStatus lb_program_begin(LbAllocDomain *, LbAtomTable *, const void *, size_t, LbBeamProgram **, LbBeamError *);
+void lb_program_commit(LbBeamProgram *);
 void *lb_palloc(LbBeamProgram *, size_t, size_t);
 int lb_pfail(LbBeamProgram *, LbBeamStatus);
 int lb_pname(LbBeamProgram *, LbBeamBytes, Eterm *);
 int lb_pliterals(LbBeamProgram *);
+int lb_pmodule_info(LbBeamProgram *);
 int lb_pmetadata(LbBeamProgram *);
 int lb_pdecode(LbBeamProgram *);
 int lb_pinteger(LbBeamProgram *, const unsigned char *, size_t, int, Eterm *);

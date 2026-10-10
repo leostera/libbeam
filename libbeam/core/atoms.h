@@ -7,6 +7,7 @@
 #include "beam_image.h"
 typedef struct LbAtomTable LbAtomTable;
 typedef struct LbAtomBinding LbAtomBinding;
+typedef struct LbAtomTransaction LbAtomTransaction;
 typedef enum {
     LB_ATOM_OK, LB_ATOM_INVALID, LB_ATOM_BAD_UTF8, LB_ATOM_LIMIT,
     LB_ATOM_NO_MEMORY, LB_ATOM_BUSY, LB_ATOM_NOT_FOUND
@@ -24,6 +25,13 @@ LbAtomStatus lb_atoms_intern(LbAtomTable *, const void *, size_t, Eterm *);
  * Caller provides disposable output storage; its contents on failure are not
  * published terms. Namespace contents/backing are unchanged on failure. */
 LbAtomStatus lb_atoms_intern_names(LbAtomTable *, const LbBeamBytes *, size_t, Eterm *);
+/* Code loading needs provisional identities through transformation/linking.
+ * One serialized writer transaction may be open. Reads see committed names;
+ * other writes and destruction refuse busy. Commit is allocation-free. */
+LbAtomStatus lb_atoms_prepare_names(LbAtomTable *, const LbBeamBytes *, size_t, Eterm *, LbAtomTransaction **);
+LbAtomStatus lb_atoms_transaction_name(const LbAtomTransaction *, Eterm, LbBeamBytes *);
+void lb_atoms_commit(LbAtomTransaction *);
+void lb_atoms_abort(LbAtomTransaction *);
 LbAtomStatus lb_atoms_find(const LbAtomTable *, const void *, size_t, Eterm *);
 LbAtomStatus lb_atoms_name(const LbAtomTable *, Eterm, LbBeamBytes *);
 /* Leases require an already-valid table. Release never automatically destroys.

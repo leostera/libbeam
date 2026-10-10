@@ -41,11 +41,12 @@ void lb_beam_program_destroy(LbBeamProgram *p)
         if(lb_alloc_domain_release(domain,block)!=LB_ALLOC_OK) abort();
     }
     lb_beam_image_destroy(p->image);
+    lb_atoms_abort(p->transaction);
     if(p->retained && lb_atoms_release(p->atoms)!=LB_ATOM_OK) abort();
     if(lb_alloc_domain_release(domain,p)!=LB_ALLOC_OK) abort();
 }
-LbBeamStatus lb_beam_program_prepare(LbAllocDomain *domain,LbAtomTable *atoms,const void *bytes,size_t size,
-                                     LbBeamProgram **out,LbBeamError *error)
+static LbBeamStatus begin(LbAllocDomain *domain,LbAtomTable *atoms,const void *bytes,size_t size,
+                          LbBeamProgram **out,LbBeamError *error,int executable)
 {
     LbBeamProgram *p;
     const LbBeamImageInfo *info;
@@ -80,6 +81,7 @@ LbBeamStatus lb_beam_program_prepare(LbAllocDomain *domain,LbAtomTable *atoms,co
         if(!lb_pname(p,name,&p->file_atoms[i])) goto fail;
     }
     if(!lb_pliterals(p) || !lb_pmetadata(p) || !lb_pdecode(p)) goto fail;
+    if(executable && !lb_pmodule_info(p)) goto fail;
     p->error.stage="atom admission";
     names=lb_palloc(p,p->name_count,sizeof(*names));
     terms=lb_palloc(p,p->name_count,sizeof(*terms));
@@ -89,13 +91,13 @@ LbBeamStatus lb_beam_program_prepare(LbAllocDomain *domain,LbAtomTable *atoms,co
     ast=lb_atoms_retain(atoms);
     if(ast!=LB_ATOM_OK) { lb_pfail(p,LB_BEAM_LIMIT); goto fail; }
     p->retained=1;
-    ast=lb_atoms_intern_names(atoms,names,p->name_count,terms);
+    ast=lb_atoms_prepare_names(atoms,names,p->name_count,terms,&p->transaction);
     if(ast!=LB_ATOM_OK) {
         lb_pfail(p,ast==LB_ATOM_NO_MEMORY ? LB_BEAM_NO_MEMORY : ast==LB_ATOM_LIMIT ? LB_BEAM_LIMIT : LB_BEAM_BAD_FORMAT);
         goto fail;
     }
-    /* No fallible work remains after namespace commit. Deferred writes target
-     * stable private slots, never host/process roots or published instructions. */
+    /* Provisional atom identities are usable only inside this unpublished
+     * transaction. Code transformation/linking may still fail and abort it. */
     i=p->name_count;
     for(patch=p->names;patch;patch=patch->next) *patch->destination=terms[--i];
     for(op=p->ops;op;op=op->next) for(i=0;i<op->arity;++i)
@@ -108,6 +110,22 @@ fail:
     if(p->error.status==LB_BEAM_OK) abort();
     status=p->error.status; if(error) *error=p->error;
     lb_beam_program_destroy(p); return status;
+}
+LbBeamStatus lb_program_begin(LbAllocDomain *domain,LbAtomTable *atoms,const void *bytes,size_t size,
+                              LbBeamProgram **out,LbBeamError *error)
+{
+    return begin(domain,atoms,bytes,size,out,error,1);
+}
+void lb_program_commit(LbBeamProgram *p)
+{
+    if(p->transaction) { lb_atoms_commit(p->transaction); p->transaction=NULL; }
+}
+LbBeamStatus lb_beam_program_prepare(LbAllocDomain *domain,LbAtomTable *atoms,const void *bytes,size_t size,
+                                     LbBeamProgram **out,LbBeamError *error)
+{
+    LbBeamStatus status=begin(domain,atoms,bytes,size,out,error,0);
+    if(status==LB_BEAM_OK) lb_program_commit(*out);
+    return status;
 }
 const LbBeamOp *lb_beam_program_ops(const LbBeamProgram *p) { return p ? p->ops : NULL; }
 const LbBeamImage *lb_beam_program_image(const LbBeamProgram *p) { return p ? p->image : NULL; }

@@ -1,0 +1,25 @@
+{
+  "baseline": "1c47d6c3",
+  "scope": "Selected C copying-GC helpers, interpreter ownership boundary, function/export word layouts, module_info and MD5. This is not whole-file admission.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_gc.c": "e420c7b61d0f3df557384a13357ba7b4c9e819ba242feae5a72e5141b97994b4",
+    "beam/erts/emulator/beam/erl_gc.h": "f1be3b3f40976409563a861e4881a7b2a1c774e6531cc3613f6304953c4fdf2d",
+    "beam/erts/emulator/beam/erl_md5.c": "c653a4e51ad97c4dd8371379ef973efc1df3bbb53034deffb3037b5ecbbab80c",
+    "beam/erts/emulator/beam/erl_md5.h": "0e3f2815eccab3bc037086fa3e222a2aa4f6d33399391d3915236537b5ea2afa",
+    "beam/erts/emulator/beam/erl_bif_info.c": "542c01a4e8f65210ff74e2989e3233d30b8098ebae5f58ff296de185202ee7e8",
+    "beam/erts/emulator/beam/code_ix.h": "58fa70f6931feb5c9248cddb65abbe5d6800f3e3c0f0d914d9fe55ec0b2fd821",
+    "beam/erts/emulator/beam/export.h": "dcfa68db96b336560487c6ca6d99c12b4e19fb29fa097b1aefbbf607783e4169"
+  },
+  "other_inputs": ["loader-sources.json", "opcodes/manifest.json"],
+  "profile": {
+    "wordsize": 64,
+    "dispatch": "OTP NO_JUMP_TABLE numeric specific-instruction words",
+    "continuation_words": 1,
+    "code_generation": "single; no hot reload",
+    "native_imports": ["erlang:get_module_info/1", "erlang:get_module_info/2"],
+    "native_kind": "heavy; these owned implementations may collect",
+    "threading": "serialized explicit-context bounded executor; no workers or TLS",
+    "literals": "existing bounded ETF subset; no offheap/fun/map admission",
+    "remaining": "Full A05/A06/A07 breadth, A12 Engine/Isolate API and all B-cluster stateful execution remain outstanding"
+  }
+}

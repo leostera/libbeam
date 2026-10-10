@@ -9,35 +9,38 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(Perl REQUIRED)
 set(LIBBEAM_ATOM_GEN ${CMAKE_CURRENT_BINARY_DIR}/generated/atoms)
 add_custom_command(
-    OUTPUT ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.h ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.inc
+    OUTPUT ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.h ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.inc ${LIBBEAM_ATOM_GEN}/lb_bif_ids_generated.h
     COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_atoms.py
         --perl ${PERL_EXECUTABLE} --output ${LIBBEAM_ATOM_GEN}
     DEPENDS tools/generate_atoms.py tools/otp/make_tables core/otp/atom.names core/otp/bif.tab
     VERBATIM)
 add_custom_target(libbeam_atom_definitions DEPENDS
-    ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.h ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.inc)
+    ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.h ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.inc ${LIBBEAM_ATOM_GEN}/lb_bif_ids_generated.h)
 set(LIBBEAM_OPCODE_GEN ${CMAKE_CURRENT_BINARY_DIR}/generated/opcodes)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS core/otp/opcodes/manifest.json)
 file(READ ${CMAKE_CURRENT_SOURCE_DIR}/core/otp/opcodes/manifest.json LIBBEAM_OPCODE_MANIFEST)
 string(JSON LIBBEAM_OPCODE_COUNT LENGTH "${LIBBEAM_OPCODE_MANIFEST}" inputs)
 math(EXPR LIBBEAM_OPCODE_LAST "${LIBBEAM_OPCODE_COUNT}-1")
-set(LIBBEAM_OPCODE_INPUTS core/otp/opcodes/manifest.json tools/otp/beam_makeops tools/generate_opcodes.py)
+set(LIBBEAM_OPCODE_INPUTS core/otp/opcodes/manifest.json tools/otp/beam_makeops tools/generate_opcodes.py tools/project_transform.py tools/project_dispatch.py)
 foreach(i RANGE ${LIBBEAM_OPCODE_LAST})
     string(JSON input GET "${LIBBEAM_OPCODE_MANIFEST}" inputs ${i} input)
     list(APPEND LIBBEAM_OPCODE_INPUTS core/otp/opcodes/${input})
 endforeach()
 add_custom_command(
-    OUTPUT ${LIBBEAM_OPCODE_GEN}/lb_opcodes_generated.h ${LIBBEAM_OPCODE_GEN}/lb_opcodes_generated.inc
+    OUTPUT ${LIBBEAM_OPCODE_GEN}/lb_opcodes_generated.h ${LIBBEAM_OPCODE_GEN}/lb_opcodes_generated.inc ${LIBBEAM_OPCODE_GEN}/lb_transform_generated.inc
+        ${LIBBEAM_OPCODE_GEN}/lb_dispatch_generated.inc ${LIBBEAM_OPCODE_GEN}/lb_dispatch_support.inc
     COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_opcodes.py
         --perl ${PERL_EXECUTABLE} --output ${LIBBEAM_OPCODE_GEN}
     DEPENDS ${LIBBEAM_OPCODE_INPUTS}
     VERBATIM)
 add_custom_target(libbeam_opcode_definitions DEPENDS
-    ${LIBBEAM_OPCODE_GEN}/lb_opcodes_generated.h ${LIBBEAM_OPCODE_GEN}/lb_opcodes_generated.inc)
+    ${LIBBEAM_OPCODE_GEN}/lb_opcodes_generated.h ${LIBBEAM_OPCODE_GEN}/lb_opcodes_generated.inc ${LIBBEAM_OPCODE_GEN}/lb_transform_generated.inc
+    ${LIBBEAM_OPCODE_GEN}/lb_dispatch_generated.inc ${LIBBEAM_OPCODE_GEN}/lb_dispatch_support.inc)
 find_package(ZLIB REQUIRED)
 add_library(libbeam_core STATIC core/alloc.c core/utf8.c core/beam_image.c core/atoms.c
     core/opcodes.c core/beam_reader.c core/beam_program.c core/beam_decode.c
-    core/beam_metadata.c core/beam_literals.c core/beam_select.c)
+    core/beam_metadata.c core/beam_literals.c core/beam_select.c
+    core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/md5.c core/process.c core/heap.c core/bif_info.c)
 add_dependencies(libbeam_core libbeam_atom_definitions libbeam_opcode_definitions)
 target_link_libraries(libbeam_core PUBLIC ZLIB::ZLIB)
 target_include_directories(libbeam_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core ${LIBBEAM_ATOM_GEN} ${LIBBEAM_OPCODE_GEN})
@@ -78,6 +81,10 @@ target_link_libraries(two_isolates PRIVATE libbeam::libbeam)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(core_code_test tests/core_code_test.c)
+    target_link_libraries(core_code_test PRIVATE libbeam_core)
+    add_test(NAME core_code_components COMMAND core_code_test)
+    set_tests_properties(core_code_components PROPERTIES TIMEOUT 90)
     add_executable(core_beam_program_test tests/core_beam_program_test.c)
     target_link_libraries(core_beam_program_test PRIVATE libbeam_core)
     add_test(NAME core_beam_program_lifetime COMMAND core_beam_program_test)

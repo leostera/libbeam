@@ -5,6 +5,7 @@
 import argparse
 import hashlib
 from pathlib import Path
+import re
 import subprocess
 
 
@@ -44,7 +45,11 @@ def main():
               ' * Copyright 2026 Leandro Ostera <leandro@ostera.io>\n'
               ' * Generated from admitted OTP naming inputs; not a BIF capability list.\n'
               ' */\n')
-    # No BIF output is compiled.
+    # Only numeric identities, not BIF implementations or permission grants.
+    bif_header = (upstream / 'erl_bif_table.h').read_text()
+    ids = re.findall(r'^#define BIF_\w+ \d+$', bif_header, re.M)
+    if not ids: raise RuntimeError('Missing BIF identities')
+    (output / 'lb_bif_ids_generated.h').write_text(notice + '\n'.join(ids) + '\n')
     (output / 'lb_atoms_generated.inc').write_text(notice + source)
     (output / 'lb_atoms_generated.h').write_text(notice + header)
 

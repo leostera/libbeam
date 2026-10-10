@@ -32,9 +32,11 @@ stripping a whole OTP runtime down. Preserving `erl` or full OTP behavior is
 not a goal. Legacy failures matter only when they reveal a problem in required
 runtime behavior or supported language semantics.
 
-**The public C++ Engine/Isolate API and isolate proof are not implemented yet. An
-experimental native startup entry runs BEAM and returns to its host, but cannot
-shut it down safely. This is not a security boundary for untrusted workloads.**
+**The public C++ Engine/Isolate API and isolate proof are not implemented yet.
+The additive C core now executes a limited BEAM profile with copying GC and owned
+code retirement; see the [first-execution record](docs/rfds/0003-first-execution.md).
+The older native startup experiment still cannot shut down safely. This is not a
+security boundary for untrusted workloads.**
 
 ## Layout
 

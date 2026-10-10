@@ -9,6 +9,11 @@ connect to a supported A05 literal/metadata subset. A06 has specific-instruction
 selection only; transformation/emission and A07 executable publication remain
 outstanding. No Engine factory, host API or acceptance example was changed.
 
+This records the preparation checkpoint at `1c47d6c3`, not the current execution
+status. The [first-execution record](0003-first-execution.md) connects its output to
+real selected-profile transformation, emission, publication and interpreter/GC
+consumers. Full A03–A07 breadth still remains incomplete.
+
 ## Admitted C boundary
 
 `lb_beam_program_prepare(domain, atoms, bytes, size, ...)` produces an owned,

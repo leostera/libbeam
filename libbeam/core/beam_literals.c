@@ -186,6 +186,23 @@ static void zfree_owned(voidpf context,voidpf memory)
     LbBeamProgram *p=context;
     if(memory && lb_alloc_domain_release(p->domain,memory)!=LB_ALLOC_OK) abort();
 }
+int lb_pmodule_info(LbBeamProgram *p)
+{
+    const uint32_t ids[]={LB_BEAM_ID('A','t','t','r'),LB_BEAM_ID('C','I','n','f')};
+    Eterm *dest[]={&p->attributes,&p->compile};
+    size_t i;
+    p->error.stage="module_info ETF";
+    for(i=0;i<2;++i) {
+        LbBeamBytes chunk;
+        *dest[i]=NIL;
+        if(lb_beam_image_chunk(p->image,ids[i],&chunk)==LB_BEAM_OK && chunk.size) {
+            LbBeamReader r={chunk.data,chunk.size,0};
+            if(!decode_term(p,&r,dest[i])) return 0;
+            if(r.pos!=r.size) return lb_pfail(p,LB_BEAM_BAD_FORMAT);
+        }
+    }
+    return 1;
+}
 int lb_pliterals(LbBeamProgram *p)
 {
     LbBeamBytes chunk;

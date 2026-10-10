@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Leandro Ostera <leandro@ostera.io>
-"""Fresh, serialized C-core loader-component validation. Reference OTP is not our executor."""
+"""Fresh, serialized C-core preparation/execution validation. OTP is a separate reference."""
 import argparse
 import fcntl
 import hashlib
@@ -23,7 +23,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    summary = {'scope': 'owned_generic_program_literals_not_emitted_code_or_engine_lifecycle', 'commands': [], 'passed': False}
+    summary = {'scope': 'selected_native_BEAM_word_execution_not_public_engine_or_stateful_isolate_acceptance', 'commands': [], 'passed': False}
     env = dict(os.environ, ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0')
 
     def run(name, command, accepted=(0,)):
@@ -51,6 +51,9 @@ def main():
                             root / 'libbeam/tests/core_terms_atoms_test.c', root / 'libbeam/tools/generate_atoms.py',
                             root / 'libbeam/tools/check_term_representation.py',
                             root / 'libbeam/tests/core_beam_program_test.c', root / 'libbeam/tools/generate_opcodes.py',
+                            root / 'libbeam/tests/core_code_test.c', root / 'libbeam/tests/fixtures/code_peer.erl',
+                            root / 'libbeam/tools/project_transform.py', root / 'libbeam/tools/project_dispatch.py',
+                            root / 'libbeam/core/otp/execution-sources.json',
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
                             root / 'libbeam/tests/fixtures/first_slice.erl',
@@ -70,6 +73,11 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError(f'Loader provenance changed: {filename}')
             summary['loader_sources'] = loader_sources
+            execution_sources = json.loads((root / 'libbeam/core/otp/execution-sources.json').read_text())
+            for filename, expected in execution_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Execution provenance changed: {filename}')
+            summary['execution_sources'] = execution_sources
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
@@ -103,6 +111,18 @@ def main():
             fixture_dir.mkdir()
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
+            run('peer-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/code_peer.erl'])
+            peer_fixture = fixture_dir / 'code_peer.beam'
+            many_source = fixture_dir / 'code_many.erl'
+            many_source.write_text('-module(code_many).\n-export(['+','.join(f'f{i}/0' for i in range(128))+']).\n'+
+                                   '\n'.join(f'f{i}() -> {i}.' for i in range(128))+'\n')
+            summary['generated_erlang_source_sha256'] = hashlib.sha256(many_source.read_bytes()).hexdigest()
+            run('many-erlc', [args.erlc, '-o', fixture_dir, many_source])
+            many_fixture = fixture_dir / 'code_many.beam'
+            run('core-code-growth', [out / 'build/core_code_test', '--many', many_fixture])
+            execution = run('core-execution', [out / 'build/core_code_test', fixture, peer_fixture])
+            if 'CORE_CODE_EXECUTION_OK' not in execution or 'CORE_LINKED_CODE_OK' not in execution:
+                raise RuntimeError('Missing real execution/linked-retirement evidence')
             native = run('native-fixture', [out / 'build/core_beam_image_test', fixture])
             run('native-atom-binding', [out / 'build/core_terms_atoms_test', fixture])
             program = run('native-program', [out / 'build/core_beam_program_test', fixture])
@@ -128,6 +148,7 @@ def main():
                 probes.append(probe)
                 native = run(variant+'-program', [out / 'build/core_beam_program_test', probe])
                 compare_functions(variant, probe, native)
+                run(variant+'-executable-refusal', [out / 'build/core_code_test', '--reject', probe])
             # Restore the image dump used by the independent metadata check below.
             native = (out / 'native-fixture.log').read_text()
             # Pass paths as plain arguments, never interpolate paths into Erlang code.
@@ -139,6 +160,7 @@ def main():
                 lists:foreach(fun({M,F,A}) -> io:format("IMPORT_NAME ~s ~s ~B~n",[Hex(M),Hex(F),A]) end,proplists:get_value(imports,Chunks)),
                 lists:foreach(fun({F,A}) -> io:format("EXPORT_NAME ~s ~B~n",[Hex(F),A]) end,proplists:get_value(exports,Chunks)),
                 42 = first_slice:value(), ok = first_slice:identity(ok), {ok,42} = first_slice:pair(ok),
+                io:format("REFERENCE_MODULE_MD5 ~s~n",[binary:encode_hex(first_slice:module_info(md5))]),
                 io:format("REFERENCE_OTP ~s ~s~n",[erlang:system_info(otp_release),erlang:system_info(version)]),
                 io:format("REFERENCE_SEMANTICS_OK not_libbeam_execution=true~n"), halt(0).
             '''
@@ -155,6 +177,10 @@ def main():
                     native_rows.append(f'EXPORT_NAME {atoms[int(words[1])]} {words[2]}')
             reference_rows = [r for r in reference.splitlines() if r.startswith(('ATOM ', 'IMPORT_NAME ', 'EXPORT_NAME '))]
             summary['reference_runtime'] = next(r for r in reference.splitlines() if r.startswith('REFERENCE_OTP '))
+            core_md5 = next(r.split()[1] for r in execution.splitlines() if r.startswith('CORE_MODULE_MD5 '))
+            reference_md5 = next(r.split()[1].lower() for r in reference.splitlines() if r.startswith('REFERENCE_MODULE_MD5 '))
+            if core_md5 != reference_md5: raise RuntimeError('Executed module_info(md5) differs from reference')
+            summary['executed_module_md5'] = core_md5
             if sorted(native_rows) != sorted(reference_rows):
                 raise RuntimeError('Core metadata differs from reference OTP; see fixture/reference logs')
             data = fixture.read_bytes()
@@ -188,13 +214,23 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','md5','process','heap','bif_info']
+            run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
+                '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
+                *[f'libbeam/core/{s}.c' for s in execution_sources_c], 'libbeam/tests/core_code_test.c',
+                '-lz', '-o', out / 'execution-ubsan'])
+            run('execution-ubsan', [out / 'execution-ubsan', fixture, peer_fixture])
+            run('execution-growth-ubsan', [out / 'execution-ubsan', '--many', many_fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
             run('release-ctest', ['ctest', '--test-dir', out / 'release', '--output-on-failure'])
             run('release-fixture', [out / 'release/core_beam_image_test', fixture])
             run('release-atom-binding', [out / 'release/core_terms_atoms_test', fixture])
-            for filename in ('lb_atoms_generated.h', 'lb_atoms_generated.inc'):
+            run('release-execution', [out / 'release/core_code_test', fixture, peer_fixture])
+            run('release-code-growth', [out / 'release/core_code_test', '--many', many_fixture])
+            for filename in ('lb_atoms_generated.h', 'lb_atoms_generated.inc', 'lb_bif_ids_generated.h'):
                 first = (out / 'build/generated/atoms' / filename).read_bytes()
                 second = (out / 'release/generated/atoms' / filename).read_bytes()
                 if first != second:
@@ -206,10 +242,15 @@ def main():
             second_outputs = json.loads((out / 'release/generated/opcodes/outputs.json').read_text())
             if first_outputs != second_outputs:
                 raise RuntimeError('Full OTP opcode generation is not reproducible across builds')
+            for filename in ('lb_transform_generated.inc','lb_dispatch_generated.inc','lb_dispatch_support.inc','transform-admission.json'):
+                if (out / 'build/generated/opcodes' / filename).read_bytes() != (out / 'release/generated/opcodes' / filename).read_bytes():
+                    raise RuntimeError(f'Execution projection differs across builds: {filename}')
+            summary['execution_projections_reproducible'] = True
+            summary['selected_core_execution_passed'] = True
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                                for p in [fixture, *probes]}
+                                                for p in [fixture, peer_fixture, many_fixture, *probes]}
             # Observe the real acceptance target; its failure is not converted
             # into a passing test or a requirement that future Engines stay red.
             run('engine-lifecycle-observed', [out / 'build/engine_lifecycle'], accepted=None)

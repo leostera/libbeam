@@ -32,6 +32,12 @@ struct LbAtomTable {
     LbAllocDomain *owner;
     size_t count, limit, capacity, slots, borrowers;
     AtomEntry **index, **bucket;
+    LbAtomTransaction *transaction;
+};
+struct LbAtomTransaction {
+    LbAtomTable *table;
+    AtomEntry *pending, **stage, **index, **buckets;
+    size_t added, capacity, slots;
 };
 struct LbAtomBinding {
     LbAtomTable *table;
@@ -111,15 +117,21 @@ static LbBeamBytes one_name(const void *name, size_t i)
  * untouched until every new name and any replacement metadata are allocated.
  * Thus a failed binding cannot leak atom identities or capacity into its owner.
  */
-static LbAtomStatus intern_batch(LbAtomTable *t, size_t count, NameSource source,
-                                 const void *context, Eterm *terms)
+static LbAtomStatus prepare_batch(LbAtomTable *t, size_t count, NameSource source,
+                                  const void *context, Eterm *terms, LbAtomTransaction **out)
 {
+    LbAtomTransaction *tx;
     AtomEntry *pending = NULL, **stage = NULL, **new_index = NULL, **new_buckets = NULL;
     size_t stage_slots = 8, added = 0, capacity = t->capacity, slots = t->slots;
     size_t i, bound = count < t->limit - t->count ? count : t->limit - t->count;
     LbAtomStatus status = LB_ATOM_NO_MEMORY;
+    *out = NULL;
+    if (t->transaction) return LB_ATOM_BUSY;
+    tx = allocate(t, 1, sizeof(*tx));
+    if (!tx) return LB_ATOM_NO_MEMORY;
+    tx->table = t;
     while (stage_slots < bound) {
-        if (stage_slots > SIZE_MAX / 2 / sizeof(*stage)) return LB_ATOM_LIMIT;
+        if (stage_slots > SIZE_MAX / 2 / sizeof(*stage)) { status = LB_ATOM_LIMIT; goto fail; }
         stage_slots *= 2;
     }
     for (i = 0; i < count; ++i) {
@@ -146,7 +158,7 @@ static LbAtomStatus intern_batch(LbAtomTable *t, size_t count, NameSource source
         }
         if (terms) terms[i] = make_atom(entry->index);
     }
-    if (!added) { release_owned(t->owner, stage); return LB_ATOM_OK; }
+    if (!added) goto prepared;
     if (!capacity) capacity = 8;
     while (capacity < t->count + added) {
         if (capacity > SIZE_MAX / 2 / sizeof(*new_index)) { status = LB_ATOM_LIMIT; goto fail; }
@@ -167,33 +179,10 @@ static LbAtomStatus intern_batch(LbAtomTable *t, size_t count, NameSource source
         new_buckets = allocate(t, slots, sizeof(*new_buckets));
         if (!new_buckets) goto fail;
     }
-    /* Commit point: no fallible work remains. Allocator release callbacks must
-     * obey the domain contract (no reentry into the domain/table). */
-    if (new_index) {
-        AtomEntry **old = t->index;
-        t->index = new_index; new_index = NULL; t->capacity = capacity;
-        release_owned(t->owner, old);
-    }
-    while (pending) {
-        AtomEntry *entry = pending;
-        pending = entry->pending; entry->pending = NULL;
-        t->index[entry->index] = entry;
-        if (!new_buckets) {
-            size_t ix = slot(t->slots, entry->hash);
-            entry->next = t->bucket[ix]; t->bucket[ix] = entry;
-        }
-    }
-    t->count += added;
-    if (new_buckets) {
-        for (i = 0; i < t->count; ++i) {
-            AtomEntry *entry = t->index[i];
-            size_t ix = slot(slots, entry->hash);
-            entry->next = new_buckets[ix]; new_buckets[ix] = entry;
-        }
-        release_owned(t->owner, t->bucket);
-        t->bucket = new_buckets; t->slots = slots;
-    }
-    release_owned(t->owner, stage);
+prepared:
+    tx->pending=pending; tx->stage=stage; tx->index=new_index; tx->buckets=new_buckets;
+    tx->capacity=capacity; tx->slots=slots; tx->added=added;
+    t->transaction=tx; *out=tx;
     return LB_ATOM_OK;
 fail:
     release_owned(t->owner, new_buckets);
@@ -203,7 +192,65 @@ fail:
         release_owned(t->owner, pending); pending = next;
     }
     release_owned(t->owner, stage);
+    release_owned(t->owner, tx);
     return status;
+}
+void lb_atoms_abort(LbAtomTransaction *tx)
+{
+    LbAtomTable *t;
+    if (!tx) return;
+    t=tx->table;
+    if (t->transaction!=tx) abort();
+    release_owned(t->owner,tx->buckets); release_owned(t->owner,tx->index);
+    while (tx->pending) {
+        AtomEntry *e=tx->pending; tx->pending=e->pending; release_owned(t->owner,e);
+    }
+    release_owned(t->owner,tx->stage); t->transaction=NULL; release_owned(t->owner,tx);
+}
+void lb_atoms_commit(LbAtomTransaction *tx)
+{
+    LbAtomTable *t=tx->table;
+    size_t i;
+    if (t->transaction!=tx) abort();
+    if (tx->index) {
+        AtomEntry **old=t->index; t->index=tx->index; t->capacity=tx->capacity;
+        release_owned(t->owner,old);
+    }
+    while (tx->pending) {
+        AtomEntry *e=tx->pending; tx->pending=e->pending; e->pending=NULL;
+        t->index[e->index]=e;
+        if (!tx->buckets) {
+            size_t ix=slot(t->slots,e->hash); e->next=t->bucket[ix]; t->bucket[ix]=e;
+        }
+    }
+    t->count+=tx->added;
+    if (tx->buckets) {
+        for (i=0;i<t->count;++i) {
+            AtomEntry *e=t->index[i]; size_t ix=slot(tx->slots,e->hash);
+            e->next=tx->buckets[ix]; tx->buckets[ix]=e;
+        }
+        release_owned(t->owner,t->bucket); t->bucket=tx->buckets; t->slots=tx->slots;
+    }
+    release_owned(t->owner,tx->stage); t->transaction=NULL; release_owned(t->owner,tx);
+}
+static LbAtomStatus intern_batch(LbAtomTable *t,size_t count,NameSource source,const void *context,Eterm *terms)
+{
+    LbAtomTransaction *tx;
+    LbAtomStatus status=prepare_batch(t,count,source,context,terms,&tx);
+    if (status==LB_ATOM_OK) lb_atoms_commit(tx);
+    return status;
+}
+LbAtomStatus lb_atoms_transaction_name(const LbAtomTransaction *tx,Eterm term,LbBeamBytes *out)
+{
+    AtomEntry *e;
+    if (!out) return LB_ATOM_INVALID;
+    *out=(LbBeamBytes){0};
+    if (!tx || !is_atom(term)) return LB_ATOM_INVALID;
+    if (atom_val(term)<tx->table->count) return lb_atoms_name(tx->table,term,out);
+    for (e=tx->pending;e;e=e->pending) if (e->index==atom_val(term)) {
+        *out=(LbBeamBytes){e->name,e->length}; return LB_ATOM_OK;
+    }
+    return LB_ATOM_NOT_FOUND;
 }
 LbAtomStatus lb_atoms_create(LbAllocDomain *domain, size_t limit, LbAtomTable **out)
 {
@@ -226,7 +273,7 @@ LbAtomStatus lb_atoms_destroy(LbAtomTable *t)
 {
     size_t i;
     if (!t) return LB_ATOM_INVALID;
-    if (t->borrowers) return LB_ATOM_BUSY;
+    if (t->borrowers || t->transaction) return LB_ATOM_BUSY;
     for (i = t->count; i; --i) release_owned(t->owner, t->index[i - 1]);
     release_owned(t->owner, t->index);
     release_owned(t->owner, t->bucket);
@@ -249,6 +296,13 @@ LbAtomStatus lb_atoms_intern(LbAtomTable *t, const void *data, size_t size, Eter
 static LbBeamBytes name_array(const void *names, size_t i)
 {
     return ((const LbBeamBytes *)names)[i];
+}
+LbAtomStatus lb_atoms_prepare_names(LbAtomTable *t,const LbBeamBytes *names,size_t count,Eterm *terms,LbAtomTransaction **out)
+{
+    if (!out) return LB_ATOM_INVALID;
+    *out=NULL;
+    if (!t || (count && (!names || !terms))) return LB_ATOM_INVALID;
+    return prepare_batch(t,count,name_array,names,terms,out);
 }
 LbAtomStatus lb_atoms_intern_names(LbAtomTable *t, const LbBeamBytes *names, size_t count, Eterm *out)
 {
