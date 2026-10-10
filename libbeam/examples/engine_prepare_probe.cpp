@@ -55,10 +55,12 @@ static std::vector<std::uint64_t> os_threads() {
     return ids;
 }
 
-static bool factory_rejects(libbeam::ErrorCode expected) {
+static bool additive_engine_is_independent() {
+    const auto claimed = erl_runtime_is_claimed();
     auto result = libbeam::Engine::create();
-    auto* error = std::get_if<libbeam::Error>(&result);
-    return error && error->code == expected;
+    auto* engine = std::get_if<libbeam::Engine>(&result);
+    return engine && !engine->shutdown(std::chrono::steady_clock::now() + std::chrono::seconds(5)) &&
+           erl_runtime_is_claimed() == claimed;
 }
 
 int main(int argc, char** argv) {
@@ -68,7 +70,7 @@ int main(int argc, char** argv) {
     if (!engine || !candidate || engine == candidate || erl_runtime_is_claimed() ||
         erl_runtime_startup_phase(engine) != ERL_RUNTIME_UNCLAIMED ||
         erl_runtime_startup_phase(candidate) != ERL_RUNTIME_UNCLAIMED ||
-        !factory_rejects(libbeam::ErrorCode::not_implemented)) return 10;
+        !additive_engine_is_independent()) return 10;
     ErlPreparedRuntimeInventory inventory{91, 92, 93, 94, 95};
     if (erl_prepared_runtime_inventory(engine, &inventory) != 1 ||
         inventory.processes != 91 || inventory.ports != 92 ||
@@ -91,7 +93,7 @@ int main(int argc, char** argv) {
     if (threads.total != 0 || after != before) return 14;
 
     // Preparation has claimed native state even though it launched no threads.
-    if (!factory_rejects(libbeam::ErrorCode::invalid_state) ||
+    if (!additive_engine_is_independent() ||
         erl_prepare_runtime(engine, argc, argv) != 1 ||
         erl_start_embedded(engine, argc, argv) != 1 ||
         erl_runtime_startup_phase(engine) != ERL_RUNTIME_PREPARED ||

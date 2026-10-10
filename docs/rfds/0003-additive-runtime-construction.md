@@ -3,13 +3,15 @@
 
 # RFD 0003: Build libbeam additively from BEAM components
 
-Status: **Accepted direction; selected additive BEAM-word execution demonstrated.**
+Status: **Accepted direction; selected BEAM execution and G1 Engine lifetime demonstrated.**
 
 The [first-execution record](0003-first-execution.md) connects the earlier
 [A03–A07 checkpoint](0003-loader-program.md) to real generated transformations,
 emission, publication, interpreter execution and copying GC for a limited profile.
-Full loader/literal/instruction breadth and Engine/Isolate API integration remain
-outstanding; neither unchanged public acceptance example passes. The subsequent
+Full loader/literal/instruction breadth and Isolate API integration remain
+outstanding. The subsequent [C Engine lifecycle integration](0003-engine-lifecycle.md)
+passes the unchanged create/shutdown/recreate target over this actual substrate;
+the unchanged stateful two-Isolate target still refuses Isolate creation. The subsequent
 [ordinary-binary slice](0003-owned-binaries.md) connects native payload lifetime to
 literal loading, metadata copies, collection and copied-byte invocation.
 
@@ -19,7 +21,7 @@ and remaining scope.
 
 The [additive runtime inventory](0003-additive-runtime-inventory.md) records the
 remaining dependency clusters, fixture-derived requirements and implementation
-order. Neither executable Isolates nor Engine lifecycle acceptance passes yet.
+order. Stateful Isolate acceptance remains outstanding; G1 is not RFD completion.
 
 ## Decision
 
@@ -55,8 +57,8 @@ clock, native-helper and diagnostic-world state. The traditional runtime expects
 process exit to finish reclamation. Moving a field does not supply a stop protocol,
 retire callbacks, destroy TLS values, release mappings, or undo once-only init.
 
-The public factory still cannot honestly succeed. Neither repeated Engine lifetime
-nor simultaneous executable Isolates has passed. We should not keep expanding the
+At that transition the public factory could not honestly succeed. Neither repeated
+Engine lifetime nor simultaneous executable Isolates had passed. We should not keep expanding the
 initialization graph and only afterward discover what its destructor requires.
 
 ### Transition checkpoint

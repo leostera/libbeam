@@ -4,17 +4,19 @@
 #ifndef LIBBEAM_CORE_CODE_H
 #define LIBBEAM_CORE_CODE_H
 #include "beam_program.h"
+#include "engine.h"
 typedef struct LbCodeSpace LbCodeSpace;
 typedef struct LbCodeModule LbCodeModule;
 typedef struct LbCodeEntry LbCodeEntry;
 typedef enum { LB_CODE_OK, LB_CODE_INVALID, LB_CODE_FORMAT, LB_CODE_UNSUPPORTED,
                LB_CODE_NO_MEMORY, LB_CODE_LIMIT, LB_CODE_BUSY, LB_CODE_NOT_FOUND,
-               LB_CODE_EXISTS, LB_CODE_UNRESOLVED } LbCodeStatus;
+               LB_CODE_EXISTS, LB_CODE_UNRESOLVED, LB_CODE_CLOSED } LbCodeStatus;
 /* Serialized C ownership boundary. No implicit OTP services or lazy module load.
  * All functions/imports must pass the single admitted interpreter profile.
  * Load is atomic, including atom identities and namespace backing. No hot reload.
  * Native effects are the explicit builtin catalog, never a name-based fallback. */
-LbCodeStatus lb_code_space_create(LbAllocDomain *, LbCodeSpace **);
+/* A space retains its Engine through physical destruction. */
+LbCodeStatus lb_code_space_create(LbEngine *, LbCodeSpace **);
 LbCodeStatus lb_code_space_destroy(LbCodeSpace *);
 LbAtomTable *lb_code_space_atoms(LbCodeSpace *); /* borrowed; no concurrent writer */
 LbCodeStatus lb_code_load(LbCodeSpace *, const void *, size_t, LbCodeModule **, LbBeamError *);

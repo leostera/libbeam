@@ -3,9 +3,9 @@
 #pragma once
 
 // EXPERIMENTAL API: signatures express the target contract below.
-// Operations remain unimplemented. A linked ERTS build also checks native
-// lifecycle state before reporting missing unbooted initialization cleanup.
-// This API does not yet start BEAM, create worlds, or claim a stable public ABI.
+// Engine construction/shutdown own the additive C execution substrate.
+// Isolate/call/reclamation operations remain explicitly unsupported.
+// No implicit worlds or OTP startup; no stable public ABI claim.
 #include <chrono>
 #include <cstddef>
 #include <cstdint>

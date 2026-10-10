@@ -23,7 +23,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    summary = {'scope': 'selected_native_BEAM_word_execution_not_public_engine_or_stateful_isolate_acceptance', 'commands': [], 'passed': False}
+    summary = {'scope': 'additive_engine_lifecycle_and_selected_BEAM_execution_not_stateful_isolate_acceptance', 'commands': [], 'passed': False}
     env = dict(os.environ, ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0')
 
     def run(name, command, accepted=(0,)):
@@ -58,7 +58,7 @@ def main():
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
                             root / 'libbeam/tests/fixtures/first_slice.erl',
-                            root / 'libbeam/tests/api_scaffold_test.cpp',
+                            root / 'libbeam/tests/api_engine_test.cpp', root / 'libbeam/tests/core_engine_test.c',
                             root / 'libbeam/include/libbeam/engine.hpp',
                             root / 'libbeam/examples/engine_lifecycle.cpp',
                             root / 'libbeam/examples/two_isolates.cpp', Path(__file__).resolve()})
@@ -109,7 +109,7 @@ def main():
                                           '--output', out / 'binary-oracle'])
             run('configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'build',
                              '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
-                             '-DCMAKE_C_FLAGS=-Wall -Wextra -Werror'])
+                             '-DCMAKE_C_FLAGS=-Wall -Wextra -Werror', '-DCMAKE_CXX_FLAGS=-Wall -Wextra -Werror'])
             run('build', ['cmake', '--build', out / 'build'])
             run('ctest', ['ctest', '--test-dir', out / 'build', '--output-on-failure'])
             symbols = run('core-symbols', ['nm', '-u', out / 'build/liblibbeam_core.a'])
@@ -236,7 +236,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','md5','process','heap','bif_info']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','md5','process','heap','bif_info']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -250,6 +250,14 @@ def main():
                 *[f'libbeam/core/{s}.c' for s in execution_sources_c], 'libbeam/tests/core_binary_test.c',
                 '-lz', '-o', out / 'binary-ubsan'])
             run('binary-ubsan', [out / 'binary-ubsan', binary_fixture, fixture, peer_fixture])
+            sanitizer_flags = '-Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all'
+            run('engine-ubsan-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'engine-ubsan',
+                '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
+                '-DCMAKE_C_FLAGS='+sanitizer_flags, '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
+            run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
+                'core_engine_test', 'api_engine_test', 'engine_lifecycle'])
+            run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
+                '-R', '^(core_engine_lifetime|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
@@ -281,11 +289,19 @@ def main():
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
                                                 for p in [fixture, peer_fixture, binary_fixture, many_fixture, *probes]}
-            # Observe the real acceptance target; its failure is not converted
-            # into a passing test or a requirement that future Engines stay red.
-            run('engine-lifecycle-observed', [out / 'build/engine_lifecycle'], accepted=None)
+            # G1 now requires the unchanged acceptance target and real C/adapter
+            # failure recovery. Stateful G3 remains separately observed, not green.
+            lifecycle = run('engine-lifecycle', [out / 'build/engine_lifecycle'])
             summary['engine_lifecycle_returncode'] = summary['commands'][-1]['returncode']
-            summary['engine_lifecycle_passed'] = summary['engine_lifecycle_returncode'] == 0
+            if 'ENGINE_LIFECYCLE_OK create_shutdown_create=true' not in lifecycle:
+                raise RuntimeError('Missing unchanged Engine lifetime acceptance marker')
+            summary['engine_lifecycle_passed'] = True
+            run('engine-lifecycle-release', [out / 'release/engine_lifecycle'])
+            run('engine-components', [out / 'build/core_engine_test'])
+            run('engine-api', [out / 'build/api_engine_test'])
+            run('two-isolates-observed', [out / 'build/two_isolates', *probes], accepted=None)
+            summary['two_isolates_returncode'] = summary['commands'][-1]['returncode']
+            summary['two_isolates_passed'] = summary['two_isolates_returncode'] == 0
             for p in files:
                 if hashlib.sha256(p.read_bytes()).hexdigest() != summary['source_hashes'][str(p.relative_to(root))]:
                     raise RuntimeError(f'Source changed during validation: {p}')

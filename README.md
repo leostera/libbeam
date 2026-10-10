@@ -32,9 +32,10 @@ stripping a whole OTP runtime down. Preserving `erl` or full OTP behavior is
 not a goal. Legacy failures matter only when they reveal a problem in required
 runtime behavior or supported language semantics.
 
-**The public C++ Engine/Isolate API and isolate proof are not implemented yet.
-The additive C core now executes a limited BEAM profile with copying GC and owned
-code retirement; see the [first-execution record](docs/rfds/0003-first-execution.md).
+**The public C++ Engine now passes create → shutdown → create over the actual
+additive C execution substrate; [lifecycle evidence](docs/rfds/0003-engine-lifecycle.md).
+The Isolate/call/reclamation API and stateful proof remain unimplemented. The C core
+executes a limited BEAM profile with copying GC and owned code/binary retirement.
 The older native startup experiment still cannot shut down safely. This is not a
 security boundary for untrusted workloads.**
 
@@ -58,8 +59,8 @@ single-digit milliseconds to **first execution**, not application completion.
 Concurrent density, execution budgets/eviction and suspend/resume have separate
 tracked gates; 1,000 sequential proof cycles do not prove 1,000 resident isolates.
 The [two-isolate C++ example](libbeam/examples/two_isolates.md) now specifies the
-API we want, with same-module Erlang fixtures. Its CMake scaffold now links and
-runs, explicitly failing at `Engine::create` until real behavior is implemented.
+API we want, with same-module Erlang fixtures. It links and runs against the real
+C Engine, explicitly failing at `Engine::create_isolate` until world lifecycle exists.
 RFD 0003 supersedes the construction strategy in the earlier
 [implementation plan](docs/rfds/0002-example-implementation-plan.md), keeping the
 example—not broad runtime cleanup—as the development driver.
@@ -82,8 +83,9 @@ The old evidence is not acceptance for the clean-upstream implementation.
 An ordinary clone includes the source. Build in a fresh detached repository worktree
 as described in [`libbeam/README.md`](libbeam/README.md); do not reuse the old Realm
 build outputs. The source-check workflow now includes standalone additive C
-component tests in debug/release builds, alongside Python tooling and snapshot
-layout checks. These are not Engine or Isolate acceptance.
+component tests and unchanged Engine lifecycle acceptance in debug/release builds,
+alongside Python tooling and snapshot layout checks. These do not establish
+stateful Isolate acceptance.
 Historical Realm and copied upstream workflows have been removed, not counted as passing.
 
 ## Source provenance and licenses

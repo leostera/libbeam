@@ -204,9 +204,10 @@ static void metadata_copy_failure(Memory *memory,LbCodeSpace *space,LbCodeModule
 }
 static void executable_test(const char *path)
 {
-    Memory m={0}; LbAllocDomain *d=domain(&m); LbCodeSpace *space; LbCodeModule *module;
+    Memory m={0}; LbSystemAllocator cb={&m,allocate,release}; LbEngine *engine=NULL;
+    LbCodeSpace *space; LbCodeModule *module;
     LbBeamError error; size_t size,calls,i,live,bytes,atoms; unsigned char *data=read_image(path,&size);
-    CHECK(lb_code_space_create(d,&space)==LB_CODE_OK); calls=m.calls;
+    CHECK(lb_engine_create(&cb,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK); calls=m.calls;
     { LbCodeStatus status=lb_code_load(space,data,size,&module,&error);
       if(status!=LB_CODE_OK) fprintf(stderr,"%s status=%d stage=%s offset=%zu\n",path,status,error.stage,error.offset);
       CHECK(status==LB_CODE_OK); }
@@ -222,7 +223,7 @@ static void executable_test(const char *path)
         if(i) CHECK(view.data[80]==0xa0);
         CHECK(lb_code_unload(module)==LB_CODE_BUSY); lb_process_destroy(p);
     }
-    copied_inputs(d,&m,space,module);
+    copied_inputs(engine->domain,&m,space,module);
     metadata_copy_failure(&m,space,module);
     { Eterm what=atom(space,"attributes"),value; LbProcess *p=invoke(space,module,"module_info",&what,1);
       run(p,1); value=payload(space,lb_process_result(p)); zero_binary(value,2056,0x7f);
@@ -230,21 +231,23 @@ static void executable_test(const char *path)
     }
     CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
     for(i=1;i<=calls;++i) {
-        CHECK(lb_code_space_create(d,&space)==LB_CODE_OK);
+        CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
         live=m.live; bytes=m.bytes; atoms=lb_atoms_count(lb_code_space_atoms(space)); m.fail=m.calls+i;
         CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_NO_MEMORY && !module);
         CHECK(m.live==live && m.bytes==bytes && lb_atoms_count(lb_code_space_atoms(space))==atoms); m.fail=0;
         CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_OK);
         CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
     }
-    free(data); CHECK(lb_alloc_domain_destroy(d)==LB_ALLOC_OK && !m.live && !m.bytes);
+    free(data); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
+    CHECK(!m.live && !m.bytes);
     printf("CORE_BINARY_EXECUTION_OK literal=true copied_input=true shared_tuple_root=true gc_dead_release=true failure_prefixes=%zu engine_lifecycle=false\n",calls);
 }
 static void source_retirement(const char *binary_path,const char *first_path,const char *peer_path)
 {
-    Memory m={0}; LbAllocDomain *d=domain(&m); LbCodeSpace *space; LbCodeModule *first,*peer,*source;
+    Memory m={0}; LbSystemAllocator cb={&m,allocate,release}; LbEngine *engine=NULL;
+    LbCodeSpace *space; LbCodeModule *first,*peer,*source;
     LbProcess *p; Eterm module,value; const unsigned char *original; LbBitstringView view;
-    CHECK(lb_code_space_create(d,&space)==LB_CODE_OK);
+    CHECK(lb_engine_create(&cb,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
     first=load(space,first_path); peer=load(space,peer_path); source=load(space,binary_path);
     module=lb_code_module_name(source); p=invoke(space,peer,"metadata",&module,1); run(p,1);
     value=payload(space,lb_process_result(p)); CHECK(refcount(value)==2);
@@ -266,7 +269,8 @@ static void source_retirement(const char *binary_path,const char *first_path,con
         lb_process_destroy(replacement);
     }
     CHECK(lb_code_unload(source)==LB_CODE_OK && lb_code_unload(peer)==LB_CODE_OK && lb_code_unload(first)==LB_CODE_OK);
-    CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_alloc_domain_destroy(d)==LB_ALLOC_OK && !m.live && !m.bytes);
+    CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK);
+    lb_engine_release(engine); CHECK(!m.live && !m.bytes);
     puts("CORE_BINARY_RETIREMENT_OK copied_binary_survives_source_module=true replacement=true resource_balance=true");
 }
 int main(int argc,char **argv)

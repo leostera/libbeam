@@ -3,8 +3,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(libbeam LANGUAGES C CXX)
 
-# RFD 0003 additive C core. Component-only until real execution infrastructure
-# can back the public factory; never falls back to the diagnostic ERTS archive.
+# RFD 0003 additive C core: the one production execution/lifetime substrate.
+# Historical ERTS packages are available only to explicit diagnostic targets.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(Perl REQUIRED)
 set(LIBBEAM_ATOM_GEN ${CMAKE_CURRENT_BINARY_DIR}/generated/atoms)
@@ -40,19 +40,19 @@ find_package(ZLIB REQUIRED)
 add_library(libbeam_core STATIC core/alloc.c core/utf8.c core/beam_image.c core/atoms.c
     core/opcodes.c core/beam_reader.c core/beam_program.c core/beam_decode.c
     core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c
-    core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/md5.c core/process.c core/heap.c core/bif_info.c)
+    core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/engine.c core/md5.c core/process.c core/heap.c core/bif_info.c)
 add_dependencies(libbeam_core libbeam_atom_definitions libbeam_opcode_definitions)
 target_link_libraries(libbeam_core PUBLIC ZLIB::ZLIB)
 target_include_directories(libbeam_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core ${LIBBEAM_ATOM_GEN} ${LIBBEAM_OPCODE_GEN})
 target_compile_features(libbeam_core PUBLIC c_std_11)
 set_target_properties(libbeam_core PROPERTIES C_EXTENSIONS OFF)
 
-# The optional package is a frozen, hash-checked native build artifact, NOT an
-# embedded/standalone runtime mode. Without it, only API-scaffold tests can run.
+# Thin C++ host adapter, always backed by the additive C runtime.
 add_library(libbeam STATIC src/engine.cpp)
 add_library(libbeam::libbeam ALIAS libbeam)
 target_include_directories(libbeam PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_features(libbeam PUBLIC cxx_std_17)
+target_link_libraries(libbeam PRIVATE libbeam_core)
 set_target_properties(libbeam PROPERTIES CXX_EXTENSIONS OFF OUTPUT_NAME beam)
 
 set(LIBBEAM_ERTS_PACKAGE "" CACHE FILEPATH "runtime-package.cmake exported by export_runtime_package.py")
@@ -61,18 +61,14 @@ if(LIBBEAM_ERTS_PACKAGE)
     if(NOT TARGET libbeam_erts)
         message(FATAL_ERROR "Runtime package must define libbeam_erts")
     endif()
-    target_link_libraries(libbeam PRIVATE libbeam_erts)
-    target_compile_definitions(libbeam PRIVATE LIBBEAM_LINKED_ERTS=1)
     # Explicit process-lifetime diagnostic, not an Engine/Isolate acceptance test.
     add_executable(engine_start_probe examples/engine_start_probe.cpp)
-    target_link_libraries(engine_start_probe PRIVATE libbeam::libbeam libbeam_erts)
-    target_compile_definitions(engine_start_probe PRIVATE LIBBEAM_PROBE_CPP_PREFLIGHT=1)
+    target_link_libraries(engine_start_probe PRIVATE libbeam_erts)
     add_executable(engine_prepare_probe examples/engine_prepare_probe.cpp)
     target_link_libraries(engine_prepare_probe PRIVATE libbeam::libbeam libbeam_erts)
 endif()
 
-# Red acceptance target until real unbooted teardown/restart exists. Deliberately
-# not registered as an expected-failure CTest.
+# Unchanged acceptance target; success requires real create/shutdown/recreate.
 add_executable(engine_lifecycle examples/engine_lifecycle.cpp)
 target_link_libraries(engine_lifecycle PRIVATE libbeam::libbeam)
 
@@ -81,6 +77,12 @@ target_link_libraries(two_isolates PRIVATE libbeam::libbeam)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_test(NAME engine_lifecycle_acceptance COMMAND engine_lifecycle)
+    set_tests_properties(engine_lifecycle_acceptance PROPERTIES TIMEOUT 20)
+    add_executable(core_engine_test tests/core_engine_test.c)
+    target_link_libraries(core_engine_test PRIVATE libbeam_core)
+    add_test(NAME core_engine_lifetime COMMAND core_engine_test)
+    set_tests_properties(core_engine_lifetime PROPERTIES TIMEOUT 90)
     add_executable(core_binary_test tests/core_binary_test.c)
     target_link_libraries(core_binary_test PRIVATE libbeam_core)
     add_test(NAME core_binary_components COMMAND core_binary_test)
@@ -104,11 +106,9 @@ if(BUILD_TESTING)
     target_link_libraries(core_beam_image_test PRIVATE libbeam_core)
     add_test(NAME core_beam_image_lifetime COMMAND core_beam_image_test)
     set_tests_properties(core_beam_image_lifetime PROPERTIES TIMEOUT 30)
-    add_executable(api_scaffold_test tests/api_scaffold_test.cpp)
-    target_link_libraries(api_scaffold_test PRIVATE libbeam::libbeam)
+    add_executable(api_engine_test tests/api_engine_test.cpp)
+    target_link_libraries(api_engine_test PRIVATE libbeam::libbeam)
     if(LIBBEAM_ERTS_PACKAGE)
-        target_link_libraries(api_scaffold_test PRIVATE libbeam_erts)
-        target_compile_definitions(api_scaffold_test PRIVATE LIBBEAM_TEST_NATIVE=1)
         add_executable(native_engine_control_test tests/native_engine_control_test.cpp)
         target_link_libraries(native_engine_control_test PRIVATE libbeam_erts)
         add_test(NAME native_engine_control_lifetime COMMAND native_engine_control_test)
@@ -131,5 +131,5 @@ if(BUILD_TESTING)
                 TIMEOUT 20)
         endforeach()
     endif()
-    add_test(NAME api_scaffold_reports_missing_engine COMMAND api_scaffold_test)
+    add_test(NAME api_engine_lifetime COMMAND api_engine_test)
 endif()

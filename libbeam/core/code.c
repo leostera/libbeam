@@ -23,46 +23,47 @@ Export *lb_export_find(LbCodeSpace *space,Eterm module,Eterm function,unsigned a
         if(e->info.mfa.module==module && e->info.mfa.function==function && e->info.mfa.arity==arity) return e;
     return NULL;
 }
-LbCodeStatus lb_code_space_create(LbAllocDomain *domain,LbCodeSpace **out)
+LbCodeStatus lb_code_space_create(LbEngine *engine,LbCodeSpace **out)
 {
     LbCodeSpace *space;
+    LbAllocDomain *domain;
     void *memory;
     size_t i;
     LbAtomStatus status;
-    const unsigned ids[]={BIF_get_module_info_1,BIF_get_module_info_2};
-    const LbBifFn functions[]={lb_bif_module_info_1,lb_bif_module_info_2};
     if(!out) return LB_CODE_INVALID;
-    *out=NULL; if(!domain) return LB_CODE_INVALID;
+    *out=NULL; if(!engine) return LB_CODE_INVALID;
+    if(!lb_engine_is_open(engine)) return LB_CODE_CLOSED;
+    if(engine->spaces==SIZE_MAX) return LB_CODE_LIMIT;
+    domain=engine->domain;
     if(lb_alloc_domain_allocate(domain,sizeof(*space),&memory)!=LB_ALLOC_OK) return LB_CODE_NO_MEMORY;
-    space=memory; memset(space,0,sizeof(*space)); space->domain=domain;
+    space=memory; memset(space,0,sizeof(*space)); space->engine=engine; space->domain=domain;
     status=lb_atoms_create(domain,1048576,&space->atoms);
     if(status!=LB_ATOM_OK) { lb_release(domain,space); return status==LB_ATOM_NO_MEMORY?LB_CODE_NO_MEMORY:LB_CODE_LIMIT; }
-    if(lb_alloc_domain_allocate(domain,sizeof(BifEntry)*BIF_SIZE,&memory)!=LB_ALLOC_OK) {
-        if(lb_atoms_destroy(space->atoms)!=LB_ATOM_OK) abort(); lb_release(domain,space); return LB_CODE_NO_MEMORY;
-    }
-    space->bifs=memory; memset(memory,0,sizeof(BifEntry)*BIF_SIZE);
-    for(i=0;i<2;++i) {
+    for(i=0;i<LB_NATIVE_COUNT;++i) {
+        unsigned id=engine->native_ids[i];
+        const BifEntry *bif=&engine->bifs[id];
         Export *e=&space->natives[i];
-        /* These implementations can collect the owned heap, hence HEAVY. This
-         * is an execution contract, not the upstream implementation's kind. */
-        space->bifs[ids[i]]=(BifEntry){am_erlang,am_get_module_info,(int)i+1,functions[i],BIF_KIND_HEAVY};
-        e->bif_number=(int)ids[i]; e->info.op=op_i_func_info_IaaI;
-        e->info.mfa=(LbMFA){am_erlang,am_get_module_info,i+1};
+        /* Mutable export/trampoline state is private; implementation metadata
+         * and allocation infrastructure are retained from the actual Engine. */
+        e->bif_number=(int)id; e->info.op=op_i_func_info_IaaI;
+        e->info.mfa=(LbMFA){bif->module,bif->name,(Uint)bif->arity};
         e->trampoline.op=op_call_bif_W;
         _Static_assert(sizeof(LbBifFn)==sizeof(BeamInstr),"Native pointer word ABI");
-        memcpy(&e->trampoline.address,&functions[i],sizeof(LbBifFn));
+        memcpy(&e->trampoline.address,&bif->f,sizeof(LbBifFn));
         e->dispatch.addresses[0]=&e->trampoline.op;
         e->next=space->exports; space->exports=e;
     }
-    *out=space; return LB_CODE_OK;
+    lb_engine_space_published(engine); *out=space; return LB_CODE_OK;
 }
 LbCodeStatus lb_code_space_destroy(LbCodeSpace *space)
 {
     LbAllocDomain *domain;
+    LbEngine *engine;
     if(!space) return LB_CODE_INVALID;
     if(space->modules || space->loading) return LB_CODE_BUSY;
     if(lb_atoms_destroy(space->atoms)!=LB_ATOM_OK) return LB_CODE_BUSY;
-    domain=space->domain; lb_release(domain,space->bifs); lb_release(domain,space); return LB_CODE_OK;
+    domain=space->domain; engine=space->engine;
+    lb_release(domain,space); lb_engine_space_released(engine); return LB_CODE_OK;
 }
 LbAtomTable *lb_code_space_atoms(LbCodeSpace *space) { return space?space->atoms:NULL; }
 static Export *local_export(LbCodeModule *module,Eterm function,unsigned arity)
@@ -124,7 +125,7 @@ static LbCodeStatus setup(LoaderState *st)
         if(!e) return LB_CODE_UNRESOLVED;
         if(e->owner && e->owner!=module && e->owner->importers>SIZE_MAX-module->import_count) return LB_CODE_LIMIT;
         module->imports[i]=e; module->dependencies[i]=e->owner==module?NULL:e->owner;
-        if(e->bif_number>=0) st->bif_imports[i]=&st->space->bifs[e->bif_number];
+        if(e->bif_number>=0) st->bif_imports[i]=&st->space->engine->bifs[e->bif_number];
     }
     st->ci=(size_t)info->function_count+1;
     return LB_CODE_OK;

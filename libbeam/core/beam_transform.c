@@ -52,7 +52,7 @@ static int smp_mark_target_label(LoaderState *st,BeamOpArg arg)
     }
     st->labels[arg.val].looprec_targeted=1; return 1;
 }
-#define bif_table (st->space->bifs)
+#define bif_table (st->space->engine->bifs)
 #define TR_REQUIRE(test) do { if(!(test)) return TE_BAD_FORMAT; } while(0)
 /* Upstream generated helper parameters are intentionally uniform. */
 #if defined(__clang__)

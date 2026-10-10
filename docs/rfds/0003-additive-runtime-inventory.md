@@ -7,7 +7,8 @@ Initial inventory baseline: **`8d7a4a67`**; updated with the
 [A01/A02 term-and-atom slice](0003-terms-and-atoms.md) and the
 [A03–A07 loader checkpoint](0003-loader-program.md) and
 [first selected-profile execution](0003-first-execution.md) and
-[owned ordinary binaries](0003-owned-binaries.md). Direction: [RFD 0003](0003-additive-runtime-construction.md).
+[owned ordinary binaries](0003-owned-binaries.md) and
+[C Engine lifetime](0003-engine-lifecycle.md). Direction: [RFD 0003](0003-additive-runtime-construction.md).
 First transplant: [owned BEAM images](0003-first-loader-slice.md).
 
 This is a source-grounded dependency and acceptance inventory, not a declaration-
@@ -28,9 +29,9 @@ parallel objective.
 | Literal / type / lambda preparation | Admitted literals have runtime/GC consumers; attributes/compile metadata decoded for execution; ordinary immutable offheap binaries now loaded/copied/collected; maps/funs and runtime lambda registration pending |
 | Transformation / executable code | Selected profile transforms, emits, eagerly links, publishes and physically retires real BEAM words; full helper/fixup/consumer breadth pending |
 | Process context / heap / GC / interpreter execution | Explicit C context, bounded generated interpreter, selected full-copy GC and two real module-info BIFs; no scheduler/process identities or broad exception handling |
-| C Engine / Isolate construction and retirement | Not implemented; allocation domains/images are not these objects |
-| Public C++ API | Scaffold; first creation still refuses |
-| Engine lifetime / two-Isolate acceptance | Neither passes |
+| C Engine / Isolate construction and retirement | Engine owns actual allocation/native-dispatch substrate; code spaces retain it through physical release; public world lifecycle pending |
+| Public C++ API | Engine creation/shutdown/move/destruction implemented through C; Isolate/call/reclamation still refuse |
+| Engine lifetime / two-Isolate acceptance | Unchanged G1 passes with failure recovery; G3 still refuses Isolate creation |
 
 The older `beam/` ownership migration is **research and transplant material**, not
 additional completed rows in this table. Its [inventory](0002-current-ownership-inventory.md)
@@ -42,7 +43,7 @@ lifecycle work is preserved and is not being continued by this inventory pass.
 | Gate | Witness | What success must mean |
 |---|---|---|
 | G0 — image preparation | `core_beam_image_test`, fresh compiler fixture | Owned structural metadata and balanced failure/release; already demonstrated, not execution |
-| G1 — actual Engine lifetime | Unchanged `engine_lifecycle.cpp`, plus failure injection | Real shared execution infrastructure, no implicit world; create/shutdown/create and failed-init/retry without retained singleton or host exit |
+| G1 — actual Engine lifetime — **selected substrate demonstrated** | Unchanged `engine_lifecycle.cpp`, plus failure injection | Real shared execution infrastructure, no implicit world; create/shutdown/create and failed-init/retry without retained singleton or host exit |
 | G2 — first execution | Existing `first_slice.erl`, `core_code_test`; selected-profile witness demonstrated | Execute real BEAM through transplanted decoding/emission/interpreter machinery; explicit contexts, ordinary terms, collection, errors and complete teardown |
 | G3 — independent worlds | Unchanged `two_isolates.cpp` and its existing fixtures | Same-name modules/registrations coexist; persistent processes; one world physically reclaimed while peer runs; replacement and clean Engine shutdown |
 | G4 — supported profile | Explicit language/BIF/service conformance suite | Deliberate supported behavior and fail-closed excluded effects, beyond the example |
@@ -123,7 +124,7 @@ All rows are outstanding in the additive implementation unless explicitly marked
 | A09 Heap, GC and off-heap cleanup — **selected full-copy collector plus real binary reference sweep; message/fun/other-offheap breadth pending** | `erl_gc.*`, term-copy helpers, `erl_binary.*`, `erl_message.*:erts_factory_*` where needed | Process heap/stack, message fragments, module literals and binary refs with explicit roots | G2: forced collection preserving arguments/tuples/literals and exact cleanup; failure at heap growth |
 | A10 Interpreter boundary — **selected generated NO_JUMP_TABLE dispatch executes; instruction breadth pending** | `emu/beam_emu.c:process_main`, generated hot/warm/cold code, `emu/instrs.tab`, `emu/macros.tab` | Engine execution machinery; explicit process/Isolate context; caller sees bounded return/yield/error | G2: transplanted execution, no `erts_schedule`/OTP-bootstrap dependency smuggled in; cancellation-safe points |
 | A11 Builtin dispatch and errors — **real get_module_info/1,2 and error roots; broader builtins/unwind pending** | `bif.*`, BIF instruction tables, `error.h`, exception/stacktrace paths | Shared approved implementations; Isolate-local terms/exports/traps; invocation-owned results | G2: explicit supported/unsupported imports, exceptions and cleanup, not fatal host exit |
-| A12 C lifecycle + C++ adapter | New C Engine/Isolate ownership graph, `libbeam/src/engine.cpp`, existing API | Engine shared resources; Isolate children; handle/tombstone storage distinct from reclaimed VM state | G1/G2: real factory, same rollback/destruction operations, repeat creation, no hidden process-lifetime roots |
+| A12 C lifecycle + C++ adapter — **Engine substrate/lifetime implemented; Isolate/call/reclamation pending** | New C Engine/Isolate ownership graph, `libbeam/src/engine.cpp`, existing API | Engine shared resources; Isolate children; handle/tombstone storage distinct from reclaimed VM state | G1/G2: real factory, same rollback/destruction operations, repeat creation, no hidden process-lifetime roots |
 
 A03's compiler input path is `beam/lib/compiler/src/genop.tab`; the generator is
 `beam/erts/emulator/utils/beam_makeops`. List actual files explicitly when admitting
@@ -143,7 +144,7 @@ this cluster instead of copying the old Makefile wholesale.
 | B08 Binary/numeric/BIF slice — **ordinary binary storage and copied-byte invocation integrated; bit-syntax/numeric/BIF breadth pending** | `erl_binary.*`, `erl_bits.*`, binary instruction tables; integer arithmetic/formatting helpers | Process/module/message binary refs, heap terms and scratch storage; shared pure implementation | G3: input comparisons, binary construction, count increment and integer conversion; expand numeric semantics deliberately, never silently wrap |
 | B09 Host invocation/completion | Existing `Call`/`Reclamation` API; new C admission/completion state | Copied input/MFA, ordinary invocation process, reserved terminal capacity, host-owned result | G3: 64 KiB payload/result, 64 outstanding, 1 MiB queued payload; once-only completion; timeout is NOT cancellation |
 | B10 World retirement | Admission, scheduler, processes/signals, timers, registry, messages, code, literals and allocator domains above | Quiesce/drain each retaining user, then destroy children; preserve closed generation-stable tombstones | G3: A reclaimed while B continues; replacement fresh; late work cannot reach freed state |
-| B11 Engine shutdown and exceptional paths | C lifecycle coordinator plus C++ move/destructor/error paths | Join/drain shared users before final release; handles/children enforce busy; no force-free or host termination | G1/G3: repeated lifetime, busy refusal, dropping handles, errors/timeouts, partial start and failed publication recovery |
+| B11 Engine shutdown and exceptional paths — **G1 substrate/parent-retention slice implemented; world/worker retirement pending** | C lifecycle coordinator plus C++ move/destructor/error paths | Join/drain shared users before final release; handles/children enforce busy; no force-free or host termination | G1/G3: repeated lifetime, busy refusal, dropping handles, errors/timeouts, partial start and failed publication recovery |
 
 The image parser's 64 MiB cap and the example host's 8 MiB fixture-read limit are
 not the invocation limits above and are not a VM memory quota. Preserve those
@@ -195,8 +196,9 @@ ownership-inventory sweep.**
 3. Extend A08–A11 from the selected roots/GC/builtin/dispatch profile, preserving
    collection at host safepoints, actual frame/literal retention and bounded progress.
    Add the pinned compiler witness and explicit conformance; G2 is not all Erlang.
-4. Use that actual substrate to back the C Engine/Isolate lifecycle and C++ adapter
-   as appropriate (A12), proving G1 alongside G2 rather than blessing empty handles.
+4. Preserve the now-demonstrated G1 C Engine/adapter lifetime while integrating
+   public Isolate/call/reclamation ownership (A12). Add resources only with real
+   consumers and failure/retirement paths, never empty successful handles.
 5. After that closure, admit B-cluster semantics and drive the unchanged G3 example.
 
 A rows form dependency cycles: decoded literals are terms, code owns literals,

@@ -20,6 +20,7 @@
     "native_kind": "heavy; these owned implementations may collect",
     "threading": "serialized explicit-context bounded executor; no workers or TLS",
     "literals": "bounded ETF subset plus ordinary immutable offheap binaries (binary-sources.json); no fun/map admission",
-    "remaining": "Full A05/A06/A07 breadth, A12 Engine/Isolate API and all B-cluster stateful execution remain outstanding"
+    "engine": "Owned shared native catalog and allocation substrate; spaces retain the C Engine through physical destruction; C++ factory uses this lifecycle",
+    "remaining": "Full A05/A06/A07 breadth, A12 Isolate/call/reclamation API and B-cluster stateful execution remain outstanding"
   }
 }

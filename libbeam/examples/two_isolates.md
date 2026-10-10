@@ -4,15 +4,15 @@
 # Two isolates: the API we want
 
 [`two_isolates.cpp`](two_isolates.cpp) is the executable specification we will work
-toward. The [experimental API](../include/libbeam/engine.hpp) now has a
-[buildable scaffold](../src/engine.cpp). **It links and runs, then exits 1 at
-`not implemented: Engine::create`.** Every unfinished API reports an explicit
-error. A [native package build](../../docs/rfds/0002-native-api-link.md) now links
-real ERTS and reports missing unbooted initialization cleanup. A separate
-[native preparation witness](../../docs/rfds/0002-unbooted-preparation.md) runs
-without booting OTP or launching workers. Neither build starts a VM through this
-public API or simulates a successful engine/isolate/result.
-See the [milestone implementation plan](../../docs/rfds/0002-example-implementation-plan.md).
+toward. The [experimental API](../include/libbeam/engine.hpp) now owns the
+[real additive C Engine](../../docs/rfds/0003-engine-lifecycle.md). **This example
+links and runs, then exits 1 at `not implemented: Engine::create_isolate`.**
+Every unfinished API reports an explicit error; no successful world/result is
+simulated. The separate unchanged `engine_lifecycle.cpp` passes create/shutdown/
+recreate. Historical [native package](../../docs/rfds/0002-native-api-link.md) and
+[preparation](../../docs/rfds/0002-unbooted-preparation.md) diagnostics are not a
+production backend. See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md)
+for the current construction strategy and remaining acceptance.
 
 ## Read the example as the goal
 
@@ -98,7 +98,7 @@ independent physical-release measurement. Trusted bytecode only initially.
 
 ## Checks available now
 
-Build and test the scaffold (no OTP build required):
+Build and test the Engine and components (no whole-OTP build required):
 
 ```sh
 cmake -S libbeam -B /tmp/libbeam-api-build
@@ -116,8 +116,8 @@ mkdir "$out/a" "$out/b"
 erlc -Werror -o "$out/a" libbeam/tests/fixtures/two_isolates/a/probe.erl
 erlc -Werror -o "$out/b" libbeam/tests/fixtures/two_isolates/b/probe.erl
 /tmp/libbeam-api-build/two_isolates "$out/a/probe.beam" "$out/b/probe.beam"
-# Expected current result: exit 1, "not implemented: Engine::create".
-# A passing scaffold test asserts this failure; it is NOT isolate acceptance.
+# Expected current result: exit 1, "not implemented: Engine::create_isolate".
+# Engine acceptance passes separately; this refusal is NOT isolate acceptance.
 ```
 
 Both variants have been compiled and independently smoke-tested using stock OTP:

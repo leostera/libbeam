@@ -47,6 +47,10 @@ def project(text):
     result = result.replace('instr->a = lb_palloc(st->program, instr->arity, sizeof(BeamOpArg));',
         'instr->a = lb_palloc(st->program, instr->arity, sizeof(BeamOpArg));\n    if (!instr->a) return TE_NO_MEMORY;')
     result = result.replace('sys_memcpy', 'memcpy').replace('ASSERT(', 'TR_REQUIRE(')
+    # The retained Engine catalog is immutable. Upstream locals only compare
+    # descriptor identities; preserve those comparisons without a writable alias.
+    result = result.replace('BifEntry *entry = st->bif_imports[i];',
+                            'const BifEntry *entry = st->bif_imports[i];')
     # File operands are 64-bit here. Never truncate a malformed import index to
     # upstream's int local before checking it against the owned import directory.
     result = re.sub(r'int i = (instr->a\[\d+\])\.val;',

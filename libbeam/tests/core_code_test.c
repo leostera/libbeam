@@ -2,6 +2,7 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  */
 #include "process.h"
+#include "engine_internal.h"
 #include "md5.h"
 #include "opcodes.h"
 #include <stdio.h>
@@ -98,12 +99,13 @@ static void put32(unsigned char *p,uint32_t value)
 {
     p[0]=(unsigned char)(value>>24); p[1]=(unsigned char)(value>>16); p[2]=(unsigned char)(value>>8); p[3]=(unsigned char)value;
 }
-static void arity_regression(LbAllocDomain *domain,Memory *m,const unsigned char *data,size_t size)
+static void arity_regression(LbEngine *engine,Memory *m,const unsigned char *data,size_t size)
 {
+    LbAllocDomain *domain=engine->domain;
     LbCodeSpace *space; LbBeamProgram *program; const LbBeamOp *op; LbCodeModule *module; LbBeamError error;
     size_t offset=SIZE_MAX,pos=12,n=0,old_end,new_end,at,total,live,bytes,atoms;
     unsigned char *bad;
-    CHECK(lb_code_space_create(domain,&space)==LB_CODE_OK);
+    CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
     CHECK(lb_beam_program_prepare(domain,lb_code_space_atoms(space),data,size,&program,&error)==LB_BEAM_OK);
     for(op=lb_beam_program_ops(program);op;op=op->next)
         if(op->op==genop_call_ext_only_2 && op->a[0].val==2 && op->a[1].val==1) offset=op->offset;
@@ -130,13 +132,13 @@ static void arity_regression(LbAllocDomain *domain,Memory *m,const unsigned char
 static void file_test(const char *path)
 {
     FILE *file=fopen(path,"rb"); long length; unsigned char *data;
-    Memory m={0}; LbSystemAllocator callbacks={&m,allocate,release}; LbAllocDomain *domain=NULL;
+    Memory m={0}; LbSystemAllocator callbacks={&m,allocate,release}; LbEngine *engine=NULL;
     LbCodeSpace *space=NULL,*peer=NULL; LbCodeModule *module=NULL,*other=NULL; LbBeamError error;
     size_t calls,i,live,bytes,atoms; LbCodeStatus status;
     CHECK(file && !fseek(file,0,SEEK_END)); length=ftell(file); CHECK(length>0 && length<8*1024*1024 && !fseek(file,0,SEEK_SET));
     data=malloc((size_t)length); CHECK(data && fread(data,1,(size_t)length,file)==(size_t)length && !fclose(file));
-    CHECK(lb_alloc_domain_create(&callbacks,&domain)==LB_ALLOC_OK);
-    CHECK(lb_code_space_create(domain,&space)==LB_CODE_OK); calls=m.calls;
+    CHECK(lb_engine_create(&callbacks,&engine)==LB_ENGINE_OK);
+    CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK); calls=m.calls;
     status=lb_code_load(space,data,(size_t)length,&module,&error);
     if(status!=LB_CODE_OK) fprintf(stderr,"load status=%d stage=%s offset=%zu\n",status,error.stage,error.offset);
     CHECK(status==LB_CODE_OK); calls=m.calls-calls;
@@ -146,17 +148,18 @@ static void file_test(const char *path)
       CHECK(m.live==live && m.bytes==bytes && lb_atoms_count(lb_code_space_atoms(space))==atoms); }
     CHECK(lb_code_space_destroy(space)==LB_CODE_BUSY);
     semantics(space,module);
-    CHECK(lb_code_space_create(domain,&peer)==LB_CODE_OK);
+    CHECK(lb_code_space_create(engine,&peer)==LB_CODE_OK);
+    CHECK(lb_engine_shutdown(engine)==LB_ENGINE_BUSY && lb_engine_is_open(engine));
     CHECK(lb_code_load(peer,data,(size_t)length,&other,&error)==LB_CODE_OK);
     { LbProcess *p=start(peer,other,"value",NULL,0);
       CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
       run(p,LB_PROCESS_DONE); CHECK(lb_process_result(p)==make_small(42)); lb_process_destroy(p); }
     CHECK(lb_code_unload(other)==LB_CODE_OK && lb_code_space_destroy(peer)==LB_CODE_OK);
-    arity_regression(domain,&m,data,(size_t)length);
+    arity_regression(engine,&m,data,(size_t)length);
     /* Every allocation prefix of transformation, emission, linking and atom
      * preparation, including failure after provisional names are assigned. */
     for(i=1;i<=calls;++i) {
-        CHECK(lb_code_space_create(domain,&space)==LB_CODE_OK);
+        CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
         live=m.live; bytes=m.bytes; atoms=lb_atoms_count(lb_code_space_atoms(space));
         m.fail=m.calls+i;
         status=lb_code_load(space,data,(size_t)length,&module,&error);
@@ -167,7 +170,7 @@ static void file_test(const char *path)
         CHECK(lb_code_load(space,data,(size_t)length,&module,&error)==LB_CODE_OK);
         CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
     }
-    CHECK(lb_code_space_create(domain,&space)==LB_CODE_OK);
+    CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
     for(i=0;i<384;++i) {
         size_t pos=(i*131+17)%(size_t)length;
         unsigned char saved=data[pos];
@@ -178,8 +181,8 @@ static void file_test(const char *path)
         else CHECK(module==NULL && m.live==live && m.bytes==bytes && lb_atoms_count(lb_code_space_atoms(space))==atoms);
     }
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK);
-    CHECK(lb_alloc_domain_destroy(domain)==LB_ALLOC_OK && !m.live && !m.bytes);
-    free(data);
+    CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
+    CHECK(!m.live && !m.bytes); free(data);
     printf("CORE_CODE_EXECUTION_OK native_words=true generated_dispatch=true forced_gc=true errors=true yields=true failure_prefixes=%zu engine_lifecycle=false\n",calls);
 }
 static unsigned char *read_image(const char *path,size_t *size)
@@ -191,12 +194,12 @@ static unsigned char *read_image(const char *path,size_t *size)
 }
 static void linked_test(const char *first_path,const char *peer_path)
 {
-    Memory m={0}; LbSystemAllocator callbacks={&m,allocate,release}; LbAllocDomain *domain=NULL;
+    Memory m={0}; LbSystemAllocator callbacks={&m,allocate,release}; LbEngine *engine=NULL;
     LbCodeSpace *space=NULL; LbCodeModule *first=NULL,*peer=NULL; LbBeamError error;
     size_t first_size,peer_size,i,count,live,bytes,atoms;
     unsigned char *first_bytes=read_image(first_path,&first_size),*peer_bytes=read_image(peer_path,&peer_size);
     LbProcess *p; LbProcessStatus status; Eterm result,arg;
-    CHECK(lb_alloc_domain_create(&callbacks,&domain)==LB_ALLOC_OK && lb_code_space_create(domain,&space)==LB_CODE_OK);
+    CHECK(lb_engine_create(&callbacks,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
     live=m.live; bytes=m.bytes; atoms=lb_atoms_count(lb_code_space_atoms(space));
     CHECK(lb_code_load(space,peer_bytes,peer_size,&peer,&error)==LB_CODE_UNRESOLVED && peer==NULL);
     CHECK(m.live==live && m.bytes==bytes && lb_atoms_count(lb_code_space_atoms(space))==atoms);
@@ -261,21 +264,23 @@ static void linked_test(const char *first_path,const char *peer_path)
         run(p,LB_PROCESS_NO_MEMORY); m.fail=0; lb_process_destroy(p);
     }
     p=start(space,peer,"loop",NULL,0);
+    lb_engine_release(engine); engine=NULL; /* execution retains its actual parent */
     CHECK(lb_process_run(p,100,10)==LB_PROCESS_YIELDED);
     CHECK(lb_process_collect(p,0)==LB_PROCESS_YIELDED);
     CHECK(lb_process_run(p,100,10)==LB_PROCESS_YIELDED);
     CHECK(lb_code_unload(peer)==LB_CODE_BUSY); lb_process_destroy(p);
+    p=start(space,peer,"module_info",NULL,0); run(p,LB_PROCESS_DONE); lb_process_destroy(p);
     CHECK(lb_code_unload(peer)==LB_CODE_OK); /* includes self imports: no cycle/UAF */
     CHECK(lb_code_unload(first)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
-    CHECK(lb_alloc_domain_destroy(domain)==LB_ALLOC_OK && !m.live && !m.bytes);
-    puts("CORE_LINKED_CODE_OK imports_retain_code=true self_import_retirement=true bounded_loop=true heap_safepoints=true runtime_failure_retry=true");
+    CHECK(!m.live && !m.bytes); /* last physical space release also reclaimed the Engine */
+    puts("CORE_LINKED_CODE_OK imports_retain_code=true self_import_retirement=true bounded_loop=true heap_safepoints=true runtime_failure_retry=true engine_owner_drop=true");
 }
 static void many_test(const char *path)
 {
-    Memory m={0}; LbSystemAllocator cb={&m,allocate,release}; LbAllocDomain *d=NULL;
+    Memory m={0}; LbSystemAllocator cb={&m,allocate,release}; LbEngine *engine=NULL;
     LbCodeSpace *space=NULL; LbCodeModule *module=NULL; LbBeamError error;
     size_t size,calls,i,live,bytes,atoms,words; unsigned char *data=read_image(path,&size);
-    CHECK(lb_alloc_domain_create(&cb,&d)==LB_ALLOC_OK && lb_code_space_create(d,&space)==LB_CODE_OK);
+    CHECK(lb_engine_create(&cb,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
     calls=m.calls; CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_OK); calls=m.calls-calls;
     CHECK(lb_code_module_function_count(module)==130 && lb_code_module_words(module,&words) && words>1024);
     for(i=0;i<128;++i) {
@@ -285,34 +290,36 @@ static void many_test(const char *path)
     }
     CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
     for(i=1;i<=calls;++i) {
-        CHECK(lb_code_space_create(d,&space)==LB_CODE_OK);
+        CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
         live=m.live; bytes=m.bytes; atoms=lb_atoms_count(lb_code_space_atoms(space)); m.fail=m.calls+i;
         CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_NO_MEMORY && !module);
         CHECK(m.live==live && m.bytes==bytes && lb_atoms_count(lb_code_space_atoms(space))==atoms); m.fail=0;
         CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_OK);
         CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
     }
-    CHECK(lb_alloc_domain_destroy(d)==LB_ALLOC_OK && !m.live && !m.bytes); free(data);
+    CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
+    CHECK(!m.live && !m.bytes); free(data);
     printf("CORE_CODE_GROWTH_OK functions=130 words=%zu failure_prefixes=%zu\n",words,calls);
 }
 static void reject_test(const char *path)
 {
-    Memory m={0}; LbSystemAllocator cb={&m,allocate,release}; LbAllocDomain *d=NULL;
+    Memory m={0}; LbSystemAllocator cb={&m,allocate,release}; LbEngine *engine=NULL;
     LbCodeSpace *space=NULL; LbCodeModule *module=NULL; LbBeamError error;
     size_t size,live,bytes,atoms; unsigned char *data=read_image(path,&size); LbCodeStatus status;
-    CHECK(lb_alloc_domain_create(&cb,&d)==LB_ALLOC_OK && lb_code_space_create(d,&space)==LB_CODE_OK);
+    CHECK(lb_engine_create(&cb,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
     live=m.live; bytes=m.bytes; atoms=lb_atoms_count(lb_code_space_atoms(space));
     status=lb_code_load(space,data,size,&module,&error);
     CHECK(status==LB_CODE_UNRESOLVED || status==LB_CODE_UNSUPPORTED);
     CHECK(!module && m.live==live && m.bytes==bytes && lb_atoms_count(lb_code_space_atoms(space))==atoms);
-    CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_alloc_domain_destroy(d)==LB_ALLOC_OK && !m.live && !m.bytes);
+    CHECK(lb_code_space_destroy(space)==LB_CODE_OK); lb_engine_release(engine);
+    CHECK(!m.live && !m.bytes);
     free(data); puts("CORE_CODE_REJECTION_OK unsupported_imports_or_profile=true atom_rollback=true");
 }
 static void component_test(void)
 {
-    LbAllocDomain *domain=NULL; LbCodeSpace *space=NULL; LbAtomTransaction *tx=NULL; LbBeamBytes names[2],view;
+    LbEngine *engine=NULL; LbCodeSpace *space=NULL; LbAtomTransaction *tx=NULL; LbBeamBytes names[2],view;
     Eterm terms[2],found; size_t count; unsigned char digest[16];
-    CHECK(lb_alloc_domain_create(NULL,&domain)==LB_ALLOC_OK && lb_code_space_create(domain,&space)==LB_CODE_OK);
+    CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
     count=lb_atoms_count(lb_code_space_atoms(space));
     names[0]=(LbBeamBytes){(const unsigned char *)"provisional-one",15}; names[1]=names[0];
     CHECK(lb_atoms_prepare_names(lb_code_space_atoms(space),names,2,terms,&tx)==LB_ATOM_OK && terms[0]==terms[1]);
@@ -327,7 +334,8 @@ static void component_test(void)
     CHECK(lb_atoms_find(lb_code_space_atoms(space),names[0].data,names[0].size,&found)==LB_ATOM_OK && found==terms[0]);
     erts_md5((const unsigned char *)"abc",3,digest);
     CHECK(!memcmp(digest,"\x90\x01\x50\x98\x3c\xd2\x4f\xb0\xd6\x96\x3f\x7d\x28\xe1\x7f\x72",16));
-    CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_alloc_domain_destroy(domain)==LB_ALLOC_OK);
+    CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK);
+    lb_engine_release(engine);
     puts("CORE_CODE_COMPONENT_OK provisional_atoms=true md5=true execution_not_tested_without_fixture=true");
 }
 int main(int argc,char **argv)

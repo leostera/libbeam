@@ -6,6 +6,7 @@
 #ifndef LIBBEAM_CORE_CODE_INTERNAL_H
 #define LIBBEAM_CORE_CODE_INTERNAL_H
 #include "code.h"
+#include "engine_internal.h"
 #include "beam_program_internal.h"
 #include "beam_select.h"
 #include "lb_atoms_generated.h"
@@ -29,11 +30,8 @@
 #define LOADER_Y_REG _TAG_IMMED1_PORT
 #define loader_x_reg_index(t) ((t)>>_TAG_IMMED1_SIZE)
 #define loader_y_reg_index(t) ((t)>>_TAG_IMMED1_SIZE)
-typedef Uint BeamInstr;
 typedef LbBeamOp BeamOp;
 typedef LbBeamArg BeamOpArg;
-typedef struct LbProcess LbProcess;
-typedef Eterm (*LbBifFn)(LbProcess *, Eterm *, const BeamInstr *);
 typedef struct { Eterm module, function; Uint arity; } LbMFA;
 typedef struct { BeamInstr op; void *breakpoint; LbMFA mfa; } LbCodeInfo;
 typedef struct { const BeamInstr *addresses[3]; } LbDispatchable;
@@ -46,19 +44,17 @@ typedef struct LbExport {
     LbCodeModule *owner;
     struct LbExport *next;
 } Export;
-typedef enum { BIF_KIND_REGULAR, BIF_KIND_HEAVY, BIF_KIND_GUARD } BifKind;
-typedef struct { Eterm module, name; int arity; LbBifFn f; BifKind kind; } BifEntry;
 typedef struct { Eterm module, function; Uint arity; } BeamFile_ImportEntry;
 typedef struct { size_t pos; Sint offset; unsigned packed; } LabelPatch;
 typedef struct { size_t value, count, capacity; int looprec_targeted; LabelPatch *patches; } Label;
 typedef struct LbPatch { size_t pos; struct LbPatch *next; } LbPatch;
 struct LbCodeSpace {
-    LbAllocDomain *domain;
+    LbEngine *engine;
+    LbAllocDomain *domain; /* borrowed Engine allocation substrate */
     LbAtomTable *atoms;
     LbCodeModule *modules;
     Export *exports;
-    BifEntry *bifs;
-    Export natives[2];
+    Export natives[LB_NATIVE_COUNT];
     int loading;
 };
 struct LbCodeModule {
@@ -83,7 +79,7 @@ typedef struct LoaderState_ {
     LbCodeModule *module_code;
     LbCodeSpace *space;
     struct { struct { size_t count; BeamFile_ImportEntry *entries; } imports; } beam;
-    BifEntry **bif_imports;
+    const BifEntry **bif_imports;
     BeamOp *genop, *free_ops;
     Label *labels;
     size_t label_count;

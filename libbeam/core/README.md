@@ -2,18 +2,23 @@
 
 See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md) and the
 [first-execution record](../../docs/rfds/0003-first-execution.md) and
-[ordinary-binary extension](../../docs/rfds/0003-owned-binaries.md).
+[ordinary-binary extension](../../docs/rfds/0003-owned-binaries.md) and
+[C Engine lifecycle](../../docs/rfds/0003-engine-lifecycle.md).
 
 This is the C runtime construction boundary, not a whole-ERTS link. It now loads
 and executes ordinary `first_slice.erl` through generated BEAM transformations,
 specific-instruction words and generated interpreter cases. Tuple allocation,
 copying GC, literal/atom returns, `module_info/0,1`, bounded yields, exceptions and
 physical code retirement have execution consumers. This is a **limited profile**,
-not full A03–A07 coverage or a functioning public Engine/Isolate API. Both unchanged
-acceptance examples remain blocked at the public factory.
+not full A03–A07 coverage or a functioning public Isolate API. The unchanged Engine
+lifecycle target passes over this substrate; stateful Isolate creation still refuses.
 
 ## Boundaries
 
+- `engine.c`: fallible C parent for the actual allocation/native catalog substrate.
+  Spaces retain it through physical release; shutdown refuses live children;
+  out-of-order owner drop defers cleanup to the last physical child. No singleton,
+  implicit world or workers. The C++ factory owns this C handle.
 - `alloc.c`: serialized fallible allocation domains, exact-base release and busy
   destruction. Not a guest quota or a performant carrier allocator.
 - `term.h`, `atoms.c`: selected flat 64-bit BEAM terms and private atom namespaces.
@@ -31,7 +36,9 @@ acceptance examples remain blocked at the public factory.
   reject admission; they are never false/success-shaped helper implementations.
 - `code.c`: private export/module lookup, eager resolution of **all** imports,
   atomic publication, retained entries/frames/import dependencies, and guarded
-  physical retirement. No lazy loading, hot reload, NIF loading or root swapping.
+  physical retirement. Construction requires an Engine, whose catalog is used
+  by import binding and transformation; mutable exports remain private.
+  No lazy loading, hot reload, NIF loading or root swapping.
 - `process.c`, `heap.c`: explicit X/Y/continuation/reduction/exception state,
   bounded generated interpreter dispatch and selected copying-GC algorithms.
   No workers, scheduler-data TLS, global process table or implicit OTP services.
@@ -83,5 +90,7 @@ python3 -B libbeam/tools/run_additive_slice.py --output /tmp/unused-core-validat
 
 It requires `erl`, `erlc`, CMake, a C compiler, Python, Perl, zlib and `nm` (POSIX
 host tooling). Compiler-produced BEAM files remain outside source control.
-Component execution is **not** Engine lifecycle or stateful-Isolate acceptance,
-complete Erlang compatibility, a security boundary, or a performance/platform claim.
+The runner requires unchanged Engine lifecycle acceptance and separately observes
+the still-failing stateful-Isolate target. Component execution alone is not either
+acceptance gate, complete Erlang compatibility, a security boundary, or a
+performance/platform claim.

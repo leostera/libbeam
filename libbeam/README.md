@@ -28,19 +28,25 @@ for allocation ownership, owned BEAM images, the selected BEAM term representati
 namespace-local atoms, and real BEAM-word loading/execution for a selected profile.
 The [first-execution record](../docs/rfds/0003-first-execution.md) covers generated
 transforms/dispatch, copying GC, module-info BIFs and guarded code retirement.
-Full A03–A07 breadth and the public factory remain unfinished. The native archive work below is preserved
-as diagnostic/reference evidence, not a fallback runtime for the new core.
+The [Engine lifecycle integration](../docs/rfds/0003-engine-lifecycle.md) connects
+that actual execution substrate to the C++ factory and passes the unchanged
+create/shutdown/recreate target. Full A03–A07 breadth and public Isolate lifecycle
+remain unfinished. Native archive work below is diagnostic/reference evidence,
+not a fallback runtime for the new core.
 
 This directory contains build/link probes and an
 [API-first two-isolate example](examples/two_isolates.md). Its experimental C++
-library and CMake target now build and run, but deliberately fail at the first
-unfinished operation (`Engine::create`). No successful runtime behavior is faked.
+library and CMake target now build and run, but the example fails at the first
+unfinished operation (`Engine::create_isolate`). No successful world is faked.
 RFD 0003 supersedes the construction strategy in the earlier
 [implementation plan](../docs/rfds/0002-example-implementation-plan.md), while
 retaining its real-engine, private-world, execution and reclamation goals.
-[Native archive integration](../docs/rfds/0002-native-api-link.md) now connects the
-C++ target to actual ERTS and retains joinable scheduler-thread handles. The public
-factory still refuses initialization until ownership/cleanup exists.
+## Preserved subtractive experiment (not the production runtime)
+
+[Native archive integration](../docs/rfds/0002-native-api-link.md) historically
+connected the C++ scaffold to ERTS and retained joinable scheduler-thread handles.
+That factory refused initialization. The production C++ target now links only the
+additive core; optional ERTS packages serve explicit diagnostic targets.
 [Unbooted preparation](../docs/rfds/0002-unbooted-preparation.md) now initializes
 native substrate without starting OTP processes or workers. The engine path must
 not reuse whole-world startup.
@@ -58,8 +64,8 @@ now adds the real Engine constant arena and namespace-owned persistent-term
 storage, traps and deferred cleanup. The sweep is still incomplete.
 The [current ownership inventory](../docs/rfds/0002-current-ownership-inventory.md)
 separates completed storage/access migrations from remaining globals and lifecycle work.
-`engine_lifecycle` is the explicit create → shutdown → create executable target;
-it currently exits 1 at the first factory call, in both native and scaffold builds.
+`engine_lifecycle` was the red create → shutdown → create target during that
+experiment. It now passes through the additive core, not through ERTS teardown.
 [Native ownership migration](../docs/rfds/0002-native-ownership.md) introduces an
 explicit `ErtsEngine`, engine-owned lifecycle/handle-registry state, and scheduler
 owner references. Remaining globals are classified by engine versus isolate
@@ -96,7 +102,7 @@ budgets and suspend/resume remain explicit follow-on gates, not implemented cont
 ## Build and link probes
 
 Use a fresh detached **libbeam repository** worktree for reproducible builds.
-These native probes are separate from the new CMake API scaffold:
+These historical native probes are separate from the additive CMake runtime:
 
 ```sh
 git worktree add --detach /tmp/libbeam-baseline-source HEAD

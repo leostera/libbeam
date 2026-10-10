@@ -15,10 +15,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python3 -B -m unittest discover -s libbeam/tools -p 'test_*.py' -v
       - name: Install additive compression dependency
         run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
-      - name: Check additive C components (not Engine acceptance)
+      - name: Check tooling and real API linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec 9>"/tmp/otp-realm-validation-$(id -u).lock"
+          flock 9
+          git rev-parse HEAD
+          python3 -B -m unittest discover -s libbeam/tools -p 'test_*.py' -v
+      - name: Check additive C components and Engine lifetime (not Isolate acceptance)
         shell: bash
         run: |
           set -euo pipefail
@@ -34,20 +41,23 @@ jobs:
               libbeam/tools/otp/beam_makeops libbeam/core/otp/loader-sources.json \
               libbeam/core/otp/execution-sources.json libbeam/core/otp/binary-sources.json \
               libbeam/tools/check_binary_representation.py libbeam/tools/project_transform.py \
-              libbeam/tools/project_dispatch.py \
+              libbeam/tools/project_dispatch.py libbeam/src/engine.cpp \
+              libbeam/include/libbeam/engine.hpp libbeam/tests/api_engine_test.cpp \
+              libbeam/examples/engine_lifecycle.cpp libbeam/CMakeLists.txt \
               > "$build/source-hashes.txt"
             find libbeam/core/otp/opcodes -type f -print0 | sort -z | \
               xargs -0 sha256sum >> "$build/source-hashes.txt"
             python3 -B libbeam/tools/check_term_representation.py --output "$build/term-oracle"
             cmake -S libbeam -B "$build" -DBUILD_TESTING=ON \
-              -DCMAKE_BUILD_TYPE="$config" -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
+              -DCMAKE_BUILD_TYPE="$config" -DCMAKE_C_FLAGS="-Wall -Wextra -Werror" \
+              -DCMAKE_CXX_FLAGS="-Wall -Wextra -Werror"
             cmake --build "$build"
             ctest --test-dir "$build" --output-on-failure
           done
       - uses: erlef/setup-beam@v1
         with:
           otp-version: '28.3'
-      - name: Execute the selected additive profile (not Engine/Isolate acceptance)
+      - name: Execute Engine lifetime and the selected additive profile (not stateful Isolates)
         shell: bash
         run: |
           set -euo pipefail
