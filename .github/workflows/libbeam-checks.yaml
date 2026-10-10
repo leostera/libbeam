@@ -16,6 +16,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -B -m unittest discover -s libbeam/tools -p 'test_*.py' -v
+      - name: Install additive compression dependency
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
       - name: Check additive C components (not Engine acceptance)
         shell: bash
         run: |
@@ -28,7 +30,11 @@ jobs:
             sha256sum libbeam/core/*.[ch] libbeam/tests/core_*_test.c \
               libbeam/core/otp/atom.names libbeam/core/otp/bif.tab \
               libbeam/tools/generate_atoms.py libbeam/tools/otp/make_tables \
-              libbeam/tools/check_term_representation.py > "$build/source-hashes.txt"
+              libbeam/tools/check_term_representation.py libbeam/tools/generate_opcodes.py \
+              libbeam/tools/otp/beam_makeops libbeam/core/otp/loader-sources.json \
+              > "$build/source-hashes.txt"
+            find libbeam/core/otp/opcodes -type f -print0 | sort -z | \
+              xargs -0 sha256sum >> "$build/source-hashes.txt"
             python3 -B libbeam/tools/check_term_representation.py --output "$build/term-oracle"
             cmake -S libbeam -B "$build" -DBUILD_TESTING=ON \
               -DCMAKE_BUILD_TYPE="$config" -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"

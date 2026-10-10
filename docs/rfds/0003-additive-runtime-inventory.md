@@ -4,7 +4,8 @@
 # Additive runtime inventory and implementation order
 
 Initial inventory baseline: **`8d7a4a67`**; updated with the
-[A01/A02 term-and-atom slice](0003-terms-and-atoms.md). Direction: [RFD 0003](0003-additive-runtime-construction.md).
+[A01/A02 term-and-atom slice](0003-terms-and-atoms.md) and the
+[A03–A07 loader checkpoint](0003-loader-program.md). Direction: [RFD 0003](0003-additive-runtime-construction.md).
 First transplant: [owned BEAM images](0003-first-loader-slice.md).
 
 This is a source-grounded dependency and acceptance inventory, not a declaration-
@@ -21,7 +22,9 @@ parallel objective.
 | Bootstrap allocation domain | Implemented, fallible, exact-base release, busy refusal, owner-local failure injection |
 | Owned BEAM image | Implemented structural preparation: copied bytes, UTF-8 file atom names, import/export metadata, code header, opaque chunks |
 | Runtime atom identities / Erlang terms | Selected 64-bit tag/immediate/tuple/list primitives and owner-local atom tables/bindings implemented; full term operations, heap/GC and execution remain absent |
-| Instruction operand decoding / transformation / executable code | Not implemented |
+| Opcode generation / operand decoding | Pinned full OTP generation, compiled immutable metadata, owned generic operations and boundary synthesis implemented |
+| Literal / type / lambda preparation | Supported ETF/heap-literal and type/lambda subset implemented; offheap binaries/maps/funs and runtime registration remain absent |
+| Transformation / executable code | Specific selection primitive only; no complete transformation, emission, linking, publication or interpreter |
 | Process context / heap / GC / interpreter execution | Not implemented |
 | C Engine / Isolate construction and retirement | Not implemented; allocation domains/images are not these objects |
 | Public C++ API | Scaffold; first creation still refuses |
@@ -109,10 +112,10 @@ All rows are outstanding in the additive implementation unless explicitly marked
 |---|---|---|---|
 | A01 Platform/representation contract — **selected 64-bit boundary implemented** | `erl_vm.h`, `erl_term.h`, selected `sys.h` definitions; word width, endian, alignment, tags | Immutable definitions; no wholesale platform pre-init | G2: layout/tag boundaries and checked arithmetic, no alternate term representation |
 | A02 Term operations and atoms — **atoms/basic-term slice implemented; broader term operations pending** | `erl_term.*`, `atom.*`, existing namespace adaptations; predefined identities, NIL, smalls, tuples/lists | Isolate atom identity/storage; explicit context; no interning into old global table | G2: atom operands and tuple roots; G3: equal spellings in independent worlds |
-| A03 Opcode generation | `../utils/beam_makeops`, compiler `genop.tab` (full path below); common and `emu/` predicate/generator/ops/instruction tables; Makefile generation rules | Shared immutable generated implementation data; reproducible input record | G2: derive decoder/transform/emitter/dispatch from matching inputs, no opcode renumbering or mock loop |
-| A04 Full operand reader / temporary operations | `beam_file.c:beamcodereader_read_next`, tagged-number reader, integer/allocation-list marshalling, `BeamOpAllocator`, function-boundary synthesis | Prepared-module owner; fallible op/argument growth; drop temporary operations on every failure | G2: real compact encodings, signs/bignums, registers, labels, extended lists/type hints/literal indices and malformed boundaries |
-| A05 Runtime literal/type/lambda/line data | Remaining `beam_file.c` parsers, `external.c`, `big.*`, `beam_types.*`; optional compressed payload helpers | Isolate/module literal storage and off-heap resources; validation before publication | G2: actual literal fixture; G3: lambda metadata; explicit treatment of optional type/line/debug chunks |
-| A06 Transform and emit | `beam_load.c:load_code`, `emu/emu_load.c`, `emu/load.h`, generated transformation helpers | Unpublished prepared-code transaction; labels, imports, strings, literals, catch/fun patches; exact allocation bases | G2: resolved code and failure at each preparation/fixup stage; never invoke whole-world preload |
+| A03 Opcode generation — **generated and metadata consumed; dispatch bodies not compiled** | `../utils/beam_makeops`, compiler `genop.tab` (full path below); common and `emu/` predicate/generator/ops/instruction tables; Makefile generation rules | Shared immutable generated implementation data; reproducible input record | G2: derive decoder/transform/emitter/dispatch from matching inputs, no opcode renumbering or mock loop |
+| A04 Full operand reader / temporary operations — **owned decoding path implemented with explicit limits** | `beam_file.c:beamcodereader_read_next`, tagged-number reader, integer/allocation-list marshalling, `BeamOpAllocator`, function-boundary synthesis | Prepared-module owner; fallible op/argument growth; drop temporary operations on every failure | G2: real compact encodings, signs/bignums, registers, labels, extended lists/type hints/literal indices and malformed boundaries |
+| A05 Runtime literal/type/lambda/line data — **supported preparation subset; runtime/offheap work pending** | Remaining `beam_file.c` parsers, `external.c`, `big.*`, `beam_types.*`; optional compressed payload helpers | Isolate/module literal storage and off-heap resources; validation before publication | G2: actual literal fixture; G3: lambda metadata; explicit treatment of optional type/line/debug chunks |
+| A06 Transform and emit — **specific selection only; transform/emission pending** | `beam_load.c:load_code`, `emu/emu_load.c`, `emu/load.h`, generated transformation helpers | Unpublished prepared-code transaction; labels, imports, strings, literals, catch/fun patches; exact allocation bases | G2: resolved code and failure at each preparation/fixup stage; never invoke whole-world preload |
 | A07 Code publication and entry resolution | `module.*`, `export.*`, `beam_code.h`, `code_ix.*`, catch/range/fun metadata and prior code-space adaptations | Isolate-owned namespace; code remains retained through frames, closures and literals | G2: resolve own entry; G3: conflicting modules coexist and retirement releases references |
 | A08 Process execution context | `erl_process.h`, relevant `erl_process.c`, `erl_message.h`; X/Y registers, stack, continuation, reductions, exception roots | Isolate-owned process; Engine execution context borrows it; no scheduler-data TLS tenant selector | G2: bounded entry/run/yield/return using real context, no global process-table initialization |
 | A09 Heap, GC and off-heap cleanup | `erl_gc.*`, term-copy helpers, `erl_binary.*`, `erl_message.*:erts_factory_*` where needed | Process heap/stack, message fragments, module literals and binary refs with explicit roots | G2: forced collection preserving arguments/tuples/literals and exact cleanup; failure at heap growth |
@@ -180,9 +183,10 @@ separate meanings.
 **Target the A-cluster as a coherent first-execution path, not another standalone
 ownership-inventory sweep.**
 
-1. Reuse the implemented A01 representation and A02 atom/binding boundary. Next
-   admit the selected opcode generator inputs (A03), recording provenance and
-   adaptations. Broader A02 term operations continue with their actual consumers.
+1. Reuse the implemented A01/A02 boundary, A03 generation, A04 decoder and A05
+   supported preparation subset. Next connect real transformation/emission and
+   its execution consumers; do not insert false/success helpers for missing BIF,
+   literal, heap or code dependencies. Broader A02/A05 work follows those consumers.
 2. Follow `beamfile_get_code` through real operand decoding, operation allocation,
    atoms/literals/types and transformation/emission (A04–A07). Every constructor
    gets failure injection and reverse cleanup when admitted—not later.

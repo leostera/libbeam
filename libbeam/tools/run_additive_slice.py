@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Leandro Ostera <leandro@ostera.io>
-"""Fresh, serialized C-core image/term/atom validation. Reference OTP is not our executor."""
+"""Fresh, serialized C-core loader-component validation. Reference OTP is not our executor."""
 import argparse
 import fcntl
 import hashlib
@@ -23,7 +23,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    summary = {'scope': 'owned_image_terms_atoms_not_execution_or_engine_lifecycle', 'commands': [], 'passed': False}
+    summary = {'scope': 'owned_generic_program_literals_not_emitted_code_or_engine_lifecycle', 'commands': [], 'passed': False}
     env = dict(os.environ, ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0')
 
     def run(name, command, accepted=(0,)):
@@ -44,10 +44,14 @@ def main():
         with (Path(tempfile.gettempdir()) / f'otp-realm-validation-{os.getuid()}.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             files = sorted(set((root / 'libbeam/core').glob('*.[ch]')) |
+                           {p for p in (root / 'libbeam/core/otp/opcodes').rglob('*') if p.is_file()} |
+                           {p for p in (root / 'libbeam/tests/fixtures/two_isolates').rglob('*') if p.is_file()} |
                            {root / 'libbeam/CMakeLists.txt', root / 'libbeam/src/engine.cpp',
                             root / 'libbeam/tests/core_beam_image_test.c', root / 'libbeam/tests/core_alloc_test.c',
                             root / 'libbeam/tests/core_terms_atoms_test.c', root / 'libbeam/tools/generate_atoms.py',
                             root / 'libbeam/tools/check_term_representation.py',
+                            root / 'libbeam/tests/core_beam_program_test.c', root / 'libbeam/tools/generate_opcodes.py',
+                            root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
                             root / 'libbeam/tests/fixtures/first_slice.erl',
                             root / 'libbeam/tests/api_scaffold_test.cpp',
@@ -56,6 +60,16 @@ def main():
                             root / 'libbeam/examples/two_isolates.cpp', Path(__file__).resolve()})
             summary['source_hashes'] = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
             summary['reference_inputs'] = {}
+            opcode_manifest = json.loads((root / 'libbeam/core/otp/opcodes/manifest.json').read_text())
+            for entry in opcode_manifest['inputs']:
+                if hashlib.sha256((root / entry['source']).read_bytes()).hexdigest() != entry['sha256']:
+                    raise RuntimeError(f"Opcode reference changed: {entry['source']}")
+            summary['opcode_inputs'] = opcode_manifest
+            loader_sources = json.loads((root / 'libbeam/core/otp/loader-sources.json').read_text())
+            for filename, expected in loader_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Loader provenance changed: {filename}')
+            summary['loader_sources'] = loader_sources
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
@@ -91,6 +105,31 @@ def main():
             fixture = fixture_dir / 'first_slice.beam'
             native = run('native-fixture', [out / 'build/core_beam_image_test', fixture])
             run('native-atom-binding', [out / 'build/core_terms_atoms_test', fixture])
+            program = run('native-program', [out / 'build/core_beam_program_test', fixture])
+            disassemble = '''
+                [Path] = init:get_plain_arguments(),
+                {beam_file,_,_,_,_,Fs} = beam_disasm:file(Path),
+                lists:foreach(fun({function,F,A,_,_}) ->
+                    io:format("FUNCTION ~ts/~B~n",[atom_to_binary(F,utf8),A]) end,Fs), halt(0).
+            '''
+            def compare_functions(label, path, native):
+                reference = run(label+'-disassembly', [args.erl, '-noshell', '-noinput', '-eval', disassemble, '-extra', path])
+                rows = lambda text: sorted(r for r in text.splitlines() if r.startswith('FUNCTION '))
+                if rows(native) != rows(reference):
+                    raise RuntimeError(f'{label}: decoded function boundaries differ from OTP disassembly')
+            compare_functions('first', fixture, program)
+            probes = []
+            for variant in ('a', 'b'):
+                probe_dir = out / variant
+                probe_dir.mkdir()
+                run(variant+'-erlc', [args.erlc, '-o', probe_dir,
+                     root / f'libbeam/tests/fixtures/two_isolates/{variant}/probe.erl'])
+                probe = probe_dir / 'probe.beam'
+                probes.append(probe)
+                native = run(variant+'-program', [out / 'build/core_beam_program_test', probe])
+                compare_functions(variant, probe, native)
+            # Restore the image dump used by the independent metadata check below.
+            native = (out / 'native-fixture.log').read_text()
             # Pass paths as plain arguments, never interpolate paths into Erlang code.
             reference_code = '''
                 [Path] = init:get_plain_arguments(),
@@ -140,6 +179,15 @@ def main():
                                       'libbeam/core/utf8.c', 'libbeam/core/beam_image.c', 'libbeam/core/atoms.c',
                                       'libbeam/tests/core_terms_atoms_test.c', '-o', out / 'terms-ubsan'])
             run('terms-ubsan-fixture', [out / 'terms-ubsan', fixture])
+            program_sources = ['alloc', 'utf8', 'atoms', 'beam_image', 'opcodes', 'beam_reader',
+                               'beam_program', 'beam_decode', 'beam_metadata', 'beam_literals', 'beam_select']
+            run('program-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
+                '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
+                *[f'libbeam/core/{s}.c' for s in program_sources], 'libbeam/tests/core_beam_program_test.c',
+                '-lz', '-o', out / 'program-ubsan'])
+            for i, image in enumerate([fixture, *probes]):
+                run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
@@ -152,6 +200,16 @@ def main():
                 if first != second:
                     raise RuntimeError(f'Atom generation is not reproducible: {filename}')
             summary['atom_generation_reproducible'] = True
+            for i, image in enumerate([fixture, *probes]):
+                run(f'release-program-{i}', [out / 'release/core_beam_program_test', image])
+            first_outputs = json.loads((out / 'build/generated/opcodes/outputs.json').read_text())
+            second_outputs = json.loads((out / 'release/generated/opcodes/outputs.json').read_text())
+            if first_outputs != second_outputs:
+                raise RuntimeError('Full OTP opcode generation is not reproducible across builds')
+            summary['opcode_generation_outputs'] = first_outputs
+            summary['opcode_generation_reproducible'] = True
+            summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
+                                                for p in [fixture, *probes]}
             # Observe the real acceptance target; its failure is not converted
             # into a passing test or a requirement that future Engines stay red.
             run('engine-lifecycle-observed', [out / 'build/engine_lifecycle'], accepted=None)

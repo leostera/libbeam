@@ -25,8 +25,9 @@ limitations under the License.
 **Current direction:** [RFD 0003](../docs/rfds/0003-additive-runtime-construction.md)
 replaces whole-OTP reduction with additive construction in C. See [`core/`](core/)
 for allocation ownership, owned BEAM images, the selected BEAM term representation,
-and namespace-local atom binding. These components do not yet execute BEAM code
-or back the public factory. The native archive work below is preserved
+namespace-local atoms, and owned generic-operation/literal preparation. These
+components do not yet emit or execute BEAM code or back the public factory. The
+[A03–A07 checkpoint](../docs/rfds/0003-loader-program.md) records the exact scope. The native archive work below is preserved
 as diagnostic/reference evidence, not a fallback runtime for the new core.
 
 This directory contains build/link probes and an

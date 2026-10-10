@@ -3,7 +3,11 @@
 
 # RFD 0003: Build libbeam additively from BEAM components
 
-Status: **Accepted direction; image and term/atom component slices implemented.**
+Status: **Accepted direction; owned image, term/atom and generic-program preparation implemented.**
+
+The [A03–A07 checkpoint](0003-loader-program.md) includes real operand/literal
+preparation, not executable loading. Complete transformation/emission, publication
+and execution remain outstanding.
 
 See the [A01/A02 term-and-atom admission record](0003-terms-and-atoms.md) for the
 selected BEAM representation, namespace identities, transactional image bindings

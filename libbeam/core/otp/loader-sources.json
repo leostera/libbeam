@@ -1,0 +1,22 @@
+{
+  "baseline": "297c896f",
+  "note": "Selected algorithms/layouts, not whole-file ports; emitter/interpreter files also anchor remaining dependencies.",
+  "sources": {
+    "beam/erts/emulator/beam/beam_file.c": "52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d",
+    "beam/erts/emulator/beam/beam_file.h": "82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718",
+    "beam/erts/emulator/beam/beam_types.c": "3f1a23fe452b3df23b15c8615ed339b6ae6daf404beb6e228da82113eb4e680f",
+    "beam/erts/emulator/beam/beam_types.h": "be5967d3d25980ff1b228bb2153e7dc12743aa1a96e2b9f17c1eca4cd1e6a29e",
+    "beam/erts/emulator/beam/external.c": "cbfdfcef0f756c468c6f2fc8a23d478a01daeddb3a4db8e240a8590252a4414b",
+    "beam/erts/emulator/beam/big.c": "370b63b16cea64901d1974a72f049cac0954dbf52896adf737665fe2188ef7e4",
+    "beam/erts/emulator/beam/big.h": "07133b1fb09864bcf905f94335f5cde2600dfef644cffad99c3d1d6b6ba97f47",
+    "beam/erts/emulator/beam/erl_term.h": "8e016126fb7a1bc1db8d31111601c0bea21d72207211bf91e1f3c127e943b5c2",
+    "beam/erts/emulator/beam/erl_bits.h": "5a72bb9b9c14690d55ff94912faf3e8f0e9914e155593d2c6aa7474c3ff5bfec",
+    "beam/erts/emulator/beam/erl_fun.h": "7d5a3e42f0a3a7a6a72683ad969f0564712e47e614d9ecd60a8bcb0f96142e5d",
+    "beam/erts/emulator/beam/erl_record.h": "60927314b32f2089626f6129622e96059fe4fb9a2588252ef7143ceda09141ea",
+    "beam/erts/emulator/beam/beam_load.c": "35dc799b319d7636d2d2c3c76de64b685bee11084b397dbc44305e3fc0af6a81",
+    "beam/erts/emulator/beam/erl_vm.h": "5fc1308a52c46629307cbe0fa085ca561ba1244b0252de1a59b1a35c53d8d02b",
+    "beam/erts/emulator/beam/emu/emu_load.c": "f2ece111cd5d8a3ccc467c275b9c01137a91b812a60830be3d05d6469353b378",
+    "beam/erts/emulator/beam/emu/load.h": "528da1fda38b9176a3967ad19faba6a84cb04553f30208d23f851b67058021f4",
+    "beam/erts/emulator/beam/emu/beam_emu.c": "af0ce4436a999e91f8479c3c04b8d8bf73df8e0e053235d8d441276da934b56e"
+  }
+}

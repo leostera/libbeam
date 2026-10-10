@@ -246,6 +246,15 @@ LbAtomStatus lb_atoms_intern(LbAtomTable *t, const void *data, size_t size, Eter
     if (status == LB_ATOM_OK) *out = term;
     return status;
 }
+static LbBeamBytes name_array(const void *names, size_t i)
+{
+    return ((const LbBeamBytes *)names)[i];
+}
+LbAtomStatus lb_atoms_intern_names(LbAtomTable *t, const LbBeamBytes *names, size_t count, Eterm *out)
+{
+    if (!t || (count && (!names || !out))) return LB_ATOM_INVALID;
+    return intern_batch(t, count, name_array, names, out);
+}
 LbAtomStatus lb_atoms_find(const LbAtomTable *t, const void *data, size_t size, Eterm *out)
 {
     LbBeamBytes name = {data, size};

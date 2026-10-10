@@ -1,0 +1,91 @@
+{
+  "baseline": "297c896f",
+  "generator_sha256": "40f5befb1cb6920e69f8bc4340931b13bfc52345eb0e43b4aebf72eb1c464d65",
+  "profile": {
+    "wordsize": 64,
+    "jit": "no",
+    "USE_VM_PROBES": 0
+  },
+  "inputs": [
+    {
+      "source": "beam/lib/compiler/src/genop.tab",
+      "input": "genop.tab",
+      "sha256": "0f999b3797672f28bfbd4007245a95637bd38b68ac67dcfcb95eacce29e0780e"
+    },
+    {
+      "source": "beam/erts/emulator/beam/predicates.tab",
+      "input": "predicates.tab",
+      "sha256": "6aa371b05724f1c762093d8555ed64b2711f98143571c9455b81fa7c578183f2"
+    },
+    {
+      "source": "beam/erts/emulator/beam/generators.tab",
+      "input": "generators.tab",
+      "sha256": "cddd948034d8cf1d07b59c34885d4766cd7d929aae79ebb776909ec1b735758a"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/ops.tab",
+      "input": "emu/ops.tab",
+      "sha256": "d204cbdd007a51df81203211675354274b5fcabd67e8fe65e0f4badf4071e234"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/predicates.tab",
+      "input": "emu/predicates.tab",
+      "sha256": "cce20c6cbb968d8d579cfe1e4f481cb51a891eb20edb71ef4681e523b0e2db0d"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/generators.tab",
+      "input": "emu/generators.tab",
+      "sha256": "e2980f167ddb6f30a920c1bd9fe5bda682d0e73b8b744a7abfba4723e7965138"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/macros.tab",
+      "input": "emu/macros.tab",
+      "sha256": "7cdce7719cde9115a88c8a4dd0299d4dbda31be2fb40c6eea5f045d293d212c4"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/instrs.tab",
+      "input": "emu/instrs.tab",
+      "sha256": "6191258ed0710adad9cdfd67779a8680461e695487fa5471594e1001a93d9647"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/arith_instrs.tab",
+      "input": "emu/arith_instrs.tab",
+      "sha256": "cd590350432e121b374141c9a8df73b6862e5ec5c8a291701643018606b2f5b2"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/bif_instrs.tab",
+      "input": "emu/bif_instrs.tab",
+      "sha256": "efa0551d5ffa27a197de60fb6759530a00a891031627b58d948442fe0f313aee"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/bs_instrs.tab",
+      "input": "emu/bs_instrs.tab",
+      "sha256": "49f203f8c900e9da964e3c483f186c7562fdb4ddb9bb2fa8a0f9af574c2d3279"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/float_instrs.tab",
+      "input": "emu/float_instrs.tab",
+      "sha256": "47ce63c83e9a870583e350571e055bb804842c274a78af6ca09c1ce926d7a085"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/map_instrs.tab",
+      "input": "emu/map_instrs.tab",
+      "sha256": "7caa5a8ef0f03b4be7f1a9c9ea6a5d461abe615f4c94bebf7da53acedff56684"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/msg_instrs.tab",
+      "input": "emu/msg_instrs.tab",
+      "sha256": "3ff33000c76eb4598340289478f65a62538b9f9a0adb1deb2321d3c8d6d46ac4"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/select_instrs.tab",
+      "input": "emu/select_instrs.tab",
+      "sha256": "dbc20d1ea53a7c5f87931c5ee0f283738489c5220e79d2472cf84368f3295bd4"
+    },
+    {
+      "source": "beam/erts/emulator/beam/emu/trace_instrs.tab",
+      "input": "emu/trace_instrs.tab",
+      "sha256": "fa49760f1c1e8d3ff68eb83127a2d02df1d6d8210cdc27ba822e67ac7106d9fb"
+    }
+  ]
+}

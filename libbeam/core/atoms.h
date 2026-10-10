@@ -20,6 +20,10 @@ LbAtomStatus lb_atoms_create(LbAllocDomain *, size_t limit, LbAtomTable **);
 LbAtomStatus lb_atoms_destroy(LbAtomTable *); /* refuses live leases/bindings */
 size_t lb_atoms_count(const LbAtomTable *);
 LbAtomStatus lb_atoms_intern(LbAtomTable *, const void *, size_t, Eterm *);
+/* Atomic namespace admission for prepared-module names (file + ETF atoms).
+ * Caller provides disposable output storage; its contents on failure are not
+ * published terms. Namespace contents/backing are unchanged on failure. */
+LbAtomStatus lb_atoms_intern_names(LbAtomTable *, const LbBeamBytes *, size_t, Eterm *);
 LbAtomStatus lb_atoms_find(const LbAtomTable *, const void *, size_t, Eterm *);
 LbAtomStatus lb_atoms_name(const LbAtomTable *, Eterm, LbBeamBytes *);
 /* Leases require an already-valid table. Release never automatically destroys.
