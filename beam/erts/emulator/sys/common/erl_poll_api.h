@@ -50,6 +50,7 @@ ErtsPollSet *ERTS_POLL_EXPORT(erts_poll_create_pollset)(int id);
  * Returns 1 without mutation for live registrations, queued updates or a started
  * pollset. The caller must exclude concurrent control/interrupt/wait operations.
  * Does not close caller-owned descriptors. Not a running-poller shutdown API. */
+int ERTS_POLL_EXPORT(erts_poll_can_discard_unstarted)(ErtsPollSet *ps);
 int ERTS_POLL_EXPORT(erts_poll_discard_unstarted)(ErtsPollSet *ps);
 #endif
 

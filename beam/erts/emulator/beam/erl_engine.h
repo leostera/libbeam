@@ -21,9 +21,13 @@
  * is deliberately no default/current-engine accessor or fake isolate container.
  */
 struct ErtsSchedulerThreadGroup;
+struct ErtsIoPollGroup;
+struct ErtsThreadProgressDomain;
 struct ErtsEngine {
     enum ErlRuntimeStartupPhase startup_phase;
     struct ErtsSchedulerThreadGroup *scheduler_threads;
+    struct ErtsIoPollGroup *io_poll_group;
+    struct ErtsThreadProgressDomain *thread_progress;
 };
 
 #endif

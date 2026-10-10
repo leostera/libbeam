@@ -81,6 +81,9 @@
 #include <stddef.h> /* offsetof() */
 #include "erl_thr_progress.h"
 #include "global.h"
+#include "erl_engine.h"
+#include <stdlib.h>
+#include <errno.h>
 
 
 #define ERTS_THR_PRGR_DBG_CHK_WAKEUP_REQUEST_VALUE 0
@@ -259,6 +262,15 @@ typedef struct {
     } unmanaged;
 } ErtsThrPrgrInternalData;
 
+struct ErtsThreadProgressDomain {
+    void *allocation;
+    size_t allocated_bytes;
+    ErtsThrPrgrInternalData *data;
+    erts_tsd_key_t key;
+    int scheduler_count;
+};
+/* Fixed shared-engine binding, not a current-isolate selector. */
+static struct ErtsThreadProgressDomain *diagnostic_domain;
 static ErtsThrPrgrInternalData *intrnl;
 
 ErtsThrPrgr erts_thr_prgr__;
@@ -383,22 +395,37 @@ block_count_inc(void)
 }
 
 
-void
-erts_thr_progress_pre_init(void)
+int
+erts_thr_progress_pre_init(ErtsEngine *engine)
 {
+    struct ErtsThreadProgressDomain *d;
+    int error;
+    if (!engine || engine->startup_phase != ERL_RUNTIME_PREPARING ||
+        engine->thread_progress || diagnostic_domain) return EBUSY;
+    d = calloc(1, sizeof(*d));
+    if (!d) return ENOMEM;
+    error = ethr_tsd_key_create(&d->key, "erts_thr_prgr_data_key");
+    if (error) { free(d); return error; }
+    engine->thread_progress = diagnostic_domain = d;
     intrnl = NULL;
-    erts_tsd_key_create(&erts_thr_prgr_data_key__,
-			"erts_thr_prgr_data_key");
+    erts_thr_prgr_data_key__ = d->key;
     init_nob(&erts_thr_prgr__.current, ERTS_THR_PRGR_VAL_FIRST);
+    return 0;
 }
 
-void
-erts_thr_progress_init(int no_schedulers, int managed, int unmanaged)
+int
+erts_thr_progress_init(ErtsEngine *engine, int no_schedulers, int managed, int unmanaged)
 {
+    struct ErtsThreadProgressDomain *d;
     int i, j, um_low, um_high;
     char *ptr;
     size_t cb_sz, intrnl_sz, thr_arr_sz, m_wakeup_size, um_wakeup_size,
 	tot_size;
+
+    if (!engine || engine->startup_phase != ERL_RUNTIME_PREPARING ||
+        !(d = engine->thread_progress) || d != diagnostic_domain ||
+        d->allocation || no_schedulers < 1 || managed < no_schedulers ||
+        unmanaged < 0 || managed > INT_MAX - unmanaged) return EINVAL;
 
     intrnl_sz = sizeof(ErtsThrPrgrInternalData);
     intrnl_sz = ERTS_ALC_CACHE_LINE_ALIGN_SIZE(intrnl_sz);
@@ -426,10 +453,16 @@ erts_thr_progress_init(int no_schedulers, int managed, int unmanaged)
     tot_size += m_wakeup_size*ERTS_THR_PRGR_WAKEUP_DATA_SIZE;
     tot_size += um_wakeup_size*ERTS_THR_PRGR_WAKEUP_DATA_SIZE;
 
-    ptr = erts_alloc_permanent_cache_aligned(ERTS_ALC_T_THR_PRGR_IDATA,
-					     tot_size);
-
-    intrnl = (ErtsThrPrgrInternalData *) ptr;
+    /* Allocators use thread progress during their own cleanup. Keep this
+     * bootstrap backing outside those allocators, and retain its real base. */
+    if (tot_size > SIZE_MAX - ERTS_CACHE_LINE_MASK) return ENOMEM;
+    d->allocated_bytes = tot_size + ERTS_CACHE_LINE_MASK;
+    d->allocation = malloc(d->allocated_bytes);
+    if (!d->allocation) { d->allocated_bytes = 0; return ENOMEM; }
+    ptr = (char *) (((UWord)d->allocation + ERTS_CACHE_LINE_MASK) &
+                    ~((UWord) ERTS_CACHE_LINE_MASK));
+    d->scheduler_count = no_schedulers;
+    intrnl = d->data = (ErtsThrPrgrInternalData *) ptr;
     ptr += intrnl_sz;
 
     erts_atomic32_init_nob(&intrnl->misc.data.lflgs,
@@ -493,6 +526,57 @@ erts_thr_progress_init(int no_schedulers, int managed, int unmanaged)
 	ptr += um_wakeup_size;
     }
     ERTS_THR_MEMORY_BARRIER;
+    return 0;
+}
+
+size_t erts_thr_progress_owned_bytes(ErtsEngine *engine)
+{
+    struct ErtsThreadProgressDomain *d = engine ? engine->thread_progress : NULL;
+    return d ? sizeof(*d) + d->allocated_bytes : 0;
+}
+
+size_t erts_thr_progress_shared_bytes(void)
+{
+    struct ErtsThreadProgressDomain *d = diagnostic_domain;
+    return d ? sizeof(*d) + d->allocated_bytes : 0;
+}
+
+int erts_thr_progress_discard_unstarted(ErtsEngine *engine)
+{
+    struct ErtsThreadProgressDomain *d;
+    ErtsThrPrgrInternalData *p;
+    int i, error;
+    if (!engine || engine->startup_phase != ERL_RUNTIME_RELEASING ||
+        engine->io_poll_group || !(d = engine->thread_progress) ||
+        d != diagnostic_domain || ethr_tsd_get(d->key)) return EBUSY;
+    p = d->data;
+    if (p) {
+        if (erts_atomic32_read_nob(&p->misc.data.managed_count) != 0 ||
+            erts_atomic32_read_nob(&p->misc.data.managed_id) != d->scheduler_count ||
+            erts_atomic32_read_nob(&p->misc.data.unmanaged_id) != -1 ||
+            erts_atomic_read_nob(&p->misc.data.blocker_event) != ERTS_AINT_NULL ||
+            erts_atomic32_read_nob(&p->misc.data.block_count) !=
+                (ERTS_THR_PRGR_BC_FLG_NOT_BLOCKING | p->managed.no) ||
+            erts_atomic32_read_nob(&p->misc.data.pref_wakeup_used) ||
+            p->misc.data.umrefc_ix.waiting != -1 ||
+            erts_atomic_read_nob(&p->umrefc[0].refc) ||
+            erts_atomic_read_nob(&p->umrefc[1].refc)) return EBUSY;
+        for (i = 0; i < ERTS_THR_PRGR_WAKEUP_DATA_SIZE; ++i)
+            if (erts_atomic32_read_nob(&p->managed.data[i]->len) ||
+                erts_atomic32_read_nob(&p->unmanaged.data[i]->len)) return EBUSY;
+        for (i = 0; i < p->managed.no; ++i)
+            if (p->managed.callbacks[i].arg || p->managed.callbacks[i].wakeup) return EBUSY;
+        for (i = 0; i < p->unmanaged.no; ++i)
+            if (p->unmanaged.callbacks[i].arg || p->unmanaged.callbacks[i].wakeup) return EBUSY;
+    }
+    error = ethr_tsd_key_delete(d->key);
+    if (error) return error;
+    intrnl = NULL;
+    diagnostic_domain = NULL;
+    engine->thread_progress = NULL;
+    free(d->allocation);
+    free(d);
+    return 0;
 }
 
 static void

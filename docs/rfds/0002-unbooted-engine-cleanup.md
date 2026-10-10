@@ -73,11 +73,20 @@ Evidence uses the shared validation lock and external outputs:
 Validated platform/backend: incremental macOS ARM64 debug interpreter, including
 its configured fallback polling backend. Other platforms are not validated.
 
+## Follow-up: owned cold startup stages
+
+[Owned cold startup stages](0002-owned-cold-startup-stages.md) extends this
+checkpoint with aggregate poll-group construction rollback, cold coordinator
+release and owned thread-progress backing/TLS cleanup. The evidence above remains
+historical poll-component evidence; the follow-up documents its additional checks
+and the still-unfinished Engine lifecycle.
+
 ## Remaining before factory success
 
 1. Separate shared initialization from diagnostic namespace/service initialization.
-2. Add aggregate I/O coordinator rollback (including cross-pollset registrations),
-   plus cleanup of allocator, TLS, thread-progress and scheduler metadata.
+2. Complete staged recoverable I/O initialization and cleanup of allocator,
+   remaining TLS and scheduler metadata. Cold I/O and thread-progress release now
+   exist; running/cross-registered pollsets remain outside their supported scope.
 3. Connect those real cleanup operations to an owned initialization transaction;
    return recoverable failures without leaving partially initialized global roots.
 4. Wire the native lifecycle into C++ creation/shutdown and test complete repeated

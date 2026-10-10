@@ -260,7 +260,7 @@ void erl_error(const char *fmt, va_list args)
     erts_vfprintf(stderr, fmt, args);
 }
 
-static int early_init(int *argc, char **argv);
+static int early_init(ErtsEngine *, int *argc, char **argv);
 
 static void
 erl_init(ErtsEngine *engine, int ncpu,
@@ -785,7 +785,7 @@ static void ethr_ll_free(void *ptr)
 
 
 static int
-early_init(int *argc, char **argv) /*
+early_init(ErtsEngine *engine, int *argc, char **argv) /*
 				   * Only put things here which are
 				   * really important initialize
 				   * early!
@@ -846,7 +846,10 @@ early_init(int *argc, char **argv) /*
 
     erts_sys_pre_init();
     erts_atomic_init_nob(&exiting, 0);
-    erts_thr_progress_pre_init();
+    {
+        int error = erts_thr_progress_pre_init(engine);
+        if (error) erts_exit(ERTS_ERROR_EXIT, "Cannot initialize thread progress: %d\n", error);
+    }
 
     erts_atomic32_init_nob(&erts_writing_erl_crash_dump, 0L);
     erts_tsd_key_create(&erts_is_crash_dumping_key,"erts_is_crash_dumping_key");
@@ -1232,7 +1235,7 @@ early_init(int *argc, char **argv) /*
     /* Require allocators */
     erts_errno_init();
 
-    erts_init_check_io(argc, argv);
+    erts_init_check_io(engine, argc, argv);
 
     /*
      * Thread progress management:
@@ -1247,14 +1250,13 @@ early_init(int *argc, char **argv) /*
      * ** Async threads (see erl_async.c)
      * ** Dirty scheduler threads
      */
-    erts_thr_progress_init(no_schedulers,
-			   (no_schedulers
-			    + aux_threads
-			    + 1
-			    + erts_no_poll_threads),
-			   (erts_async_max_threads
-			    + erts_no_dirty_cpu_schedulers
-			    + erts_no_dirty_io_schedulers));
+    {
+        int error = erts_thr_progress_init(engine, no_schedulers,
+                           no_schedulers + aux_threads + 1 + erts_no_poll_threads,
+                           erts_async_max_threads + erts_no_dirty_cpu_schedulers +
+                           erts_no_dirty_io_schedulers);
+        if (error) erts_exit(ERTS_ERROR_EXIT, "Cannot allocate thread progress: %d\n", error);
+    }
     erts_thr_q_init();
     erts_init_utils();
     erts_early_init_cpu_topology(no_schedulers,
@@ -1389,7 +1391,7 @@ prepare_runtime(ErtsEngine *engine, int argc, char **argv)
     char* arg=NULL;
     char envbuf[21]; /* enough for any 64-bit integer */
     size_t envbufsz;
-    int ncpu = early_init(&argc, argv);
+    int ncpu = early_init(engine, &argc, argv);
     int proc_tab_sz = ERTS_DEFAULT_MAX_PROCESSES;
     int port_tab_sz = ERTS_DEFAULT_MAX_PORTS;
     int port_tab_sz_ignore_files = 0;

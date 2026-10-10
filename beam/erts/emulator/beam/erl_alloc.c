@@ -2511,6 +2511,9 @@ erts_memory(fmtfn_t *print_to_p, void *print_to_arg, void *proc, Eterm earg)
     }
 
     if (want_tot_or_sys) {
+        /* Bootstrap backing must outlive allocator teardown and is therefore
+         * owned directly by the engine, outside the allocator instances. */
+        size.total += erts_thr_progress_shared_bytes();
 #ifdef BEAMASM
         /* The JIT allocates code on its own because of W^X restrictions, so we
          * need to bump the total size accordingly. */
@@ -2699,6 +2702,7 @@ erts_allocated_areas(fmtfn_t *print_to_p, void *print_to_arg, void *proc)
 #else
     values[i].ui[0] = 0;
 #endif
+    values[i].ui[0] += erts_thr_progress_shared_bytes();
     i++;
 
     length = i;

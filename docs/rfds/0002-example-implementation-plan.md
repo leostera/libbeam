@@ -149,9 +149,12 @@ of the loader/retirement/world-service migration; private admission stays refuse
 at diagnostic-only execution boundaries.
 
 **Unbooted engine lifecycle:** [cleanup prerequisites](0002-unbooted-engine-cleanup.md)
-now include real cold POSIX pollset disposal and descriptor-failure rollback.
-Aggregate I/O, allocator, TLS, thread-progress and scheduler cleanup are still
-missing; this does not enable the public Engine factory.
+now include [owned cold startup stages](0002-owned-cold-startup-stages.md):
+engine-owned poll groups with aggregate descriptor rollback, cold I/O coordinator
+release, and owned thread-progress backing/TLS with terminal cold release.
+Allocator, remaining TLS/scheduler cleanup, shared/world initialization separation,
+and the complete initialization transaction remain missing. The public factory
+still refuses success; repeated Engine creation/shutdown is not implemented.
 
 **API:** `Isolate::load_module`.
 

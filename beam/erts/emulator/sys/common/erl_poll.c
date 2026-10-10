@@ -2271,16 +2271,23 @@ ERTS_POLL_EXPORT(erts_poll_create_pollset)(int id)
  * the set started. Engine rollback must run before worker admission, and must
  * remove any internal cross-pollset registrations before releasing the sets. */
 int
-ERTS_POLL_EXPORT(erts_poll_discard_unstarted)(ErtsPollSet *ps)
+ERTS_POLL_EXPORT(erts_poll_can_discard_unstarted)(ErtsPollSet *ps)
 {
     if (!ps || erts_atomic32_read_nob(&ps->wait_started) ||
         erts_atomic_read_nob(&ps->no_of_user_fds))
-        return 1;
+        return 0;
 #if !ERTS_POLL_USE_CONCURRENT_UPDATE
     if (erts_atomic32_read_nob(&ps->have_update_requests))
-        return 1;
+        return 0;
 #endif
+    return 1;
+}
 
+int
+ERTS_POLL_EXPORT(erts_poll_discard_unstarted)(ErtsPollSet *ps)
+{
+    if (!ERTS_POLL_EXPORT(erts_poll_can_discard_unstarted)(ps))
+        return 1;
     destroy_unstarted_pollset(ps);
     return 0;
 }

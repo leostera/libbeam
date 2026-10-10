@@ -99,7 +99,11 @@ void erts_check_io(struct erts_poll_thread *pt, ErtsMonotonicTime timeout_time,
  * @param argc the number of arguments
  * @param argv an array with the arguments
  */
-void erts_init_check_io(int *argc, char **argv);
+struct ErtsEngine;
+void erts_init_check_io(struct ErtsEngine *, int *argc, char **argv);
+/* Exclusive, unbooted cleanup stage. Success enters RELEASING, not UNCLAIMED.
+ * Other engine resources remain live. Running pollers are refused. */
+int erts_discard_check_io_unstarted(struct ErtsEngine *);
 /**
  * Interrupt the poll thread so that it can execute other code.
  *
@@ -131,6 +135,7 @@ typedef struct {
 } ErtsIoTask;
 
 
+ErtsPollSet *erts_diagnostic_scheduler_pollset(void);
 ERTS_GLB_INLINE int erts_sched_poll_enabled(void);
 
 #if ERTS_GLB_INLINE_INCL_FUNC_DEF
@@ -138,8 +143,7 @@ ERTS_GLB_INLINE int erts_sched_poll_enabled(void);
 ERTS_GLB_INLINE int erts_sched_poll_enabled(void)
 {
 #if ERTS_POLL_USE_SCHEDULER_POLLING
-    extern ErtsPollSet *sched_pollset;
-    return (sched_pollset != NULL);
+    return erts_diagnostic_scheduler_pollset() != NULL;
 #else
     return 0;
 #endif

@@ -32,7 +32,9 @@ enum ErlRuntimeStartupPhase {
     ERL_RUNTIME_PREPARING,
     ERL_RUNTIME_PREPARED,
     ERL_RUNTIME_OTP_BOOTSTRAPPED,
-    ERL_RUNTIME_THREADS_STARTED
+    ERL_RUNTIME_THREADS_STARTED,
+    /* Cleanup has begun; this is not a reusable or fully released engine. */
+    ERL_RUNTIME_RELEASING
 };
 enum ErlRuntimeStartupPhase erl_runtime_startup_phase(const ErtsEngine *engine);
 

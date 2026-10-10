@@ -39,6 +39,8 @@
 #include "erl_port.h"
 #include "erl_port_task.h"
 #include "erl_check_io.h"
+#include "erl_io_poll_group.h"
+#include "erl_engine.h"
 #include "erl_thr_progress.h"
 #include "erl_bif_unique.h"
 #include "erl_proc_sig_queue.h"
@@ -155,17 +157,138 @@ typedef struct erts_poll_thread
     int pollres_len;
 } ErtsPollThread;
 
-/* pollsetv contains pointers to the ErtsPollSets that are in use.
- * Which pollset to use is determined by hashing the fd.
- */
-static ErtsPollSet **pollsetv;
-static ErtsPollThread *psiv;
+/* Primary pollset selection hashes the fd. The group owns all sets and the
+ * original thread-record allocation, including scheduler/fallback prefixes. */
+struct ErtsIoPollGroup {
+    ErtsPollSet **primary;
+    ErtsPollSet *scheduler, *fallback;
+    ErtsPollThread *thread_base, *primary_threads;
+    int sets, threads, total_threads;
+    int bound;
+    erts_atomic32_t borrowed;
+};
+/* Fixed engine binding; never changed to select an isolate. */
+static ErtsIoPollGroup *diagnostic_io;
+
+static int io_poll_group_is_cold(ErtsIoPollGroup *g)
+{
+#ifndef __WIN32__
+    int i;
+    if (!g || erts_atomic32_read_nob(&g->borrowed)) return 0;
+    if (g->primary)
+        for (i = 0; i < g->sets; ++i)
+            if (g->primary[i] && !erts_poll_can_discard_unstarted(g->primary[i])) return 0;
+    if (g->scheduler && !erts_poll_can_discard_unstarted(g->scheduler)) return 0;
 #if ERTS_POLL_USE_FALLBACK
-static ErtsPollSet *flbk_pollset;
+    if (g->fallback && !erts_poll_can_discard_unstarted_flbk(g->fallback)) return 0;
 #endif
-#if ERTS_POLL_USE_SCHEDULER_POLLING
-ErtsPollSet *sched_pollset;
+    return 1;
+#else
+    /* Windows does not yet provide cold poll-backend disposal. */
+    (void) g;
+    return 0;
 #endif
+}
+
+int erts_io_poll_group_can_discard(ErtsIoPollGroup *g)
+{
+    return g && !g->bound && io_poll_group_is_cold(g);
+}
+
+int erts_io_poll_group_discard(ErtsIoPollGroup *g)
+{
+#ifndef __WIN32__
+    int i;
+    if (!erts_io_poll_group_can_discard(g)) return 1;
+    /* Preflight the entire group before releasing any child. */
+    if (g->thread_base) {
+        for (i = 0; i < g->total_threads; ++i)
+            if (g->thread_base[i].pollres)
+                erts_free(ERTS_ALC_T_POLLSET, g->thread_base[i].pollres);
+        erts_free(ERTS_ALC_T_POLLSET, g->thread_base);
+    }
+    if (g->primary) {
+        for (i = 0; i < g->sets; ++i)
+            if (g->primary[i]) erts_poll_discard_unstarted(g->primary[i]);
+        erts_free(ERTS_ALC_T_POLLSET, g->primary);
+    }
+    if (g->scheduler) erts_poll_discard_unstarted(g->scheduler);
+#if ERTS_POLL_USE_FALLBACK
+    if (g->fallback) erts_poll_discard_unstarted_flbk(g->fallback);
+#endif
+    erts_free(ERTS_ALC_T_POLLSET, g);
+    return 0;
+#else
+    (void) g;
+    return 1;
+#endif
+}
+
+ErtsIoPollGroup *erts_io_poll_group_create(int sets, int threads, int scheduler)
+{
+    ErtsIoPollGroup *g;
+    int i, offset = 0, error;
+    if (sets <= 0 || threads < sets || threads > INT_MAX - 2 ||
+        (size_t) sets > SIZE_MAX / sizeof(ErtsPollSet *) ||
+        (size_t) threads + 2 > SIZE_MAX / sizeof(ErtsPollThread) ||
+        (scheduler != 0 && scheduler != 1) ||
+        (scheduler && !ERTS_POLL_USE_SCHEDULER_POLLING) ||
+        (!(ERTS_POLL_USE_EPOLL || ERTS_POLL_USE_KQUEUE) && threads != sets)) {
+        errno = EINVAL;
+        return NULL;
+    }
+    g = erts_alloc_fnf(ERTS_ALC_T_POLLSET, sizeof(*g));
+    if (!g) { errno = ENOMEM; return NULL; }
+    sys_memzero(g, sizeof(*g));
+    erts_atomic32_init_nob(&g->borrowed, 0);
+    g->sets = sets;
+    g->threads = threads;
+    g->total_threads = threads + scheduler + ERTS_POLL_USE_FALLBACK;
+    g->primary = erts_alloc_fnf(ERTS_ALC_T_POLLSET, sizeof(*g->primary) * sets);
+    if (!g->primary) goto memory_error;
+    sys_memzero(g->primary, sizeof(*g->primary) * sets);
+    for (i = 0; i < sets; ++i) {
+        g->primary[i] = erts_poll_create_pollset(i);
+        if (!g->primary[i]) goto resource_error;
+    }
+    if (scheduler) {
+        g->scheduler = erts_poll_create_pollset(-1);
+        if (!g->scheduler) goto resource_error;
+    }
+#if ERTS_POLL_USE_FALLBACK
+    g->fallback = erts_poll_create_pollset_flbk(scheduler ? -2 : -1);
+    if (!g->fallback) goto resource_error;
+#endif
+    g->thread_base = erts_alloc_fnf(ERTS_ALC_T_POLLSET,
+                                    sizeof(*g->thread_base) * g->total_threads);
+    if (!g->thread_base) goto memory_error;
+    sys_memzero(g->thread_base, sizeof(*g->thread_base) * g->total_threads);
+    if (g->fallback) g->thread_base[offset++].ps = g->fallback;
+    if (g->scheduler) g->thread_base[offset++].ps = g->scheduler;
+    g->primary_threads = g->thread_base + offset;
+    for (i = 0; i < threads; ++i)
+        g->primary_threads[i].ps = g->primary[i % sets];
+    for (i = 0; i < g->total_threads; ++i) {
+        g->thread_base[i].pollres_len = ERTS_CHECK_IO_POLL_RES_LEN;
+        g->thread_base[i].pollres = erts_alloc_fnf(ERTS_ALC_T_POLLSET,
+                                       sizeof(ErtsPollResFd) * ERTS_CHECK_IO_POLL_RES_LEN);
+        if (!g->thread_base[i].pollres) goto memory_error;
+    }
+    return g;
+ memory_error:
+    errno = ENOMEM;
+ resource_error:
+    error = errno;
+    if (erts_io_poll_group_discard(g))
+        ERTS_INTERNAL_ERROR("Cannot unwind unpublished I/O poll group");
+    errno = error;
+    return NULL;
+}
+
+ErtsPollSet *erts_diagnostic_scheduler_pollset(void)
+{
+    return diagnostic_io ? diagnostic_io->scheduler : NULL;
+}
 
 typedef struct {
 #ifndef ERTS_SYS_CONTINOUS_FD_NUMBERS
@@ -447,14 +570,14 @@ get_pollset_id(ErtsSysFdType fd)
 static ERTS_INLINE ErtsPollSet *
 get_pollset(ErtsSysFdType fd)
 {
-    return pollsetv[get_pollset_id(fd)];
+    return diagnostic_io->primary[get_pollset_id(fd)];
 }
 
 #if ERTS_POLL_USE_FALLBACK
 static ERTS_INLINE ErtsPollSet *
 get_fallback_pollset(void)
 {
-    return flbk_pollset;
+    return diagnostic_io->fallback;
 }
 #endif
 
@@ -462,7 +585,7 @@ get_fallback_pollset(void)
 static ERTS_INLINE ErtsPollSet *
 get_scheduler_pollset(void)
 {
-    return sched_pollset;
+    return diagnostic_io->scheduler;
 }
 #endif
 
@@ -1923,10 +2046,24 @@ erts_check_io_interrupt(ErtsPollThread *psi, int set)
     }
 }
 
+ErtsPollThread *erts_io_poll_group_borrow_thread(ErtsIoPollGroup *g, int id)
+{
+    int first;
+    if (!g) return NULL;
+    first = (int)(g->thread_base - g->primary_threads);
+    if (id < first || id >= g->threads) return NULL;
+    erts_atomic32_set_nob(&g->borrowed, 1);
+    return g->primary_threads + id;
+}
+
 ErtsPollThread *
 erts_create_pollset_thread(int id, ErtsThrPrgrData *tpd) {
-    psiv[id].tpd = tpd;
-    return psiv+id;
+    ErtsPollThread *slot = erts_io_poll_group_borrow_thread(diagnostic_io, id);
+    ASSERT(slot);
+    /* Scheduler pollers share a zero-initialized slot and pass NULL. Avoid
+     * concurrent writes to that immutable NULL; other slots have one owner. */
+    if (tpd) slot->tpd = tpd;
+    return slot;
 }
 
 void
@@ -2525,9 +2662,9 @@ args_parsed:
 }
 
 void
-erts_init_check_io(int *argc, char **argv)
+erts_init_check_io(ErtsEngine *engine, int *argc, char **argv)
 {
-    int j, concurrent_waiters, no_poll_threads;
+    int j, concurrent_waiters;
     int use_sched_poll = ERTS_POLL_USE_SCHEDULER_POLLING;
 
     ERTS_CT_ASSERT((INT_MIN & (ERL_NIF_SELECT_STOP_CALLED |
@@ -2543,69 +2680,18 @@ erts_init_check_io(int *argc, char **argv)
 
     parse_args(argc, argv, concurrent_waiters, &use_sched_poll);
 
-    /* Create the actual pollsets */
-    pollsetv = erts_alloc(ERTS_ALC_T_POLLSET,sizeof(ErtsPollSet *) * erts_no_pollsets);
-
-    for (j=0; j < erts_no_pollsets; j++) {
-        pollsetv[j] = erts_poll_create_pollset(j);
-        if (!pollsetv[j])
-            erts_exit(ERTS_ERROR_EXIT, "Cannot create pollset: %s\n", erl_errno_id(errno));
-    }
-
-    no_poll_threads = erts_no_poll_threads;
-
-    j = -1;
-
-    if (use_sched_poll) {
-#if ERTS_POLL_USE_SCHEDULER_POLLING
-        sched_pollset = erts_poll_create_pollset(j--);
-        if (!sched_pollset)
-            erts_exit(ERTS_ERROR_EXIT, "Cannot create scheduler pollset: %s\n", erl_errno_id(errno));
-        ASSERT(erts_sched_poll_enabled());
-        no_poll_threads++;
-#else
-        erts_fprintf(stderr,"+IOs true: not supported by this emulator\n");
-        erts_usage();
-#endif
-    }
-
-#if ERTS_POLL_USE_FALLBACK
-    flbk_pollset = erts_poll_create_pollset_flbk(j--);
-    if (!flbk_pollset)
-        erts_exit(ERTS_ERROR_EXIT, "Cannot create fallback pollset: %s\n", erl_errno_id(errno));
-    no_poll_threads++;
-#endif
-
-    psiv = erts_alloc(ERTS_ALC_T_POLLSET, sizeof(ErtsPollThread) * no_poll_threads);
-
-#if ERTS_POLL_USE_FALLBACK
-    psiv[0].pollres_len = ERTS_CHECK_IO_POLL_RES_LEN;
-    psiv[0].pollres = erts_alloc(ERTS_ALC_T_POLLSET,
-        sizeof(ErtsPollResFd) * ERTS_CHECK_IO_POLL_RES_LEN);
-    psiv[0].ps = get_fallback_pollset();
-    psiv++;
-#endif
-
-#if ERTS_POLL_USE_SCHEDULER_POLLING
-    if (erts_sched_poll_enabled()) {
-        psiv[0].pollres_len = ERTS_CHECK_IO_POLL_RES_LEN;
-        psiv[0].pollres = erts_alloc(ERTS_ALC_T_POLLSET,
-                                     sizeof(ErtsPollResFd) * ERTS_CHECK_IO_POLL_RES_LEN);
-        psiv[0].ps = get_scheduler_pollset();
-        psiv++;
-    }
-#endif
-
-    for (j = 0; j < erts_no_poll_threads; j++) {
-        psiv[j].pollres_len = ERTS_CHECK_IO_POLL_RES_LEN;
-        psiv[j].pollres = erts_alloc(ERTS_ALC_T_POLLSET,
-                                      sizeof(ErtsPollResFd) * ERTS_CHECK_IO_POLL_RES_LEN);
-        psiv[j].ps = pollsetv[j % erts_no_pollsets];
-    }
+    ASSERT(engine && !engine->io_poll_group && !diagnostic_io);
+    engine->io_poll_group = erts_io_poll_group_create(erts_no_pollsets,
+                                                    erts_no_poll_threads,
+                                                    use_sched_poll);
+    if (!engine->io_poll_group)
+        erts_exit(ERTS_ERROR_EXIT, "Cannot create I/O poll group: %s\n", erl_errno_id(errno));
+    diagnostic_io = engine->io_poll_group;
+    diagnostic_io->bound = 1;
 
     for (j=0; j < ERTS_CHECK_IO_DRV_EV_STATE_LOCK_CNT; j++) {
         erts_mtx_init(&drv_ev_state.locks[j].lck, "drv_ev_state", make_small(j),
-                          ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_IO);
+                          ERTS_LOCK_FLAGS_CATEGORY_IO);
     }
 
 #ifdef ERTS_SYS_CONTINOUS_FD_NUMBERS
@@ -2613,7 +2699,7 @@ erts_init_check_io(int *argc, char **argv)
     erts_atomic_init_nob(&drv_ev_state.len, 0);
     drv_ev_state.v = NULL;
     erts_mtx_init(&drv_ev_state.grow_lock, "drv_ev_state_grow", NIL,
-        ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_IO);
+        ERTS_LOCK_FLAGS_CATEGORY_IO);
 #else
     {
 	SafeHashFunctions hf;
@@ -2628,6 +2714,46 @@ erts_init_check_io(int *argc, char **argv)
 	safe_hash_init(ERTS_ALC_T_DRV_EV_STATE, &drv_ev_state.tab, "drv_ev_state_tab",
             ERTS_LOCK_FLAGS_CATEGORY_IO, DRV_EV_STATE_HTAB_SIZE, hf);
     }
+#endif
+}
+
+int erts_discard_check_io_unstarted(ErtsEngine *engine)
+{
+#if defined(ERTS_SYS_CONTINOUS_FD_NUMBERS) && !defined(__WIN32__)
+    ErtsIoPollGroup *g;
+    int i, len;
+    if (!engine || engine->startup_phase != ERL_RUNTIME_PREPARED ||
+        !(g = engine->io_poll_group) || g != diagnostic_io ||
+        !io_poll_group_is_cold(g)) return 1;
+    len = erts_atomic_read_nob(&drv_ev_state.len);
+    for (i = 0; i < len; ++i) {
+        ErtsDrvEventState *s = &drv_ev_state.v[i];
+        if (s->type != ERTS_EV_TYPE_NONE || s->flags ||
+            (s->events && s->events != ERTS_POLL_EV_NONE) ||
+            (s->active_events && s->active_events != ERTS_POLL_EV_NONE) ||
+            s->driver.select || s->driver.nif || s->driver.stop.drv_ptr)
+            return 1;
+    }
+    /* All checks precede mutation. This is one cleanup stage, not shutdown:
+     * prohibit further namespace admission while other substrate cleanup is
+     * still outstanding. No prepared/running transition can resume this state. */
+    engine->startup_phase = ERL_RUNTIME_RELEASING;
+    for (i = 0; i < ERTS_CHECK_IO_DRV_EV_STATE_LOCK_CNT; ++i)
+        erts_mtx_destroy(&drv_ev_state.locks[i].lck);
+    erts_mtx_destroy(&drv_ev_state.grow_lock);
+    if (drv_ev_state.v) erts_free(ERTS_ALC_T_DRV_EV_STATE, drv_ev_state.v);
+    drv_ev_state.v = NULL;
+    drv_ev_state.max_fds = 0;
+    erts_atomic_set_nob(&drv_ev_state.len, 0);
+    diagnostic_io = NULL;
+    engine->io_poll_group = NULL;
+    g->bound = 0;
+    if (erts_io_poll_group_discard(g))
+        ERTS_INTERNAL_ERROR("Lost exclusive ownership during cold I/O release");
+    return 0;
+#else
+    (void) engine;
+    return 1;
 #endif
 }
 
@@ -2648,18 +2774,24 @@ erts_check_io_size(void)
     ErtsPollInfo pi;
     int i;
 
+    if (!diagnostic_io) return 0;
+    res += sizeof(*diagnostic_io);
+    res += sizeof(ErtsPollSet *) * diagnostic_io->sets;
+    res += sizeof(ErtsPollThread) * diagnostic_io->total_threads;
+    for (i = 0; i < diagnostic_io->total_threads; ++i)
+        res += sizeof(ErtsPollResFd) * diagnostic_io->thread_base[i].pollres_len;
 #if ERTS_POLL_USE_FALLBACK
-    erts_poll_info(get_fallback_pollset(), &pi);
+    erts_poll_info_flbk(get_fallback_pollset(), &pi);
     res += pi.memory_size;
 #endif
 #if ERTS_POLL_USE_SCHEDULER_POLLING
     if (erts_sched_poll_enabled()) {
-        erts_poll_info(sched_pollset, &pi);
+        erts_poll_info(diagnostic_io->scheduler, &pi);
         res += pi.memory_size;
     }
 #endif
     for (i = 0; i < erts_no_pollsets; i++) {
-        erts_poll_info(pollsetv[i], &pi);
+        erts_poll_info(diagnostic_io->primary[i], &pi);
         res += pi.memory_size;
     }
 #ifdef ERTS_SYS_CONTINOUS_FD_NUMBERS
@@ -2700,14 +2832,14 @@ erts_check_io_info(void *proc)
 #endif
 #if ERTS_POLL_USE_SCHEDULER_POLLING
     if (erts_sched_poll_enabled()) {
-        erts_poll_info(sched_pollset, &piv[0]);
+        erts_poll_info(diagnostic_io->scheduler, &piv[0]);
         piv[0].poll_threads = 0;
         piv[0].active_fds = 0;
         piv++;
     }
 #endif
     for (j = 0; j < erts_no_pollsets; j++) {
-        erts_poll_info(pollsetv[j], &piv[j]);
+        erts_poll_info(diagnostic_io->primary[j], &piv[j]);
         piv[j].active_fds = 0;
         piv[j].poll_threads = erts_no_poll_threads / erts_no_pollsets;
         if (erts_no_poll_threads % erts_no_pollsets > j)
@@ -3254,7 +3386,7 @@ erts_check_io_debug(ErtsCheckIoDebugInfo *ciodip)
 #if ERTS_POLL_USE_SCHEDULER_POLLING
     if (erts_sched_poll_enabled()) {
         erts_dsprintf(dsbufp, "--- fds in scheduler pollset ----------------------------\n");
-        erts_poll_get_selected_events(sched_pollset, counters.epep,
+        erts_poll_get_selected_events(diagnostic_io->scheduler, counters.epep,
                                       drv_ev_state.max_fds);
         for (fd = 0; fd < len; fd++) {
             if (drv_ev_state.v[fd].flags & ERTS_EV_FLAG_SCHEDULER) {
@@ -3268,7 +3400,7 @@ erts_check_io_debug(ErtsCheckIoDebugInfo *ciodip)
     erts_dsprintf(dsbufp, "--- fds in pollset --------------------------------------\n");
 
     for (i = 0; i < erts_no_pollsets; i++) {
-        erts_poll_get_selected_events(pollsetv[i],
+        erts_poll_get_selected_events(diagnostic_io->primary[i],
                                       counters.epep,
                                       drv_ev_state.max_fds);
         for (fd = 0; fd < len; fd++) {
@@ -3335,6 +3467,6 @@ void erts_lcnt_update_cio_locks(int enable) {
 #endif
 
     for (i = 0; i < erts_no_pollsets; i++)
-        erts_lcnt_enable_pollset_lock_count(pollsetv[i], enable);
+        erts_lcnt_enable_pollset_lock_count(diagnostic_io->primary[i], enable);
 }
 #endif /* ERTS_ENABLE_LOCK_COUNT */

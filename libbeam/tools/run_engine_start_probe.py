@@ -220,6 +220,12 @@ def main():
                  tools.parent / 'tests/native_unstarted_poll_test.c',
                  source / 'erts/emulator/sys/common/erl_poll.c',
                  source / 'erts/emulator/sys/common/erl_poll_api.h',
+                 source / 'erts/emulator/sys/common/erl_check_io.c',
+                 source / 'erts/emulator/sys/common/erl_check_io.h',
+                 source / 'erts/emulator/sys/common/erl_io_poll_group.h',
+                 source / 'erts/emulator/beam/erl_thr_progress.c',
+                 source / 'erts/emulator/beam/erl_thr_progress.h',
+                 source / 'erts/emulator/beam/erl_alloc.c',
                  tools.parent / 'tests/native_export_namespace_test.c',
                  source / 'erts/emulator/beam/erl_export_literals.c',
                  source / 'erts/emulator/beam/erl_export_literals.h',
@@ -340,7 +346,7 @@ def main():
                 if line.startswith(('CC=', 'CFLAGS=', 'INCLUDES=')))
             components = [
                 ('unstarted-poll', 'native_unstarted_poll_test.c',
-                 'NATIVE_UNSTARTED_POLL_OK descriptor_balance=true peer_survival=true engine_shutdown=false'),
+                 'NATIVE_COLD_STAGES_OK aggregate_poll_rollback=true io_release=true thread_progress_release=true engine_shutdown=false'),
                 ('code-space', 'native_code_space_test.c',
                  'NATIVE_CODE_SPACE_OK independent_tables=true coordinated_metadata_transactions=true guarded_disposal=true private_execution=false'),
                 ('export-namespace', 'native_export_namespace_test.c',

@@ -124,8 +124,16 @@ typedef int ErtsThrPrgrDelayHandle;
 
 extern ErtsThrPrgr erts_thr_prgr__;
 
-void erts_thr_progress_pre_init(void);
-void erts_thr_progress_init(int no_schedulers, int managed, int unmanaged);
+struct ErtsEngine;
+int erts_thr_progress_pre_init(struct ErtsEngine *);
+int erts_thr_progress_init(struct ErtsEngine *, int no_schedulers, int managed, int unmanaged);
+size_t erts_thr_progress_owned_bytes(struct ErtsEngine *);
+size_t erts_thr_progress_shared_bytes(void);
+/* Terminal cold-cleanup stage: exclusive ownership, no registered workers,
+ * callbacks/delayers or TLS borrowers. Disconnect all users first; allocators
+ * depend on thread progress, so no subsequent allocator/VM operations are safe.
+ * Success releases only this domain, not the remaining Engine resources. */
+int erts_thr_progress_discard_unstarted(struct ErtsEngine *);
 ErtsThrPrgrData *erts_thr_progress_register_managed_thread(
     ErtsSchedulerData *esdp, ErtsThrPrgrCallbacks *, int, int);
 void erts_thr_progress_register_unmanaged_thread(ErtsThrPrgrCallbacks *);
