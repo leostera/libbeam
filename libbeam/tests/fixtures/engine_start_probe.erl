@@ -14,6 +14,7 @@ run() ->
     export_literals(),
     export_tables(),
     owner_lifetime(),
+    allocator_memory(),
     3.75 = float_div(7.5, 2.0),
     1.25 = binary_to_float(<<"1.25">>),
     <<"1.250">> = float_to_binary(1.25, [{decimals, 3}]),
@@ -23,6 +24,18 @@ run() ->
     io:format("BEAM_STARTUP_OK pid=~s~n", [os:getpid()]),
     %% Do not call halt/0 or init:stop/0: either would kill the C++ host.
     ok.
+
+allocator_memory() ->
+    {external_alloc, External} = lists:keyfind(external_alloc, 1,
+                                             erlang:system_info(allocated_areas)),
+    true = External > 0,
+    Memory = erlang:memory(),
+    {total, Total} = lists:keyfind(total, 1, Memory),
+    {processes, Processes} = lists:keyfind(processes, 1, Memory),
+    {system, System} = lists:keyfind(system, 1, Memory),
+    true = Total =:= Processes + System,
+    true = System >= External,
+    io:format("ALLOCATOR_MEMORY_OK external_accounting=true live_statistics=true~n").
 
 %% The driver supplies /dev/null as stdin. Exercise the retained FD driver's
 %% EOF and close paths after removing its shared spawn-handshake machinery.

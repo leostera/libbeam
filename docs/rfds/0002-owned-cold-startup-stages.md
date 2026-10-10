@@ -127,6 +127,13 @@ Validated scope: incremental macOS ARM64 debug interpreter and its configured
 fallback backend. No clean-bootstrap, other-platform, sanitizer, JIT, isolation,
 security or performance acceptance is implied.
 
+## Follow-up: allocator ownership
+
+[Engine-owned allocator storage](0002-owned-allocator-domain.md) moves major
+allocator storage roots and retained aligned-allocation bases under the engine.
+This advances ownership, not the draining/stopping and complete lifecycle still
+required below.
+
 ## Still required before factory success
 
 1. Separate shared engine initialization from diagnostic namespace/service creation.

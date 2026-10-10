@@ -36,7 +36,10 @@ native substrate without starting OTP processes or workers. The engine path must
 not reuse whole-world startup.
 [Owned cold startup stages](../docs/rfds/0002-owned-cold-startup-stages.md) add
 aggregate poll-group rollback, cold I/O release and owned thread-progress/TLS
-release. Complete Engine initialization/shutdown remains unfinished.
+release. [Allocator ownership](../docs/rfds/0002-owned-allocator-domain.md) now
+puts major allocator/backing/mapper storage under the engine and retains aligned
+allocation bases for explicit release. Complete Engine initialization/shutdown
+remains unfinished.
 [Native ownership migration](../docs/rfds/0002-native-ownership.md) introduces an
 explicit `ErtsEngine`, engine-owned lifecycle/handle-registry state, and scheduler
 owner references. Remaining globals are classified by engine versus isolate

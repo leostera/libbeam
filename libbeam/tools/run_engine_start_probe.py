@@ -100,6 +100,7 @@ def run_host(command, cwd, env, log, timeout=60):
                     or not host_markers(text, process.pid)
                     or text.splitlines().count('ATOM_STORAGE_OK copied_names=true empty_binary=true') != 1
                     or text.splitlines().count('OWNER_LIFETIME_OK prepared_drop=true retained_literals=true process_exit=true diagnostic_world=true') != 1
+                    or text.splitlines().count('ALLOCATOR_MEMORY_OK external_accounting=true live_statistics=true') != 1
                     or text.splitlines().count('CODE_SPACE_EXECUTION_OK local_funs=true native_records=true catches_and_stacktraces=true diagnostic_world=true') != 1
                     or text.splitlines().count('EXPORT_TABLE_OK reload_and_stub_lookup=true private_execution=false') != 1
                     or text.splitlines().count('EXPORT_LITERAL_OK gc_roundtrip_and_dispatch=true') != 1
@@ -226,6 +227,15 @@ def main():
                  source / 'erts/emulator/beam/erl_thr_progress.c',
                  source / 'erts/emulator/beam/erl_thr_progress.h',
                  source / 'erts/emulator/beam/erl_alloc.c',
+                 source / 'erts/emulator/beam/erl_alloc.h',
+                 source / 'erts/emulator/beam/erl_allocator_domain.h',
+                 source / 'erts/emulator/beam/erl_alloc_util.c',
+                 source / 'erts/emulator/beam/erl_alloc_util.h',
+                 source / 'erts/emulator/sys/common/erl_mseg.c',
+                 source / 'erts/emulator/sys/common/erl_mseg.h',
+                 source / 'erts/emulator/sys/common/erl_mmap.c',
+                 source / 'erts/emulator/sys/common/erl_mmap.h',
+                 tools.parent / 'tests/native_allocator_domain_test.c',
                  tools.parent / 'tests/native_export_namespace_test.c',
                  source / 'erts/emulator/beam/erl_export_literals.c',
                  source / 'erts/emulator/beam/erl_export_literals.h',
@@ -345,6 +355,8 @@ def main():
                 (output / 'compile-settings.log').read_text().splitlines()
                 if line.startswith(('CC=', 'CFLAGS=', 'INCLUDES=')))
             components = [
+                ('allocator-domain', 'native_allocator_domain_test.c',
+                 'NATIVE_ALLOCATOR_DOMAIN_OK owned_dispatch=true retained_bases=true permanent_release=true engine_shutdown=false'),
                 ('unstarted-poll', 'native_unstarted_poll_test.c',
                  'NATIVE_COLD_STAGES_OK aggregate_poll_rollback=true io_release=true thread_progress_release=true engine_shutdown=false'),
                 ('code-space', 'native_code_space_test.c',

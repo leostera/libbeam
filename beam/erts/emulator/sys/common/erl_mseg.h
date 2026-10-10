@@ -97,7 +97,8 @@ void  erts_mseg_clear_cache(void);
 void  erts_mseg_cache_check(void);
 Uint  erts_mseg_no( const ErtsMsegOpt_t *);
 Uint  erts_mseg_unit_size(void);
-void  erts_mseg_init(ErtsMsegInit_t *init);
+struct ErtsAllocatorDomain;
+void  erts_mseg_init(struct ErtsAllocatorDomain *, ErtsMsegInit_t *init);
 void  erts_mseg_late_init(void); /* Have to be called after all allocators,
 				   threads and timers have been initialized. */
 Eterm erts_mseg_info_options(int, fmtfn_t*, void*, Uint **, Uint *);

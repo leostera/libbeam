@@ -4443,7 +4443,7 @@ define etp-search-alloc
   etp-1 ($arg0) 0
   set $etp_flat = 0
   printf ":...\n"
-  set $etp_search_alloc_n = sizeof(erts_allctrs) / sizeof(*erts_allctrs)
+  set $etp_search_alloc_n = erts_allocator_count
   set $etp_search_alloc_i = 0
   while $etp_search_alloc_i < $etp_search_alloc_n
     if erts_allctrs[$etp_search_alloc_i].alloc
@@ -4546,7 +4546,7 @@ define etp-alloc-stats
   set $etp_tot_crr_no = 0
   set $etp_tot_crr_sz = 0
   set $etp_ERTS_ALC_A_MIN = 1
-  set $etp_ERTS_ALC_A_MAX = (sizeof(erts_allctrs) / sizeof(*erts_allctrs)) - 1
+  set $etp_ERTS_ALC_A_MAX = erts_allocator_count - 1
 
   set $etp_ix = $etp_ERTS_ALC_A_MIN
   while $etp_ix <= $etp_ERTS_ALC_A_MAX
@@ -4637,7 +4637,7 @@ end
 
 define etp-alloc-instances
   set $etp_ERTS_ALC_A_MIN = 1
-  set $etp_ERTS_ALC_A_MAX = (sizeof(erts_allctrs) / sizeof(*erts_allctrs)) - 1
+  set $etp_ERTS_ALC_A_MAX = erts_allocator_count - 1
 
   set $etp_ix = $arg0
   if $etp_ix >= $etp_ERTS_ALC_A_MIN && $etp_ix <= $etp_ERTS_ALC_A_MAX

@@ -19,7 +19,8 @@ int
 erl_engine_discard_uninitialized(ErtsEngine *engine)
 {
     if (!engine || engine->startup_phase != ERL_RUNTIME_UNCLAIMED ||
-        engine->scheduler_threads || engine->io_poll_group || engine->thread_progress)
+        engine->scheduler_threads || engine->io_poll_group || engine->thread_progress ||
+        engine->allocators)
         return 1;
     free(engine);
     return 0;

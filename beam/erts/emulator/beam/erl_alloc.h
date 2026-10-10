@@ -113,7 +113,8 @@ typedef struct {
     int alc_ix;
 } ErtsThrAllocData;
 
-void erts_alloc_init(int *argc, char **argv, ErtsAllocInitOpts *eaiop);
+struct ErtsEngine;
+void erts_alloc_init(struct ErtsEngine *, int *argc, char **argv, ErtsAllocInitOpts *eaiop);
 void erts_alloc_late_init(void);
 
 #if defined(GET_ERTS_ALC_TEST) || defined(ERTS_ALC_INTERNAL__)
@@ -151,10 +152,8 @@ typedef struct {
 } ErtsAllocatorFunctions_t;
 
 extern erts_tsd_key_t erts_thr_alloc_data_key;
-extern ErtsAllocatorFunctions_t
-    ERTS_WRITE_UNLIKELY(erts_allctrs[ERTS_ALC_A_MAX+1]);
-extern ErtsAllocatorInfo_t
-    ERTS_WRITE_UNLIKELY(erts_allctrs_info[ERTS_ALC_A_MAX+1]);
+extern ErtsAllocatorFunctions_t *erts_allctrs;
+extern ErtsAllocatorInfo_t *erts_allctrs_info;
 
 extern Uint ERTS_WRITE_UNLIKELY(erts_no_dirty_alloc_instances);
 
@@ -166,7 +165,8 @@ typedef struct {
     Allctr_t **allctr;
 } ErtsAllocatorThrSpec_t;
 
-extern ErtsAllocatorThrSpec_t erts_allctr_thr_spec[ERTS_ALC_A_MAX+1];
+extern ErtsAllocatorThrSpec_t *erts_allctr_thr_spec;
+extern const Uint erts_allocator_count;
 
 void erts_alloc_register_scheduler(void *vesdp);
 void erts_alloc_register_delayed_dealloc_handler_thread(ErtsThrAllocData *tadp,

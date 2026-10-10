@@ -28,6 +28,7 @@
 #include "erl_process.h"
 #include "atom.h"
 #include "erl_mmap.h"
+#include "erl_allocator_domain.h"
 #include <stddef.h>
 
 #ifdef HAVE_SYS_MMAN_H
@@ -401,10 +402,10 @@ struct ErtsMemMapper_ {
     } size;
 };
 
-ErtsMemMapper erts_dflt_mmapper;
+ErtsMemMapper *erts_dflt_mmapper;
 
 #if defined(ARCH_64) && defined(ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION)
-ErtsMemMapper erts_literal_mmapper;
+ErtsMemMapper *erts_literal_mmapper;
 char* erts_literals_start;
 UWord erts_literals_size;
 #endif
@@ -2233,13 +2234,18 @@ static void hard_dbg_mseg_init(void);
 #endif
 
 void
-erts_mmap_init(ErtsMemMapper* mm, ErtsMMapInit *init)
+erts_mmap_init(ErtsAllocatorDomain *owner, ErtsMemMapper **slot, ErtsMMapInit *init)
 {
+    ErtsMemMapper *mm;
     static int is_first_call = 1;
     char *start = NULL, *end = NULL;
     int virtual_map = 0;
 
     (void)virtual_map;
+    ASSERT(slot && !*slot);
+    mm = erts_allocator_bootstrap_alloc(owner, sizeof(*mm), ERTS_CACHE_LINE_SIZE);
+    if (!mm) erts_exit(ERTS_ABORT_EXIT, "Cannot allocate memory mapper\n");
+    *slot = mm;
 
 #if defined(HARD_DEBUG)  || 0
     erts_fprintf(stderr, "erts_mmap: scs = %bpu\n", init->scs);
@@ -2444,9 +2450,9 @@ erts_mmap_init(ErtsMemMapper* mm, ErtsMMapInit *init)
 #endif
 
 #if defined(ARCH_64) && defined(ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION)
-   if (mm == &erts_literal_mmapper) {
-       erts_literals_start = erts_literal_mmapper.sa.bot;
-       erts_literals_size  = erts_literal_mmapper.sua.top - erts_literals_start;
+   if (mm == erts_literal_mmapper) {
+       erts_literals_start = erts_literal_mmapper->sa.bot;
+       erts_literals_size  = erts_literal_mmapper->sua.top - erts_literals_start;
     }
 #endif
     is_first_call = 0;
@@ -2598,7 +2604,7 @@ Eterm erts_mmap_info_options(ErtsMemMapper* mm,
 Eterm erts_mmap_debug_info(Process* p)
 {
 #if HAVE_ERTS_MMAP
-    ErtsMemMapper* mm = &erts_dflt_mmapper;
+    ErtsMemMapper* mm = erts_dflt_mmapper;
 
     if (mm->supercarrier) {
         ERTS_DECL_AM(sabot);

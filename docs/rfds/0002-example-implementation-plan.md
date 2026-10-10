@@ -156,6 +156,14 @@ Allocator, remaining TLS/scheduler cleanup, shared/world initialization separati
 and the complete initialization transaction remain missing. The public factory
 still refuses success; repeated Engine creation/shutdown is not implemented.
 
+**Allocator ownership sweep:** [engine-owned allocator storage](0002-owned-allocator-domain.md)
+moves dispatch/debug tables, instance/fixed-list backing, carrier-pool roots,
+segment instances and mapper controls under `ErtsEngine`. Permanent aligned
+allocations retain releasable bases. Unpublished cleanup, real TLS exhaustion
+rollback and live allocation/statistics paths are checked. Draining/stopping
+active allocators, releasing mappings and the complete Engine transaction remain
+unfinished; bound controls cannot be force-freed.
+
 **API:** `Isolate::load_module`.
 
 **First storage extraction:** [owned module tables](0002-owned-module-tables.md)

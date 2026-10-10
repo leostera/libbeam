@@ -40,6 +40,7 @@
 #include "erl_threads.h"
 #include "erl_time.h"
 #include "erl_alloc.h"
+#include "erl_allocator_domain.h"
 #include "big.h"
 #include "erl_thr_progress.h"
 #include "erl_util_queue.h"
@@ -267,7 +268,7 @@ mseg_create(ErtsMsegAllctr_t *ma, Uint flags, UWord *sizep)
     if (MSEG_FLG_IS_2POW(flags))
 	mmap_flags |= ERTS_MMAPFLG_SUPERALIGNED;
 
-    seg = erts_mmap(&erts_dflt_mmapper, mmap_flags, sizep);
+    seg = erts_mmap(erts_dflt_mmapper, mmap_flags, sizep);
 
 #ifdef ERTS_PRINT_ERTS_MMAP
     erts_fprintf(stderr, "%p = erts_mmap(%s, {%bpu, %bpu});\n", seg,
@@ -287,7 +288,7 @@ mseg_destroy(ErtsMsegAllctr_t *ma, Uint flags, void *seg_p, UWord size) {
     if (MSEG_FLG_IS_2POW(flags))
 	 mmap_flags |= ERTS_MMAPFLG_SUPERALIGNED;
 
-    erts_munmap(&erts_dflt_mmapper, mmap_flags, seg_p, size);
+    erts_munmap(erts_dflt_mmapper, mmap_flags, seg_p, size);
 #ifdef ERTS_PRINT_ERTS_MMAP
     erts_fprintf(stderr, "erts_munmap(%s, %p, %bpu);\n",
 		 (mmap_flags & ERTS_MMAPFLG_SUPERALIGNED) ? "sa" : "sua",
@@ -308,7 +309,7 @@ mseg_recreate(ErtsMsegAllctr_t *ma, Uint flags, void *old_seg, UWord old_size, U
     if (MSEG_FLG_IS_2POW(flags))
 	mmap_flags |= ERTS_MMAPFLG_SUPERALIGNED;
 
-    new_seg = erts_mremap(&erts_dflt_mmapper, mmap_flags, old_seg, old_size, sizep);
+    new_seg = erts_mremap(erts_dflt_mmapper, mmap_flags, old_seg, old_size, sizep);
 
 #ifdef ERTS_PRINT_ERTS_MMAP
     erts_fprintf(stderr, "%p = erts_mremap(%s, %p, %bpu, {%bpu, %bpu});\n",
@@ -1357,31 +1358,28 @@ static void mem_cache_init(ErtsMsegAllctr_t *ma)
 }
 
 void
-erts_mseg_init(ErtsMsegInit_t *init)
+erts_mseg_init(ErtsAllocatorDomain *owner, ErtsMsegInit_t *init)
 {
     int i;
-    UWord x;
 
     no_mseg_allocators = 1; /* Global instance */
     no_mseg_allocators += init->nos; /* Scheduler specific instances */
     no_mseg_allocators += init->ndai; /* Dirty alloc instances */
     
-    x = (UWord) malloc(sizeof(ErtsAlgndMsegAllctr_t)
-		       *no_mseg_allocators
-		       + (ERTS_CACHE_LINE_SIZE-1));
-    if (x & ERTS_CACHE_LINE_MASK)
-	x = (x & ~ERTS_CACHE_LINE_MASK) + ERTS_CACHE_LINE_SIZE;
-    ASSERT((x & ERTS_CACHE_LINE_MASK) == 0);
-    aligned_mseg_allctr = (ErtsAlgndMsegAllctr_t *) x;
+    ASSERT(!aligned_mseg_allctr);
+    aligned_mseg_allctr = erts_allocator_bootstrap_alloc(owner,
+        sizeof(*aligned_mseg_allctr) * no_mseg_allocators, ERTS_CACHE_LINE_SIZE);
+    if (!aligned_mseg_allctr)
+        erts_exit(ERTS_ABORT_EXIT, "Cannot allocate mseg instances\n");
 
     atoms_initialized = 0;
 
     erts_mtx_init(&init_atoms_mutex, "mseg_init_atoms", NIL,
         ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
 
-    erts_mmap_init(&erts_dflt_mmapper, &init->dflt_mmap);
+    erts_mmap_init(owner, &erts_dflt_mmapper, &init->dflt_mmap);
 #if defined(ARCH_64) && defined(ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION)
-    erts_mmap_init(&erts_literal_mmapper, &init->literal_mmap);
+    erts_mmap_init(owner, &erts_literal_mmapper, &init->literal_mmap);
 #endif
 
     if (!IS_2POW(sys_page_size))

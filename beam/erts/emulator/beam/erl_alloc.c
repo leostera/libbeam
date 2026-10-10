@@ -37,6 +37,8 @@
 #define ERL_THREADS_EMU_INTERNAL__
 #include "erl_threads.h"
 #include "global.h"
+#include "erl_engine.h"
+#include "erl_allocator_domain.h"
 #include "erl_db.h"
 #include "erl_binary.h"
 #include "erl_bits.h"
@@ -97,11 +99,12 @@ static Uint install_debug_functions(void);
 #endif
 #endif
 
-static int lock_all_physical_memory = 0;
-
-ErtsAllocatorFunctions_t ERTS_WRITE_UNLIKELY(erts_allctrs[ERTS_ALC_A_MAX+1]);
-ErtsAllocatorInfo_t erts_allctrs_info[ERTS_ALC_A_MAX+1];
-ErtsAllocatorThrSpec_t ERTS_WRITE_UNLIKELY(erts_allctr_thr_spec[ERTS_ALC_A_MAX+1]);
+/* Fixed engine bindings, not per-isolate selection. Storage belongs to the
+ * engine's domain; never rebind while allocations or users remain alive. */
+ErtsAllocatorFunctions_t *erts_allctrs;
+ErtsAllocatorInfo_t *erts_allctrs_info;
+ErtsAllocatorThrSpec_t *erts_allctr_thr_spec;
+const Uint erts_allocator_count = ERTS_ALC_A_MAX + 1;
 
 #define ERTS_MIN(A, B) ((A) < (B) ? (A) : (B))
 #define ERTS_MAX(A, B) ((A) > (B) ? (A) : (B))
@@ -117,17 +120,140 @@ typedef union {
     char align_aoffa[ERTS_ALC_CACHE_LINE_ALIGN_SIZE(sizeof(AOFFAllctr_t))];
 } ErtsAllocatorState_t erts_align_attribute(ERTS_CACHE_LINE_SIZE);
 
-static ErtsAllocatorState_t std_alloc_state;
-static ErtsAllocatorState_t ll_alloc_state;
-static ErtsAllocatorState_t sl_alloc_state;
-static ErtsAllocatorState_t temp_alloc_state;
-static ErtsAllocatorState_t eheap_alloc_state;
-static ErtsAllocatorState_t binary_alloc_state;
-static ErtsAllocatorState_t ets_alloc_state;
-static ErtsAllocatorState_t driver_alloc_state;
-static ErtsAllocatorState_t fix_alloc_state;
-static ErtsAllocatorState_t literal_alloc_state;
-static ErtsAllocatorState_t test_alloc_state;
+typedef struct ErtsPermanentAllocation {
+    struct ErtsPermanentAllocation *next;
+    void *base, *aligned;
+    ErtsAlcType_t type;
+    UWord bytes;
+} ErtsPermanentAllocation;
+
+struct ErtsAllocatorDomain {
+    ErtsAllocatorFunctions_t functions[ERTS_ALC_A_MAX+1];
+    ErtsAllocatorInfo_t info[ERTS_ALC_A_MAX+1];
+    ErtsAllocatorThrSpec_t thread_spec[ERTS_ALC_A_MAX+1];
+    ErtsAllocatorState_t initial_states[ERTS_ALC_A_MAX+1];
+#ifdef DEBUG
+    ErtsAllocatorFunctions_t debug_original[ERTS_ALC_A_MAX+1];
+#endif
+    void *allocation;
+    void *state_blocks[ERTS_ALC_A_MAX+1];
+    void *fix_blocks[ERTS_ALC_A_MAX+1];
+    UWord started[ERTS_ALC_A_MAX+1];
+    UWord backing_bytes;
+    ErtsPermanentAllocation *permanent, *bootstrap;
+    UWord permanent_blocks, permanent_bytes, bootstrap_blocks;
+    ethr_mutex permanent_lock;
+    erts_tsd_key_t thread_key;
+    int bound, lock_all_physical_memory;
+};
+static ErtsAllocatorDomain *diagnostic_allocator;
+
+ErtsAllocatorDomain *erts_allocator_domain_create(void)
+{
+    void *base = calloc(1, sizeof(ErtsAllocatorDomain) + ERTS_CACHE_LINE_MASK);
+    ErtsAllocatorDomain *d;
+    int error;
+    if (!base) return NULL;
+    d = (ErtsAllocatorDomain *) (((UWord)base + ERTS_CACHE_LINE_MASK) &
+                                 ~((UWord)ERTS_CACHE_LINE_MASK));
+    d->allocation = base;
+    error = ethr_mutex_init(&d->permanent_lock);
+    if (error) { free(base); errno = error; return NULL; }
+    error = ethr_tsd_key_create(&d->thread_key, "erts_alc_data_key");
+    if (error) {
+        ethr_mutex_destroy(&d->permanent_lock);
+        free(base);
+        errno = error;
+        return NULL;
+    }
+    return d;
+}
+
+int erts_allocator_domain_discard(ErtsAllocatorDomain *d)
+{
+    int i;
+    if (!d || d->bound || d->permanent || d->bootstrap ||
+        ethr_tsd_get(d->thread_key)) return 1;
+    for (i = 0; i <= ERTS_ALC_A_MAX; ++i)
+        if (d->started[i] || d->state_blocks[i] || d->fix_blocks[i]) return 1;
+    erts_tsd_key_delete(d->thread_key);
+    if (ethr_mutex_destroy(&d->permanent_lock))
+        ERTS_INTERNAL_ERROR("Allocator domain still in use");
+    free(d->allocation);
+    return 0;
+}
+
+int erts_allocator_ownership(ErtsEngine *engine, ErtsAllocatorOwnership *out)
+{
+    ErtsAllocatorDomain *d = engine ? engine->allocators : NULL;
+    int i;
+    if (!d || !out) return 1;
+    sys_memzero(out, sizeof(*out));
+    out->control_bytes = sizeof(*d) + ERTS_CACHE_LINE_MASK;
+    for (i = 0; i <= ERTS_ALC_A_MAX; ++i) out->started_instances += d->started[i];
+    ethr_mutex_lock(&d->permanent_lock);
+    out->backing_bytes = d->backing_bytes;
+    out->bootstrap_blocks = d->bootstrap_blocks;
+    out->permanent_blocks = d->permanent_blocks;
+    out->permanent_bytes = d->permanent_bytes;
+    ethr_mutex_unlock(&d->permanent_lock);
+    return 0;
+}
+
+void *erts_allocator_bootstrap_alloc(ErtsAllocatorDomain *d, UWord size, UWord alignment)
+{
+    ErtsPermanentAllocation *record;
+    UWord mask;
+    if (!d || !alignment || (alignment & (alignment - 1))) {
+        errno = EINVAL;
+        return NULL;
+    }
+    mask = alignment - 1;
+    if (size > ((UWord) -1) - mask) { errno = ENOMEM; return NULL; }
+    record = malloc(sizeof(*record));
+    if (!record) return NULL;
+    record->bytes = size + mask;
+    if (!record->bytes) record->bytes = 1;
+    record->base = calloc(1, record->bytes);
+    if (!record->base) { free(record); errno = ENOMEM; return NULL; }
+    record->aligned = (void *) (((UWord)record->base + mask) & ~mask);
+    ethr_mutex_lock(&d->permanent_lock);
+    record->next = d->bootstrap;
+    d->bootstrap = record;
+    d->bootstrap_blocks++;
+    d->backing_bytes += record->bytes;
+    ethr_mutex_unlock(&d->permanent_lock);
+    return record->aligned;
+}
+
+int erts_allocator_bootstrap_release(ErtsAllocatorDomain *d, void *ptr)
+{
+    ErtsPermanentAllocation **link, *record;
+    if (!d || d->bound || !ptr) return 1;
+    ethr_mutex_lock(&d->permanent_lock);
+    for (link = &d->bootstrap; *link && (*link)->aligned != ptr; link = &(*link)->next) {}
+    record = *link;
+    if (!record) { ethr_mutex_unlock(&d->permanent_lock); return 1; }
+    *link = record->next;
+    d->bootstrap_blocks--;
+    d->backing_bytes -= record->bytes;
+    ethr_mutex_unlock(&d->permanent_lock);
+    free(record->base);
+    free(record);
+    return 0;
+}
+
+static UWord allocator_external_bytes(void)
+{
+    ErtsAllocatorDomain *d = diagnostic_allocator;
+    UWord bytes;
+    if (!d) return 0;
+    ethr_mutex_lock(&d->permanent_lock);
+    bytes = sizeof(*d) + ERTS_CACHE_LINE_MASK + d->backing_bytes +
+        (d->permanent_blocks + d->bootstrap_blocks) * sizeof(ErtsPermanentAllocation);
+    ethr_mutex_unlock(&d->permanent_lock);
+    return bytes;
+}
 
 enum {
     ERTS_ALC_INFO_A_ALLOC_UTIL = ERTS_ALC_A_MAX + 1,
@@ -151,7 +277,6 @@ ERTS_SCHED_PREF_QUICK_ALLOC_IMPL(aireq,
                                  5,
                                  ERTS_ALC_T_AINFO_REQ)
 
-ErtsAlcType_t erts_fix_core_allocator_ix;
 erts_tsd_key_t erts_thr_alloc_data_key;
 
 Uint ERTS_WRITE_UNLIKELY(erts_no_dirty_alloc_instances);
@@ -330,7 +455,8 @@ set_default_literal_alloc_opts(struct au_init *ip)
     ip->init.util.mseg_alloc    = &erts_alcu_mmapper_mseg_alloc;
     ip->init.util.mseg_realloc  = &erts_alcu_mmapper_mseg_realloc;
     ip->init.util.mseg_dealloc  = &erts_alcu_mmapper_mseg_dealloc;
-    ip->init.util.mseg_mmapper  = &erts_literal_mmapper;
+    /* Filled after the engine-owned mapper is constructed in mseg init. */
+    ip->init.util.mseg_mmapper  = NULL;
 # endif
 #else
 # error Unknown architecture
@@ -603,7 +729,7 @@ adjust_carrier_migration_support(struct au_init *auip)
 }
 
 void
-erts_alloc_init(int *argc, char **argv, ErtsAllocInitOpts *eaiop)
+erts_alloc_init(ErtsEngine *engine, int *argc, char **argv, ErtsAllocInitOpts *eaiop)
 {
     UWord extra_block_size = 0;
     int i, ncpu;
@@ -653,9 +779,16 @@ erts_alloc_init(int *argc, char **argv, ErtsAllocInitOpts *eaiop)
     hdbg_init();
 #endif
 
-    erts_tsd_key_create(&erts_thr_alloc_data_key, "erts_alc_data_key");
-
-    lock_all_physical_memory = 0;
+    ASSERT(engine && !engine->allocators && !diagnostic_allocator);
+    engine->allocators = erts_allocator_domain_create();
+    if (!engine->allocators)
+        erts_exit(ERTS_ABORT_EXIT, "Cannot create allocator domain\n");
+    diagnostic_allocator = engine->allocators;
+    diagnostic_allocator->bound = 1;
+    erts_allctrs = diagnostic_allocator->functions;
+    erts_allctrs_info = diagnostic_allocator->info;
+    erts_allctr_thr_spec = diagnostic_allocator->thread_spec;
+    erts_thr_alloc_data_key = diagnostic_allocator->thread_key;
 
     ncpu = eaiop->ncpu;
     if (ncpu < 1)
@@ -680,7 +813,7 @@ erts_alloc_init(int *argc, char **argv, ErtsAllocInitOpts *eaiop)
     if (argc && argv)
 	handle_args(argc, argv, &init);
 
-    if (lock_all_physical_memory) {
+    if (diagnostic_allocator->lock_all_physical_memory) {
 #ifdef HAVE_MLOCKALL
 	errno = 0;
 	if (mlockall(MCL_CURRENT|MCL_FUTURE) != 0) {
@@ -747,10 +880,13 @@ erts_alloc_init(int *argc, char **argv, ErtsAllocInitOpts *eaiop)
 #if HAVE_ERTS_MSEG
     init.mseg.nos = erts_no_schedulers;
     init.mseg.ndai = init.dirty_alloc_insts;
-    erts_mseg_init(&init.mseg);
+    erts_mseg_init(diagnostic_allocator, &init.mseg);
+#if defined(ARCH_64) && defined(ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION)
+    init.literal_alloc.init.util.mseg_mmapper = erts_literal_mmapper;
+#endif
 #endif
 
-    erts_alcu_init(&init.alloc_util);
+    erts_alcu_init(diagnostic_allocator, &init.alloc_util);
     erts_afalc_init();
     erts_bfalc_init();
     erts_gfalc_init();
@@ -801,44 +937,44 @@ erts_alloc_init(int *argc, char **argv, ErtsAllocInitOpts *eaiop)
 
     start_au_allocator(ERTS_ALC_A_TEMPORARY,
 		       &init.temp_alloc,
-		       &temp_alloc_state);
+		       &diagnostic_allocator->initial_states[ERTS_ALC_A_TEMPORARY]);
 
     start_au_allocator(ERTS_ALC_A_SHORT_LIVED,
 		       &init.sl_alloc,
-		       &sl_alloc_state);
+		       &diagnostic_allocator->initial_states[ERTS_ALC_A_SHORT_LIVED]);
 
     start_au_allocator(ERTS_ALC_A_STANDARD,
 		       &init.std_alloc,
-		       &std_alloc_state);
+		       &diagnostic_allocator->initial_states[ERTS_ALC_A_STANDARD]);
 
     start_au_allocator(ERTS_ALC_A_LONG_LIVED,
 		       &init.ll_alloc,
-		       &ll_alloc_state);
+		       &diagnostic_allocator->initial_states[ERTS_ALC_A_LONG_LIVED]);
     start_au_allocator(ERTS_ALC_A_EHEAP,
 		       &init.eheap_alloc,
-		       &eheap_alloc_state);
+		       &diagnostic_allocator->initial_states[ERTS_ALC_A_EHEAP]);
 
     start_au_allocator(ERTS_ALC_A_BINARY,
 		       &init.binary_alloc,
-		       &binary_alloc_state);
+		       &diagnostic_allocator->initial_states[ERTS_ALC_A_BINARY]);
 
     start_au_allocator(ERTS_ALC_A_ETS,
 		       &init.ets_alloc,
-		       &ets_alloc_state);
+		       &diagnostic_allocator->initial_states[ERTS_ALC_A_ETS]);
 
     start_au_allocator(ERTS_ALC_A_DRIVER,
 		       &init.driver_alloc,
-		       &driver_alloc_state);
+		       &diagnostic_allocator->initial_states[ERTS_ALC_A_DRIVER]);
 
     start_au_allocator(ERTS_ALC_A_FIXED_SIZE,
 		       &init.fix_alloc,
-		       &fix_alloc_state);
+		       &diagnostic_allocator->initial_states[ERTS_ALC_A_FIXED_SIZE]);
     start_au_allocator(ERTS_ALC_A_LITERAL,
                        &init.literal_alloc,
-                       &literal_alloc_state);
+                       &diagnostic_allocator->initial_states[ERTS_ALC_A_LITERAL]);
     start_au_allocator(ERTS_ALC_A_TEST,
 		       &init.test_alloc,
-		       &test_alloc_state);
+		       &diagnostic_allocator->initial_states[ERTS_ALC_A_TEST]);
 
     init_aireq_alloc();
 
@@ -961,17 +1097,14 @@ start_au_allocator(ErtsAlcType_t alctr_n,
 	return;
 
     if (init->thr_spec) {
-	char *states = erts_sys_alloc(0,
-				      NULL,
-				      ((sizeof(Allctr_t *)
-					* (tspec->size + 1))
-				       + (sizeof(ErtsAllocatorState_t)
-					  * tspec->size)
-				       + ERTS_CACHE_LINE_SIZE - 1));
+        size_t state_bytes = sizeof(Allctr_t *) * (tspec->size + 1)
+            + sizeof(ErtsAllocatorState_t) * tspec->size + ERTS_CACHE_LINE_MASK;
+	char *states = erts_allocator_bootstrap_alloc(diagnostic_allocator, state_bytes, 1);
 	if (!states)
 	    erts_exit(ERTS_ABORT_EXIT,
 		     "Failed to allocate allocator states for %salloc\n",
 		     init->init.util.name_prefix);
+        diagnostic_allocator->state_blocks[alctr_n] = states;
 	tspec->allctr = (Allctr_t **) states;
 	states += sizeof(Allctr_t *) * (tspec->size + 1);
 	states = ((((UWord) states) & ERTS_CACHE_LINE_MASK)
@@ -992,15 +1125,15 @@ start_au_allocator(ErtsAlcType_t alctr_n,
 	tot_fix_list_size = fix_list_size;
 	if (init->thr_spec)
 	    tot_fix_list_size *= tspec->size;
-	fix_lists = erts_sys_alloc(0,
-				   NULL,
-				   (tot_fix_list_size
-				    + ERTS_CACHE_LINE_SIZE - 1));
+	fix_lists = erts_allocator_bootstrap_alloc(diagnostic_allocator,
+                                                   tot_fix_list_size,
+                                                   ERTS_CACHE_LINE_SIZE);
 	if (!fix_lists)
 	    erts_exit(ERTS_ABORT_EXIT,
 		     "Failed to allocate fix lists for %salloc\n",
 		     init->init.util.name_prefix);
 
+        diagnostic_allocator->fix_blocks[alctr_n] = fix_lists;
 	if (((UWord) fix_lists) & ERTS_CACHE_LINE_MASK)
 		fix_lists = ((ErtsAlcFixList_t *)
 		       ((((UWord) fix_lists) & ~ERTS_CACHE_LINE_MASK)
@@ -1076,6 +1209,7 @@ start_au_allocator(ErtsAlcType_t alctr_n,
 		     "Failed to start %salloc\n", init->init.util.name_prefix);
 
 	ASSERT(as == (void *) as0);
+        diagnostic_allocator->started[alctr_n]++;
 	af->extra = as;
     }
 
@@ -1785,9 +1919,9 @@ handle_args(int *argc, char **argv, erts_alc_hndl_args_init_t *init)
 		    if (has_prefix("pm", param+2)) {
 			arg = get_value(argv[i]+5, argv, &i);
 			if (sys_strcmp("all", arg) == 0)
-			    lock_all_physical_memory = 1;
+			    diagnostic_allocator->lock_all_physical_memory = 1;
 			else if (sys_strcmp("no", arg) == 0)
-			    lock_all_physical_memory = 0;
+			    diagnostic_allocator->lock_all_physical_memory = 0;
 			else
 			    bad_value(param, param+4, arg);
 			break;
@@ -2513,7 +2647,7 @@ erts_memory(fmtfn_t *print_to_p, void *print_to_arg, void *proc, Eterm earg)
     if (want_tot_or_sys) {
         /* Bootstrap backing must outlive allocator teardown and is therefore
          * owned directly by the engine, outside the allocator instances. */
-        size.total += erts_thr_progress_shared_bytes();
+        size.total += erts_thr_progress_shared_bytes() + allocator_external_bytes();
 #ifdef BEAMASM
         /* The JIT allocates code on its own because of W^X restrictions, so we
          * need to bump the total size accordingly. */
@@ -2702,7 +2836,7 @@ erts_allocated_areas(fmtfn_t *print_to_p, void *print_to_arg, void *proc)
 #else
     values[i].ui[0] = 0;
 #endif
-    values[i].ui[0] += erts_thr_progress_shared_bytes();
+    values[i].ui[0] += erts_thr_progress_shared_bytes() + allocator_external_bytes();
     i++;
 
     length = i;
@@ -2888,10 +3022,10 @@ erts_allocator_info(fmtfn_t to, void *arg)
 	    erts_mseg_info(i, &to, arg, 0, 0, NULL, NULL);
 	}
 	erts_print(to, arg, "=allocator:erts_mmap.default_mmap\n");
-	erts_mmap_info(&erts_dflt_mmapper, &to, arg, NULL, NULL, &emis);
+	erts_mmap_info(erts_dflt_mmapper, &to, arg, NULL, NULL, &emis);
 #if defined(ARCH_64) && defined(ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION)
         erts_print(to, arg, "=allocator:erts_mmap.literal_mmap\n");
-        erts_mmap_info(&erts_literal_mmapper, &to, arg, NULL, NULL, &emis);
+        erts_mmap_info(erts_literal_mmapper, &to, arg, NULL, NULL, &emis);
 #endif
     }
 #endif
@@ -3000,12 +3134,12 @@ erts_allocator_options(void *proc)
 
 #if HAVE_ERTS_MMAP
     atoms[length] = ERTS_MAKE_AM("erts_mmap");
-    terms[length++] = erts_mmap_info_options(&erts_dflt_mmapper, NULL, NULL,
+    terms[length++] = erts_mmap_info_options(erts_dflt_mmapper, NULL, NULL,
                                              NULL, hpp, szp);
 #endif
 
     atoms[length] = ERTS_MAKE_AM("lock_physical_memory");
-    terms[length++] = (lock_all_physical_memory ? am_all : am_no);
+    terms[length++] = (diagnostic_allocator->lock_all_physical_memory ? am_all : am_no);
 
     settings = erts_bld_2tup_list(hpp, szp, length, atoms, terms);
 
@@ -3078,28 +3212,50 @@ void *erts_alloc_permanent_aligned(ErtsAlcType_t type,
                                    Uint size,
                                    Uint alignment)
 {
-    const UWord m = (alignment - 1);
-    UWord v = (UWord) erts_alloc(type,
-#ifdef VALGRIND
-                                 sizeof(UWord) +
-#endif
-                                 size + (alignment - 1));
+    ErtsAllocatorDomain *d = diagnostic_allocator;
+    ErtsPermanentAllocation *record;
+    UWord m, v;
+    if (!d || !alignment || (alignment & (alignment - 1)) ||
+        size > ((Uint) -1) - (alignment - 1))
+        ERTS_INTERNAL_ERROR("Invalid permanent allocation");
+    m = alignment - 1;
+    record = malloc(sizeof(*record));
+    if (!record) erts_alloc_enomem(type, size);
+    record->base = erts_alloc(type, size + m);
+    record->type = type;
+    record->bytes = size + m;
+    v = ((UWord) record->base + m) & ~m;
+    record->aligned = (void *) v;
+    /* Exact base pointers also keep allocations reachable for leak tools.
+     * Never hold the ledger lock across VM allocation/free callbacks. */
+    ethr_mutex_lock(&d->permanent_lock);
+    record->next = d->permanent;
+    d->permanent = record;
+    d->permanent_blocks++;
+    d->permanent_bytes += record->bytes;
+    ethr_mutex_unlock(&d->permanent_lock);
+    return record->aligned;
+}
 
-#ifdef VALGRIND
-    {   /* Link them to avoid Leak_PossiblyLost */
-        static UWord* first_in_list = NULL;
-        *(UWord**)v = first_in_list;
-        first_in_list = (UWord*) v;
-        v += sizeof(UWord);
+int erts_allocator_release_permanent(ErtsEngine *engine, ErtsAlcType_t type, void *ptr)
+{
+    ErtsAllocatorDomain *d = engine ? engine->allocators : NULL;
+    ErtsPermanentAllocation **link, *record;
+    if (!d || d != diagnostic_allocator || !ptr) return 1;
+    ethr_mutex_lock(&d->permanent_lock);
+    for (link = &d->permanent; *link && (*link)->aligned != ptr; link = &(*link)->next) {}
+    record = *link;
+    if (!record || record->type != type) {
+        ethr_mutex_unlock(&d->permanent_lock);
+        return 1;
     }
-#endif
-
-    if (v & m) {
-        v = (v & ~m) + alignment;
-    }
-
-    ASSERT((v & m) == 0);
-    return (void*)v;
+    *link = record->next;
+    d->permanent_blocks--;
+    d->permanent_bytes -= record->bytes;
+    ethr_mutex_unlock(&d->permanent_lock);
+    erts_free(type, record->base);
+    free(record);
+    return 0;
 }
 
 static void
@@ -3232,7 +3388,7 @@ reply_alloc_info(void *vair)
                     alloc_atom = erts_bld_atom(hpp, szp, "erts_mmap");
 #if HAVE_ERTS_MMAP
                     ainfo = (air->only_sz ? NIL :
-                             erts_mmap_info(&erts_dflt_mmapper, NULL, NULL,
+                             erts_mmap_info(erts_dflt_mmapper, NULL, NULL,
                                             hpp, szp, &mmap_info_dflt));
                     ainfo = erts_bld_tuple3(hpp, szp,
                                             alloc_atom,
@@ -3242,7 +3398,7 @@ reply_alloc_info(void *vair)
                     ai_list = erts_bld_cons(hpp, szp,
                                             ainfo, ai_list);
                     ainfo = (air->only_sz ? NIL :
-                             erts_mmap_info(&erts_literal_mmapper, NULL, NULL,
+                             erts_mmap_info(erts_literal_mmapper, NULL, NULL,
                                             hpp, szp, &mmap_info_literal));
                     ainfo = erts_bld_tuple3(hpp, szp,
                                             alloc_atom,
@@ -4033,7 +4189,7 @@ check_memory_fence(void *ptr, Uint *size, ErtsAlcType_t n, int func)
     return (void *) ui_ptr;
 }
 
-static ErtsAllocatorFunctions_t real_allctrs[ERTS_ALC_A_MAX+1];
+static ErtsAllocatorFunctions_t *real_allctrs;
 
 static void *
 debug_alloc(ErtsAlcType_t type, void *extra, Uint size)
@@ -4138,9 +4294,8 @@ static Uint
 install_debug_functions(void)
 {
     int i;
-    ERTS_CT_ASSERT(sizeof(erts_allctrs) == sizeof(real_allctrs));
-
-    sys_memcpy((void *)real_allctrs,(void *)erts_allctrs,sizeof(erts_allctrs));
+    real_allctrs = diagnostic_allocator->debug_original;
+    sys_memcpy(real_allctrs, erts_allctrs, sizeof(diagnostic_allocator->functions));
 
     for (i = ERTS_ALC_A_MIN; i <= ERTS_ALC_A_MAX; i++) {
 	erts_allctrs[i].alloc	= debug_alloc;

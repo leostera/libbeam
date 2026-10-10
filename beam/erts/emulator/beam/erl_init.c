@@ -1229,7 +1229,7 @@ early_init(ErtsEngine *engine, int *argc, char **argv) /*
     erts_early_init_scheduling(no_schedulers + 1 + dirty_cpu_scheds);
 
     alloc_opts.ncpu = ncpu;
-    erts_alloc_init(argc, argv, &alloc_opts); /* Handles (and removes)
+    erts_alloc_init(engine, argc, argv, &alloc_opts); /* Handles (and removes)
 						 -M flags. */
     aux_threads += erts_no_dirty_alloc_instances;
     /* Require allocators */

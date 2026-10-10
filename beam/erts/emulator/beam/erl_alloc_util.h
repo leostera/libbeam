@@ -206,7 +206,8 @@ Eterm	erts_alcu_au_info_options(fmtfn_t *, void *, Uint **, Uint *);
 Eterm	erts_alcu_info_options(Allctr_t *, fmtfn_t *, void *, Uint **, Uint *);
 Eterm	erts_alcu_sz_info(Allctr_t *, int, int, fmtfn_t *, void *, Uint **, Uint *);
 Eterm	erts_alcu_info(Allctr_t *, int, int, fmtfn_t *, void *, Uint **, Uint *);
-void	erts_alcu_init(AlcUInit_t *);
+struct ErtsAllocatorDomain;
+void	erts_alcu_init(struct ErtsAllocatorDomain *, AlcUInit_t *);
 void    erts_alcu_current_size(Allctr_t *, AllctrSize_t *,
 			       ErtsAlcUFixInfo_t *, int);
 void    erts_alcu_foreign_size(Allctr_t *, ErtsAlcType_t, AllctrSize_t *);

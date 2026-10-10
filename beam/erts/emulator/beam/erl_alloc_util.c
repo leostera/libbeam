@@ -48,6 +48,7 @@
 #include "erl_mmap.h"
 #define GET_ERL_ALLOC_UTIL_IMPL
 #include "erl_alloc_util.h"
+#include "erl_allocator_domain.h"
 #include "erl_mseg.h"
 #include "erl_threads.h"
 #include "erl_thr_progress.h"
@@ -3206,7 +3207,7 @@ typedef union {
     char align__[ERTS_ALC_CACHE_LINE_ALIGN_SIZE(sizeof(ErtsAlcCPoolData_t))];
 } ErtsAlcCrrPool_t;
 
-static ErtsAlcCrrPool_t firstfit_carrier_pools[ERTS_ALC_NO_CPOOLS] erts_align_attribute(ERTS_CACHE_LINE_SIZE);
+static ErtsAlcCrrPool_t *firstfit_carrier_pools;
 
 #define ERTS_ALC_CPOOL_MAX_BACKOFF (1 << 8)
 
@@ -7004,10 +7005,16 @@ erts_alcu_stop(Allctr_t *allctr)
 /* ------------------------------------------------------------------------- */
 
 void
-erts_alcu_init(AlcUInit_t *init)
+erts_alcu_init(ErtsAllocatorDomain *owner, AlcUInit_t *init)
 {
     int i;
     ErtsAlcCPoolData_t *sentinel;
+
+    ASSERT(!firstfit_carrier_pools);
+    firstfit_carrier_pools = erts_allocator_bootstrap_alloc(owner,
+        sizeof(*firstfit_carrier_pools) * ERTS_ALC_NO_CPOOLS, ERTS_CACHE_LINE_SIZE);
+    if (!firstfit_carrier_pools)
+        erts_exit(ERTS_ABORT_EXIT, "Cannot allocate carrier pool roots\n");
 
     for (i = ERTS_ALC_A_MIN; i <= ERTS_ALC_A_MAX; i++) {
         sentinel = &firstfit_carrier_pools[i].sentinel;

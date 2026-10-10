@@ -143,7 +143,8 @@ void *erts_mmap(ErtsMemMapper*, Uint32 flags, UWord *sizep);
 void erts_munmap(ErtsMemMapper*, Uint32 flags, void *ptr, UWord size);
 void *erts_mremap(ErtsMemMapper*, Uint32 flags, void *ptr, UWord old_size, UWord *sizep);
 int erts_mmap_in_supercarrier(ErtsMemMapper*, void *ptr);
-void erts_mmap_init(ErtsMemMapper*, ErtsMMapInit*);
+struct ErtsAllocatorDomain;
+void erts_mmap_init(struct ErtsAllocatorDomain *, ErtsMemMapper **, ErtsMMapInit*);
 struct erts_mmap_info_struct
 {
     UWord sizes[6];
@@ -159,12 +160,12 @@ Eterm erts_mmap_info_options(ErtsMemMapper*,
 #ifdef ERTS_WANT_MEM_MAPPERS
 #  include "erl_alloc_types.h"
 
-extern ErtsMemMapper erts_dflt_mmapper;
+extern ErtsMemMapper *erts_dflt_mmapper;
 
 # if defined(ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION)
 
 #  if defined(ARCH_64)
-extern ErtsMemMapper erts_literal_mmapper;
+extern ErtsMemMapper *erts_literal_mmapper;
 #  endif
 
 # endif /* ERTS_HAVE_OS_PHYSICAL_MEMORY_RESERVATION */

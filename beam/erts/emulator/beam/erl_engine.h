@@ -23,11 +23,13 @@
 struct ErtsSchedulerThreadGroup;
 struct ErtsIoPollGroup;
 struct ErtsThreadProgressDomain;
+struct ErtsAllocatorDomain;
 struct ErtsEngine {
     enum ErlRuntimeStartupPhase startup_phase;
     struct ErtsSchedulerThreadGroup *scheduler_threads;
     struct ErtsIoPollGroup *io_poll_group;
     struct ErtsThreadProgressDomain *thread_progress;
+    struct ErtsAllocatorDomain *allocators;
 };
 
 #endif
