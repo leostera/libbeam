@@ -148,6 +148,11 @@ process destruction, loaded-code purge and literal release. It is not completion
 of the loader/retirement/world-service migration; private admission stays refused
 at diagnostic-only execution boundaries.
 
+**Unbooted engine lifecycle:** [cleanup prerequisites](0002-unbooted-engine-cleanup.md)
+now include real cold POSIX pollset disposal and descriptor-failure rollback.
+Aggregate I/O, allocator, TLS, thread-progress and scheduler cleanup are still
+missing; this does not enable the public Engine factory.
+
 **API:** `Isolate::load_module`.
 
 **First storage extraction:** [owned module tables](0002-owned-module-tables.md)

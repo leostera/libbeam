@@ -39,8 +39,19 @@ void ERTS_POLL_EXPORT(erts_poll_init)(int *concurrent_waiters);
 /**
  * @brief Create a new pollset.
  * @param id The unique debug id of this pollset.
+ * POSIX descriptor creation/setup failures return NULL with errno preserved and
+ * unwind acquired descriptors/storage. Other ERTS initialization/allocation
+ * failures are not yet generally recoverable.
  */
 ErtsPollSet *ERTS_POLL_EXPORT(erts_poll_create_pollset)(int id);
+
+#ifndef __WIN32__
+/** Discard an exclusively owned POSIX pollset which has never been waited on.
+ * Returns 1 without mutation for live registrations, queued updates or a started
+ * pollset. The caller must exclude concurrent control/interrupt/wait operations.
+ * Does not close caller-owned descriptors. Not a running-poller shutdown API. */
+int ERTS_POLL_EXPORT(erts_poll_discard_unstarted)(ErtsPollSet *ps);
+#endif
 
 /**
  * Modify the contents of a pollset. This function can be called while one

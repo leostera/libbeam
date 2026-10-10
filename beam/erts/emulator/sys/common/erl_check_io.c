@@ -2546,8 +2546,11 @@ erts_init_check_io(int *argc, char **argv)
     /* Create the actual pollsets */
     pollsetv = erts_alloc(ERTS_ALC_T_POLLSET,sizeof(ErtsPollSet *) * erts_no_pollsets);
 
-    for (j=0; j < erts_no_pollsets; j++)
+    for (j=0; j < erts_no_pollsets; j++) {
         pollsetv[j] = erts_poll_create_pollset(j);
+        if (!pollsetv[j])
+            erts_exit(ERTS_ERROR_EXIT, "Cannot create pollset: %s\n", erl_errno_id(errno));
+    }
 
     no_poll_threads = erts_no_poll_threads;
 
@@ -2556,6 +2559,8 @@ erts_init_check_io(int *argc, char **argv)
     if (use_sched_poll) {
 #if ERTS_POLL_USE_SCHEDULER_POLLING
         sched_pollset = erts_poll_create_pollset(j--);
+        if (!sched_pollset)
+            erts_exit(ERTS_ERROR_EXIT, "Cannot create scheduler pollset: %s\n", erl_errno_id(errno));
         ASSERT(erts_sched_poll_enabled());
         no_poll_threads++;
 #else
@@ -2566,6 +2571,8 @@ erts_init_check_io(int *argc, char **argv)
 
 #if ERTS_POLL_USE_FALLBACK
     flbk_pollset = erts_poll_create_pollset_flbk(j--);
+    if (!flbk_pollset)
+        erts_exit(ERTS_ERROR_EXIT, "Cannot create fallback pollset: %s\n", erl_errno_id(errno));
     no_poll_threads++;
 #endif
 

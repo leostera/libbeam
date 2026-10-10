@@ -217,6 +217,9 @@ def main():
                  source / 'erts/emulator/beam/erl_module_namespace.h',
                  source / 'erts/emulator/beam/code_ix.c',
                  tools.parent / 'tests/native_code_space_test.c',
+                 tools.parent / 'tests/native_unstarted_poll_test.c',
+                 source / 'erts/emulator/sys/common/erl_poll.c',
+                 source / 'erts/emulator/sys/common/erl_poll_api.h',
                  tools.parent / 'tests/native_export_namespace_test.c',
                  source / 'erts/emulator/beam/erl_export_literals.c',
                  source / 'erts/emulator/beam/erl_export_literals.h',
@@ -336,6 +339,8 @@ def main():
                 (output / 'compile-settings.log').read_text().splitlines()
                 if line.startswith(('CC=', 'CFLAGS=', 'INCLUDES=')))
             components = [
+                ('unstarted-poll', 'native_unstarted_poll_test.c',
+                 'NATIVE_UNSTARTED_POLL_OK descriptor_balance=true peer_survival=true engine_shutdown=false'),
                 ('code-space', 'native_code_space_test.c',
                  'NATIVE_CODE_SPACE_OK independent_tables=true coordinated_metadata_transactions=true guarded_disposal=true private_execution=false'),
                 ('export-namespace', 'native_export_namespace_test.c',
