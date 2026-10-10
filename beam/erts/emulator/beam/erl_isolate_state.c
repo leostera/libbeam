@@ -15,15 +15,17 @@ struct ErtsIsolateNamespaceState {
     ErtsAtomNamespace *atoms;
     ErtsModuleTable *modules[ERTS_NUM_CODE_IX];
     ErtsExportLiterals *export_literals;
+    ErtsExportNamespace *exports;
     int bound; /* Diagnostic execution references prevent unpublished disposal. */
 };
 
 static ErtsIsolateNamespaceState *create_state(ErtsEngine *engine,
-                                              int atom_limit, int module_limit)
+                                              int atom_limit, int module_limit,
+                                              int export_limit)
 {
     ErtsIsolateNamespaceState *state;
     int i;
-    if (!engine || module_limit <= 0)
+    if (!engine || module_limit <= 0 || export_limit <= 0)
         return NULL;
     state = calloc(1, sizeof(*state));
     if (!state)
@@ -35,6 +37,8 @@ static ErtsIsolateNamespaceState *create_state(ErtsEngine *engine,
         return NULL;
     }
     state->export_literals = erts_export_literals_create();
+    state->exports = erts_export_namespace_create(state->export_literals, export_limit);
+    ASSERT(state->exports);
     for (i = 0; i < ERTS_NUM_CODE_IX; ++i) {
         state->modules[i] = erts_module_table_create(module_limit);
         ASSERT(state->modules[i]); /* validated limit; ERTS allocation is fatal */
@@ -52,19 +56,26 @@ ErtsIsolateNamespaceState *erts_isolate_namespace_create(ErtsEngine *engine,
     phase = erl_runtime_startup_phase(engine);
     if (phase != ERL_RUNTIME_PREPARED && phase != ERL_RUNTIME_THREADS_STARTED)
         return NULL;
-    return create_state(engine, atom_limit, module_limit);
+    return create_state(engine, atom_limit, module_limit,
+                         erts_export_namespace_default_limit());
 }
 
 ErtsIsolateNamespaceState *erts_isolate_namespace_create_diagnostic(
-    ErtsEngine *engine, int atom_limit, int module_limit)
+    ErtsEngine *engine, int atom_limit, int module_limit, int export_limit)
 {
     ErtsIsolateNamespaceState *state;
     ASSERT(erl_runtime_startup_phase(engine) == ERL_RUNTIME_PREPARING);
     state = create_state(engine, atom_limit,
-                         module_limit > 0 ? module_limit : erts_module_table_default_limit());
+                         module_limit > 0 ? module_limit : erts_module_table_default_limit(),
+                         export_limit > 0 ? export_limit : erts_export_namespace_default_limit());
     if (state)
         state->bound = 1;
     return state;
+}
+
+ErtsExportNamespace *erts_isolate_namespace_exports(ErtsIsolateNamespaceState *state)
+{
+    return state->exports;
 }
 
 ErtsExportLiterals *erts_isolate_namespace_export_literals(ErtsIsolateNamespaceState *state)
@@ -97,7 +108,8 @@ int erts_isolate_namespace_discard(ErtsIsolateNamespaceState *state)
 {
     int i;
     if (!state || state->bound ||
-        !erts_export_literals_can_discard(state->export_literals))
+        !erts_export_literals_can_discard(state->export_literals) ||
+        !erts_export_namespace_can_discard(state->exports))
         return 1;
     /* Preflight ALL slots before freeing any of them. No partial destruction
      * if a later slot retains code or metadata references. */
@@ -109,6 +121,7 @@ int erts_isolate_namespace_discard(ErtsIsolateNamespaceState *state)
         ASSERT(!result);
         (void) result;
     }
+    erts_export_namespace_discard(state->exports);
     erts_export_literals_discard(state->export_literals);
     erts_atom_namespace_discard_unpublished(state->atoms);
     free(state);

@@ -27,6 +27,7 @@
 #include "index.h"
 #include "code_ix.h"
 #include "erl_export_literals.h"
+#include "erl_export_namespace.h"
 
 /*
 ** Export entry
@@ -124,7 +125,8 @@ typedef struct export_
 #endif
 
 Eterm erts_export_literal_create(ErtsExportLiterals *, Export *);
-void init_export_table(int limit, ErtsExportLiterals *);
+void init_export_table(ErtsExportNamespace *);
+const Export *erts_find_export_entry(Eterm, Eterm, unsigned, ErtsCodeIndex);
 void export_info(fmtfn_t, void *);
 int erts_export_table_limit(void);
 

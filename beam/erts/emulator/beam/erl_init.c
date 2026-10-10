@@ -298,12 +298,11 @@ erl_init(ErtsEngine *engine, int ncpu,
     erts_code_ix_init();
     erts_init_fun_table();
     diagnostic_namespace = erts_isolate_namespace_create_diagnostic(
-        engine, erts_atom_table_size, module_tab_sz);
+        engine, erts_atom_table_size, module_tab_sz, export_tab_sz);
     if (!diagnostic_namespace)
         erts_exit(ERTS_ERROR_EXIT, "Cannot construct diagnostic namespace state\n");
     init_atom_table(erts_isolate_namespace_atoms(diagnostic_namespace));
-    init_export_table(export_tab_sz,
-                      erts_isolate_namespace_export_literals(diagnostic_namespace));
+    init_export_table(erts_isolate_namespace_exports(diagnostic_namespace));
     erts_record_init_table();
     init_module_table(erts_isolate_namespace_module_slots(diagnostic_namespace));
     init_register_table();

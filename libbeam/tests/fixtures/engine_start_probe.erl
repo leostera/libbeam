@@ -12,6 +12,7 @@ run() ->
     no_signal_administration(),
     atom_storage(),
     export_literals(),
+    export_tables(),
     3.75 = float_div(7.5, 2.0),
     1.25 = binary_to_float(<<"1.25">>),
     <<"1.250">> = float_to_binary(1.25, [{decimals, 3}]),
@@ -53,6 +54,40 @@ no_executable_ports() ->
     expect_undef(fun() -> os:cmd(Command, #{}) end),
     Ports = lists:sort(erlang:ports()),
     io:format("EXECUTABLE_PORTS_DENIED checks=11 forker_port=false~n").
+
+export_tables() ->
+    Dir = filename:dirname(code:which(?MODULE)),
+    {ok, A} = file:read_file(filename:join(Dir, "export_namespace_probe.beam")),
+    {ok, B} = file:read_file(filename:join([Dir, "export-v2", "export_namespace_probe.beam"])),
+    F = erlang:make_fun(export_namespace_probe, version, 0),
+    Parent = self(),
+    Refs = [begin
+                Ref = make_ref(),
+                spawn(fun() ->
+                    lists:foreach(fun(_) ->
+                        G = erlang:make_fun(libbeam_missing_export, probe, 0),
+                        {module, libbeam_missing_export} = erlang:fun_info(G, module)
+                    end, lists:seq(1, 500)),
+                    Parent ! {Ref, done}
+                end),
+                Ref
+            end || _ <- lists:seq(1, 16)],
+    lists:foreach(fun(_) ->
+        true = code:soft_purge(export_namespace_probe),
+        {module, export_namespace_probe} = code:load_binary(export_namespace_probe, "v1", A),
+        1 = F(),
+        true = code:soft_purge(export_namespace_probe),
+        {module, export_namespace_probe} = code:load_binary(export_namespace_probe, "v2", B),
+        2 = F()
+    end, lists:seq(1, 4)),
+    lists:foreach(fun(Ref) ->
+        receive {Ref, done} -> ok after 5000 -> error(export_stub_timeout) end
+    end, Refs),
+    true = code:soft_purge(export_namespace_probe),
+    true = code:delete(export_namespace_probe),
+    true = code:soft_purge(export_namespace_probe),
+    1 = F(), % The same external fun resolves again through autoload.
+    io:format("EXPORT_TABLE_OK reload_and_stub_lookup=true private_execution=false~n").
 
 export_literals() ->
     F = fun lists:reverse/1,

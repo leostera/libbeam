@@ -99,6 +99,7 @@ def run_host(command, cwd, env, log, timeout=60):
                     or text.splitlines().count('HOST_SIGNALS_OK dispositions=9 altstack=true mask=true usr1_delivered=true') != 1
                     or not host_markers(text, process.pid)
                     or text.splitlines().count('ATOM_STORAGE_OK copied_names=true empty_binary=true') != 1
+                    or text.splitlines().count('EXPORT_TABLE_OK reload_and_stub_lookup=true private_execution=false') != 1
                     or text.splitlines().count('EXPORT_LITERAL_OK gc_roundtrip_and_dispatch=true') != 1
                     or thread_handle_marker(text) is None
                     or text.splitlines().count('HOST_ENGINE_OWNER_OK live_handles_private=true uninitialized_candidate_released=true') != 1):
@@ -197,11 +198,14 @@ def main():
                  tools / 'link_archive_probe.py', tools / 'export_runtime_package.py',
                  tools / 'archive_probe.mk', cpp,
                  fixtures / 'startup_probe.erl', fixtures / 'engine_start_probe.erl',
+                 fixtures / 'export_namespace_probe.erl',
                  source / 'erts/emulator/beam/erl_embed.h',
                  source / 'erts/emulator/beam/erl_engine.h',
                  source / 'erts/emulator/beam/erl_engine.c',
                  source / 'erts/emulator/beam/export.c',
                  source / 'erts/emulator/beam/export.h',
+                 source / 'erts/emulator/beam/erl_export_namespace.h',
+                 tools.parent / 'tests/native_export_namespace_test.c',
                  source / 'erts/emulator/beam/erl_export_literals.c',
                  source / 'erts/emulator/beam/erl_export_literals.h',
                  tools.parent / 'tests/native_export_literals_test.c',
@@ -320,6 +324,8 @@ def main():
                 (output / 'compile-settings.log').read_text().splitlines()
                 if line.startswith(('CC=', 'CFLAGS=', 'INCLUDES=')))
             components = [
+                ('export-namespace', 'native_export_namespace_test.c',
+                 'NATIVE_EXPORT_NAMESPACE_OK same_mfa_independent=true scoped_staging=true guarded_disposal=true private_execution=false'),
                 ('export-literals', 'native_export_literals_test.c',
                  'NATIVE_EXPORT_LITERALS_OK independent_areas=true peer_survives=true bound_retained=true private_execution=false'),
                 ('module-roots', 'native_module_table_roots_test.c',
@@ -343,7 +349,11 @@ def main():
             report['unpublished_module_root_guard_checks'] = 12
             report['private_atom_namespace_state_checked'] = True
             run('compile-fixtures', [str(source / 'bin/erlc'), '-o', str(output),
-                str(fixtures / 'startup_probe.erl'), str(fixtures / 'engine_start_probe.erl')])
+                str(fixtures / 'startup_probe.erl'), str(fixtures / 'engine_start_probe.erl'),
+                str(fixtures / 'export_namespace_probe.erl')])
+            (output / 'export-v2').mkdir()
+            run('compile-export-v2', [str(source / 'bin/erlc'), '-DVERSION=2',
+                '-o', str(output / 'export-v2'), str(fixtures / 'export_namespace_probe.erl')])
             command = [str(host), '-S', '2:2', '-SDcpu', '1:1', '-SDio', '1', '--',
                        '-root', str(source), '-bindir', str(archive.parent), '-progname', 'libbeam-probe',
                        '--', '-home', str(output), '--', '-noshell', '-noinput', '-pa', str(output),

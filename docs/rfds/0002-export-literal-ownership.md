@@ -3,6 +3,10 @@
 
 # Namespace-owned external-fun literals
 
+Checkpoint at `90fa55c2`. [Owned export tables](0002-owned-export-tables.md)
+supersedes the global-table limitation below; full code-space transactions and
+private execution remain unfinished.
+
 Export ownership migration begins with a lifetime dependency: each export entry
 previously allocated its external-fun literal in the process-global literal arena.
 Moving its table alone would leave that permanent root outside the isolate owner.
