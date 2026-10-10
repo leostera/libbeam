@@ -42,6 +42,7 @@ Eterm ERTS_WRITE_UNLIKELY(ERTS_GLOBAL_LIT_OS_VERSION);
 Eterm ERTS_WRITE_UNLIKELY(ERTS_GLOBAL_LIT_DFLAGS_RECORD);
 Eterm ERTS_WRITE_UNLIKELY(ERTS_GLOBAL_LIT_ERL_FILE_SUFFIX);
 Eterm ERTS_WRITE_UNLIKELY(ERTS_GLOBAL_LIT_EMPTY_TUPLE);
+Eterm ERTS_WRITE_UNLIKELY(ERTS_GLOBAL_LIT_EMPTY_BINARY);
 
 /* This lock is taken in the beginning of erts_global_literal_allocate,
  * released at the end of erts_global_literal_register. It protects the 
@@ -182,6 +183,21 @@ static void init_empty_tuple(void) {
     ERTS_GLOBAL_LIT_EMPTY_TUPLE = tuple;
 }
 
+static void init_empty_binary(void)
+{
+    struct erl_off_heap_header **ohp;
+    Uint size = heap_bits_size(0);
+    Eterm *hp = erts_global_literal_allocate(size, &ohp);
+    ErlOffHeap oh;
+    ErtsHeapFactory factory;
+    ERTS_INIT_OFF_HEAP(&oh);
+    erts_factory_static_init(&factory, hp, size, &oh);
+    ERTS_GLOBAL_LIT_EMPTY_BINARY = erts_hfact_new_binary_from_data(&factory, 0, 0,
+                                                               (const byte *) "");
+    *ohp = oh.first;
+    erts_global_literal_register(&ERTS_GLOBAL_LIT_EMPTY_BINARY);
+}
+
 void
 init_global_literals(void)
 {
@@ -190,4 +206,5 @@ init_global_literals(void)
     
     expand_shared_global_literal_area(GLOBAL_LITERAL_INITIAL_SIZE);
     init_empty_tuple();
+    init_empty_binary();
 }

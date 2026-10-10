@@ -30,7 +30,6 @@
 #include "global.h"
 #include "hash.h"
 #include "atom.h"
-#include "erl_global_literals.h"
 #include "erl_atom_namespace.h"
 
 struct ErtsAtomNamespace {
@@ -38,28 +37,22 @@ struct ErtsAtomNamespace {
     erts_rwmtx_t lock;
     Uint text_bytes;
     int limit;
+    erts_atomic_t put_ops;
 };
 
 
 #define ATOM_SIZE  3000
 
-IndexTable erts_atom_table;	/* The index table */
+/* Fixed borrowed diagnostic binding, installed once by explicit startup.
+ * Storage/lifetime belongs to ErtsIsolateNamespaceState, not this adapter. */
+static ErtsAtomNamespace *diagnostic_atoms;
 
-static erts_rwmtx_t atom_table_lock;
-
-#define atom_read_lock()	erts_rwmtx_rlock(&atom_table_lock)
-#define atom_read_unlock()	erts_rwmtx_runlock(&atom_table_lock)
-#define atom_write_lock()	erts_rwmtx_rwlock(&atom_table_lock)
-#define atom_write_unlock()	erts_rwmtx_rwunlock(&atom_table_lock)
+#define atom_read_lock() erts_rwmtx_rlock(&diagnostic_atoms->lock)
+#define atom_read_unlock() erts_rwmtx_runlock(&diagnostic_atoms->lock)
 
 #if 0
 #define ERTS_ATOM_PUT_OPS_STAT
 #endif
-#ifdef ERTS_ATOM_PUT_OPS_STAT
-static erts_atomic_t atom_put_ops;
-#endif
-
-static Uint atom_space;		/* Amount of atom text space used */
 
 /*
  * Print info about atom tables
@@ -69,10 +62,10 @@ void atom_info(fmtfn_t to, void *to_arg)
     int lock = !ERTS_IS_CRASH_DUMPING;
     if (lock)
 	atom_read_lock();
-    index_info(to, to_arg, &erts_atom_table);
+    index_info(to, to_arg, &diagnostic_atoms->index);
 #ifdef ERTS_ATOM_PUT_OPS_STAT
     erts_print(to, to_arg, "atom_put_ops: %ld\n",
-	       erts_atomic_read_nob(&atom_put_ops));
+	       erts_atomic_read_nob(&diagnostic_atoms->put_ops));
 #endif
 
     if (lock)
@@ -114,16 +107,7 @@ atom_hash(Atom* obj)
 
 const byte *erts_atom_get_name(const Atom *atom)
 {
-    byte *name;
-    Uint size;
-    Uint offset;
-    if (atom->owned_name)
-        return atom->owned_name;
-    ERTS_GET_BITSTRING(atom->u.bin, name, offset, size);
-    ASSERT(offset == 0 && (size % 8) == 0);
-    (void) size;
-    (void) offset;
-    return name;
+    return atom->u.name;
 }
 
 static int 
@@ -144,53 +128,6 @@ static int atom_ordinal(const byte *name, int len)
     for (i = 0; i < len && i < 4; ++i)
         c[i] = name[i];
     return (c[0] << 23) + (c[1] << 15) + (c[2] << 7) + (c[3] >> 1);
-}
-
-static Atom*
-atom_alloc(Atom* tmpl)
-{
-    Atom *obj = (Atom*) erts_alloc(ERTS_ALC_T_ATOM, sizeof(Atom));
-    obj->owned_name = NULL;
-
-    {
-        Eterm *hp;
-        Uint heap_size = 0;
-        ErtsHeapFactory factory;
-        ErlOffHeap oh;
-        struct erl_off_heap_header **literal_ohp;
-        
-        if (tmpl->len <= ERL_ONHEAP_BINARY_LIMIT) {
-            heap_size = heap_bits_size(NBITS(tmpl->len));
-        } else {
-            heap_size = ERL_REFC_BITS_SIZE;
-        }
-
-        hp = erts_global_literal_allocate(heap_size, &literal_ohp);
-        ERTS_INIT_OFF_HEAP(&oh);
-        oh.first = *literal_ohp;
-        
-        erts_factory_static_init(&factory, hp, heap_size, &oh);
-        *literal_ohp = oh.first;
-        obj->u.bin = erts_hfact_new_binary_from_data(&factory, 
-                                                    0, 
-                                                    tmpl->len, 
-                                                    tmpl->u.name);
-        erts_global_literal_register(&obj->u.bin);
-    }
-    
-    obj->len = tmpl->len;
-    obj->latin1_chars = tmpl->latin1_chars;
-    obj->slot.index = -1;
-    atom_space += tmpl->len;
-    
-
-    obj->ord0 = atom_ordinal(tmpl->u.name, tmpl->len);
-    return obj;
-}
-
-static void
-atom_free(Atom* obj)
-{
 }
 
 static void latin1_to_utf8(byte* conv_buf, Uint buf_sz,
@@ -240,14 +177,13 @@ atom_put_index(ErtsAtomNamespace *owner, const byte *name, Sint len,
     Sint no_latin1_chars;
     Atom a;
     int aix;
-    IndexTable *table = owner ? &owner->index : &erts_atom_table;
-    erts_rwmtx_t *lock = owner ? &owner->lock : &atom_table_lock;
+    IndexTable *table = &owner->index;
+    erts_rwmtx_t *lock = &owner->lock;
 
     ERTS_UNDEF(no_latin1_chars, -1);
 
 #ifdef ERTS_ATOM_PUT_OPS_STAT
-    if (!owner)
-        erts_atomic_inc_nob(&atom_put_ops);
+    erts_atomic_inc_nob(&owner->put_ops);
 #endif
 
     if (len < 0) {
@@ -340,12 +276,11 @@ atom_put_index(ErtsAtomNamespace *owner, const byte *name, Sint len,
     /* Recheck under the writer lock: another writer may have interned it. */
     aix = index_get(table, &a);
     if (aix < 0) {
-        if (owner && table->entries >= owner->limit)
+        if (table->entries >= owner->limit)
             aix = -3;
         else {
             aix = index_put(table, &a);
-            if (owner)
-                owner->text_bytes += tlen;
+            owner->text_bytes += tlen;
         }
     }
     erts_rwmtx_rwunlock(lock);
@@ -356,7 +291,10 @@ int
 erts_atom_put_index(const byte *name, Sint len, ErtsAtomEncoding enc, int trunc)
 {
     /* Explicit diagnostic-world adapter, not a current-isolate selector. */
-    return atom_put_index(NULL, name, len, enc, trunc);
+    int index = atom_put_index(diagnostic_atoms, name, len, enc, trunc);
+    if (index == -3)
+        erts_exit(ERTS_DUMP_EXIT, "no more index entries in atom table\n");
+    return index;
 }
 
 /*
@@ -385,7 +323,7 @@ int atom_table_size(void)
     int lock = !ERTS_IS_CRASH_DUMPING;
     if (lock)
 	atom_read_lock();
-    ret = erts_atom_table.entries;
+    ret = diagnostic_atoms->index.entries;
     if (lock)
 	atom_read_unlock();
     return ret;
@@ -397,7 +335,7 @@ int atom_table_sz(void)
     int lock = !ERTS_IS_CRASH_DUMPING;
     if (lock)
 	atom_read_lock();
-    ret = index_table_sz(&erts_atom_table);
+    ret = index_table_sz(&diagnostic_atoms->index);
     if (lock)
 	atom_read_unlock();
     return ret;
@@ -451,7 +389,7 @@ erts_atom_get(const char *name, Uint len, Eterm* ap, ErtsAtomEncoding enc)
     }
 
     atom_read_lock();
-    i = index_get(&erts_atom_table, (void*) &a);
+    i = index_get(&diagnostic_atoms->index, (void*) &a);
     res = i < 0 ? 0 : (*ap = make_atom(i), 1);
     atom_read_unlock();
 
@@ -465,63 +403,28 @@ erts_atom_get_text_space_sizes(Uint *reserved, Uint *used)
     if (lock)
 	atom_read_lock();
     if (reserved)
-	*reserved = atom_space;
+	*reserved = diagnostic_atoms->text_bytes;
     if (used)
-	*used = atom_space;
+	*used = diagnostic_atoms->text_bytes;
     if (lock)
 	atom_read_unlock();
 }
 
 void
-init_atom_table(void)
+init_atom_table(ErtsAtomNamespace *owner)
 {
-    HashFunctions f;
-    int i;
-    Atom a;
-    erts_rwmtx_opt_t rwmtx_opt = ERTS_RWMTX_OPT_DEFAULT_INITER;
+    ASSERT(owner && !diagnostic_atoms);
+    diagnostic_atoms = owner;
+}
 
-    rwmtx_opt.type = ERTS_RWMTX_TYPE_FREQUENT_READ;
-    rwmtx_opt.lived = ERTS_RWMTX_LONG_LIVED;
+Atom *erts_diagnostic_atom_at(Uint i)
+{
+    return (Atom *) erts_index_lookup(&diagnostic_atoms->index, i);
+}
 
-#ifdef ERTS_ATOM_PUT_OPS_STAT
-    erts_atomic_init_nob(&atom_put_ops, 0);
-#endif
-
-    erts_rwmtx_init_opt(&atom_table_lock, &rwmtx_opt, "atom_tab", NIL,
-        ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
-
-    f.hash = (H_FUN) atom_hash;
-    f.cmp  = (HCMP_FUN) atom_cmp;
-    f.alloc = (HALLOC_FUN) atom_alloc;
-    f.free = (HFREE_FUN) atom_free;
-    f.meta_alloc = (HMALLOC_FUN) erts_alloc;
-    f.meta_free = (HMFREE_FUN) erts_free;
-    f.meta_print = (HMPRINT_FUN) erts_print;
-
-    erts_index_init(ERTS_ALC_T_ATOM_TABLE, &erts_atom_table,
-		    "atom_tab", ATOM_SIZE, erts_atom_table_size, f);
-
-    /* Ordinary atoms. a is a template for creating an entry in the atom table */
-    for (i = 0; erl_atom_names[i] != 0; i++) {
-	int ix;
-	a.len = sys_strlen(erl_atom_names[i]);
-	a.latin1_chars = a.len;
-	a.u.name = (byte*)erl_atom_names[i];
-	a.slot.index = i;
-
-
-#ifdef DEBUG
-	/* Verify 7-bit ascii */
-	for (ix = 0; ix < a.len; ix++) {
-	    ASSERT((a.u.name[ix] & 0x80) == 0);
-	}
-#endif
-	ix = index_put(&erts_atom_table, (void*) &a);
-    (void) ix;
-    /* Assert that the entry in the atom table is not a template */
-    ASSERT(erts_atom_get_name(atom_tab(ix)));
-    }
-
+int erts_diagnostic_atom_index_ok(Uint i)
+{
+    return i < (Uint) diagnostic_atoms->index.entries;
 }
 
 /* Private names never enter the process-global literal registry. Records and
@@ -532,7 +435,6 @@ static Atom *private_atom_alloc(Atom *tmpl)
     byte *text = (byte *)(obj + 1);
     sys_memcpy(text, tmpl->u.name, tmpl->len);
     text[tmpl->len] = 0;
-    obj->owned_name = text;
     obj->u.name = text;
     obj->len = tmpl->len;
     obj->latin1_chars = tmpl->latin1_chars;
@@ -558,6 +460,7 @@ ErtsAtomNamespace *erts_atom_namespace_create(int limit)
     owner = erts_alloc(ERTS_ALC_T_ATOM_TABLE, sizeof(*owner));
     owner->text_bytes = 0;
     owner->limit = limit;
+    erts_atomic_init_nob(&owner->put_ops, 0);
     erts_rwmtx_init(&owner->lock, "isolate_atom_tab", NIL,
                    ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
     f.hash = (H_FUN) atom_hash;
@@ -639,13 +542,13 @@ void erts_atom_namespace_discard_unpublished(ErtsAtomNamespace *owner)
 void
 dump_atoms(fmtfn_t to, void *to_arg)
 {
-    int i = erts_atom_table.entries;
+    int i = diagnostic_atoms->index.entries;
 
     /*
      * Print out the atom table starting from the end.
      */
     while (--i >= 0) {
-	if (erts_index_lookup(&erts_atom_table, i)) {
+	if (erts_index_lookup(&diagnostic_atoms->index, i)) {
 	    erts_print(to, to_arg, "%T\n", make_atom(i));
 	}
     }
@@ -654,5 +557,5 @@ dump_atoms(fmtfn_t to, void *to_arg)
 Uint
 erts_get_atom_limit(void)
 {
-    return erts_atom_table.limit;
+    return diagnostic_atoms->limit;
 }

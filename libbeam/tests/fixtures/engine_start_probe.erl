@@ -10,6 +10,7 @@ run() ->
     fd_eof(),
     no_executable_ports(),
     no_signal_administration(),
+    atom_storage(),
     3.75 = float_div(7.5, 2.0),
     1.25 = binary_to_float(<<"1.25">>),
     <<"1.250">> = float_to_binary(1.25, [{decimals, 3}]),
@@ -51,6 +52,23 @@ no_executable_ports() ->
     expect_undef(fun() -> os:cmd(Command, #{}) end),
     Ports = lists:sort(erlang:ports()),
     io:format("EXECUTABLE_PORTS_DENIED checks=11 forker_port=false~n").
+
+atom_storage() ->
+    Names = [<<>>, <<"libbeam_atom_copy">>, <<0>>, <<255/utf8>>,
+             <<16#1f600/utf8>>, binary:copy(<<16#1f600/utf8>>, 255)],
+    lists:foreach(fun(Bytes) ->
+        Atom = binary_to_atom(Bytes, utf8),
+        Bytes = atom_to_binary(Atom, utf8),
+        Bytes = atom_to_binary(Atom, unicode),
+        true = erlang:garbage_collect(),
+        Bytes = atom_to_binary(Atom, utf8)
+    end, Names),
+    Latin = binary_to_atom(<<0,255>>, latin1),
+    <<0,255>> = atom_to_binary(Latin, latin1),
+    <<0,255/utf8>> = atom_to_binary(Latin, utf8),
+    [<<>>, <<"a">>, <<>>, <<>>] = binary:split(<<",a,,">>, <<",">>, [global]),
+    [<<"a">>] = binary:split(<<",a,,">>, <<",">>, [global, trim_all]),
+    io:format("ATOM_STORAGE_OK copied_names=true empty_binary=true~n").
 
 float_div(A, B) -> A / B.
 

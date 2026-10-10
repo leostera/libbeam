@@ -1942,7 +1942,7 @@ BIF_RETTYPE atom_to_binary_2(BIF_ALIST_2)
         }
 
         if (ap->latin1_chars == ap->len) {
-	    BIF_RET(ap->u.bin);
+	    BIF_RET(erts_new_binary_from_data(BIF_P, ap->len, erts_atom_get_name(ap)));
         } else {
             byte* bin_p;
             int dbg_sz;
@@ -1952,7 +1952,7 @@ BIF_RETTYPE atom_to_binary_2(BIF_ALIST_2)
 	    BIF_RET(bin_term);
         }
     } else if (BIF_ARG_2 == am_utf8 || BIF_ARG_2 == am_unicode) {
-	BIF_RET(ap->u.bin);
+	BIF_RET(erts_new_binary_from_data(BIF_P, ap->len, erts_atom_get_name(ap)));
     } else {
     error:
 	BIF_ERROR(BIF_P, BADARG);

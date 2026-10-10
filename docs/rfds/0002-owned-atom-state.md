@@ -3,6 +3,11 @@
 
 # Private atoms in isolate namespace state
 
+Checkpoint at `d704a97e`. The subsequent [diagnostic-state migration](0002-diagnostic-namespace-state.md)
+uses the same owned name storage for diagnostic atoms, removes the cached binary
+representation, and adds module slots to namespace state. Details below describe
+this earlier extraction checkpoint.
+
 `ErtsIsolateNamespaceState` now owns a private atom namespace and the extracted
 module metadata table, with explicit engine affinity. This is real allocated
 namespace state, **not a runnable Isolate or a successful public API handle**.

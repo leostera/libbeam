@@ -89,6 +89,16 @@ int main(int argc, char **argv)
     CHECK(erts_isolate_namespace_discard(a) == 1);
     CHECK(INTERN(aa, "libbeam_private_alpha") == ax);
     ma->on_load = NULL;
+    {
+        Module *later = erts_module_table_put(erts_isolate_namespace_module_at(a, 2), ax);
+        CHECK(later);
+        later->on_load = &later->curr;
+        CHECK(erts_isolate_namespace_discard(a) == 1);
+        CHECK(erts_module_table_find(erts_isolate_namespace_modules(a), ax) == ma);
+        CHECK(INTERN(aa, "libbeam_private_alpha") == ax);
+        later->on_load = NULL;
+    }
+    CHECK(!erts_isolate_namespace_module_at(a, ERTS_NUM_CODE_IX));
     CHECK(erts_isolate_namespace_discard(a) == 0);
     CHECK(erts_atom_namespace_name(bb, bx, out, sizeof(out)) == 20);
     CHECK(!memcmp(out, "libbeam_private_beta", 20));

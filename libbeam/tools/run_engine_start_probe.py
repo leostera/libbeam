@@ -98,6 +98,7 @@ def run_host(command, cwd, env, log, timeout=60):
                     or text.splitlines().count('HOST_NO_CHILDREN sigchld_preserved=true') != 1
                     or text.splitlines().count('HOST_SIGNALS_OK dispositions=9 altstack=true mask=true usr1_delivered=true') != 1
                     or not host_markers(text, process.pid)
+                    or text.splitlines().count('ATOM_STORAGE_OK copied_names=true empty_binary=true') != 1
                     or thread_handle_marker(text) is None
                     or text.splitlines().count('HOST_ENGINE_OWNER_OK live_handles_private=true uninitialized_candidate_released=true') != 1):
                 raise RuntimeError('host control witness failed')
@@ -202,6 +203,10 @@ def main():
                  tools.parent / 'tests/native_atom_namespace_test.c',
                  source / 'erts/emulator/beam/atom.c',
                  source / 'erts/emulator/beam/atom.h',
+                 source / 'erts/emulator/beam/erl_unicode.c',
+                 source / 'erts/emulator/beam/erl_bif_binary.c',
+                 source / 'erts/emulator/beam/erl_global_literals.c',
+                 source / 'erts/emulator/beam/erl_global_literals.h',
                  source / 'erts/emulator/beam/erl_lock_check.c',
                  source / 'erts/emulator/beam/erl_atom_namespace.h',
                  source / 'erts/emulator/beam/erl_isolate_state.c',

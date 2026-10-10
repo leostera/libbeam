@@ -77,7 +77,7 @@ void erts_unseal_module(struct erl_module_instance *modi);
  * setting up a code barrier. */
 void erts_seal_module(struct erl_module_instance *modi);
 
-void init_module_table(int limit);
+void init_module_table(ErtsModuleTable **tables);
 void module_start_staging(void);
 void module_end_staging(int commit);
 void module_info(fmtfn_t, void *);

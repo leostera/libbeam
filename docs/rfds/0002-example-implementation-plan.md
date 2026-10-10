@@ -108,6 +108,10 @@ bundles owned atom/index/name storage and module metadata in an engine-affine
 `ErtsIsolateNamespaceState`. Independent local indices and unpublished disposal
 are tested. This is not executable world construction or a public Isolate handle;
 process ownership, exports, code indices and execution remain pending.
+[Diagnostic startup](0002-diagnostic-namespace-state.md) now explicitly owns the
+same atom/module state, with module storage for each code slot. Atom names no
+longer use global literals, including in the diagnostic world. Fixed diagnostic
+adapters remain until loader/process context propagation is implemented.
 
 - Introduce a real `ErtsIsolate`/code-space context in ERTS: engine affinity,
   generation, lifecycle state, private table roots and retained ownership for

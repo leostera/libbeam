@@ -40,6 +40,7 @@ class EngineStartProbeTests(unittest.TestCase):
 pid=os.getpid()
 print("HOST_THREAD_HANDLES_OK total=7 joinable=true stopped=false joined=false", flush=True)
 print("HOST_ENGINE_OWNER_OK live_handles_private=true uninitialized_candidate_released=true", flush=True)
+print("ATOM_STORAGE_OK copied_names=true empty_binary=true", flush=True)
 print(f"HOST_STARTUP_RETURNED pid={pid} second_start=rejected", flush=True)
 print(f"BEAM_STARTUP_OK pid={pid}", flush=True)
 print("EXECUTABLE_PORTS_DENIED checks=11 forker_port=false", flush=True)

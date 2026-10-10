@@ -16,6 +16,7 @@ extern "C" {
 
 typedef struct ErtsModuleTable ErtsModuleTable;
 struct erl_module;
+int erts_module_table_default_limit(void);
 ErtsModuleTable *erts_module_table_create(int limit);
 struct erl_module *erts_module_table_find(ErtsModuleTable *, int atom_index);
 /* NULL for an invalid index or a full table; existing entries remain retrievable. */
@@ -25,6 +26,7 @@ int erts_module_table_capacity(const ErtsModuleTable *);
 /* Caller must own an UNPUBLISHED table and have released all borrowed pointers.
  * Returns 1 without freeing anything if code/on_load/NIF roots remain. This is
  * not executable-code retirement, concurrent reclamation, or isolate shutdown. */
+int erts_module_table_can_discard_unpublished(ErtsModuleTable *);
 int erts_module_table_discard_unpublished(ErtsModuleTable *);
 
 #ifdef __cplusplus

@@ -28,6 +28,7 @@
 #include <ctype.h>
 #include "erl_vm.h"
 #include "erl_engine.h"
+#include "erl_isolate_state.h"
 #include "global.h"
 #include "erl_process.h"
 #include "error.h"
@@ -108,6 +109,8 @@ static void prepare_runtime(ErtsEngine *engine, int argc, char **argv);
  * operations receive their owner explicitly; this is not a current-engine API.
  * Remove the one-runtime restriction only as the remaining globals migrate. */
 static ErtsEngine *claimed_engine;
+/* Diagnostic host's retained world-state handle, not an Engine-owned namespace. */
+static ErtsIsolateNamespaceState *diagnostic_namespace;
 
 static erts_atomic_t exiting;
 
@@ -294,10 +297,14 @@ erl_init(ErtsEngine *engine, int ncpu,
     erts_init_debugger();
     erts_code_ix_init();
     erts_init_fun_table();
-    init_atom_table();
+    diagnostic_namespace = erts_isolate_namespace_create_diagnostic(
+        engine, erts_atom_table_size, module_tab_sz);
+    if (!diagnostic_namespace)
+        erts_exit(ERTS_ERROR_EXIT, "Cannot construct diagnostic namespace state\n");
+    init_atom_table(erts_isolate_namespace_atoms(diagnostic_namespace));
     init_export_table(export_tab_sz);
     erts_record_init_table();
-    init_module_table(module_tab_sz);
+    init_module_table(erts_isolate_namespace_module_slots(diagnostic_namespace));
     init_register_table();
     init_message();
 #ifdef BEAMASM
