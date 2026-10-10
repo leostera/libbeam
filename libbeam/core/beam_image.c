@@ -26,6 +26,7 @@
  * and deliberately stricter structural validation. This is NOT an executor.
  */
 #include "beam_image.h"
+#include "utf8.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -93,31 +94,6 @@ static int read_length(BeamReader *r, uint32_t *out)
     }
     if (value > UINT32_MAX) return 0;
     *out = (uint32_t)value;
-    return 1;
-}
-/* New bounded UTF-8 validation, replacing the validation side effect of
- * erts_atom_put. No normalization, interning or runtime atom identity is implied.
- */
-static int valid_atom(LbBeamBytes name)
-{
-    size_t pos = 0, characters = 0;
-    while (pos < name.size) {
-        uint32_t code, minimum;
-        unsigned n, i, first = name.data[pos++];
-        if (++characters > 255) return 0;
-        if (first < 0x80) continue;
-        if (first >= 0xc2 && first <= 0xdf) { n = 1; code = first & 31; minimum = 0x80; }
-        else if (first >= 0xe0 && first <= 0xef) { n = 2; code = first & 15; minimum = 0x800; }
-        else if (first >= 0xf0 && first <= 0xf4) { n = 3; code = first & 7; minimum = 0x10000; }
-        else return 0;
-        if (n > name.size - pos) return 0;
-        for (i = 0; i < n; ++i) {
-            unsigned b = name.data[pos++];
-            if ((b & 0xc0) != 0x80) return 0;
-            code = code << 6 | (b & 63);
-        }
-        if (code < minimum || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return 0;
-    }
     return 1;
 }
 static LbBeamStatus iff_init(const void *data, size_t size, BeamReader *body)
@@ -217,7 +193,7 @@ static LbBeamStatus parse_atom_chunk(LbBeamImage *image, LbBeamBytes chunk)
             length = byte_length;
         }
         if (length > 4 * 255 || !read_bytes(&r, length, &image->atoms[i]) ||
-            !valid_atom(image->atoms[i])) return LB_BEAM_BAD_FORMAT;
+            !lb_utf8_atom_validate(image->atoms[i].data, image->atoms[i].size)) return LB_BEAM_BAD_FORMAT;
     }
     return r.left ? LB_BEAM_BAD_FORMAT : LB_BEAM_OK;
 }

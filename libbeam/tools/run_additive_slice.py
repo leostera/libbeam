@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Leandro Ostera <leandro@ostera.io>
-"""Fresh, serialized C-core image validation. Reference OTP is never our executor."""
+"""Fresh, serialized C-core image/term/atom validation. Reference OTP is not our executor."""
 import argparse
 import fcntl
 import hashlib
@@ -23,7 +23,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    summary = {'scope': 'owned_beam_image_not_execution_or_engine_lifecycle', 'commands': [], 'passed': False}
+    summary = {'scope': 'owned_image_terms_atoms_not_execution_or_engine_lifecycle', 'commands': [], 'passed': False}
     env = dict(os.environ, ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0')
 
     def run(name, command, accepted=(0,)):
@@ -46,6 +46,9 @@ def main():
             files = sorted(set((root / 'libbeam/core').glob('*.[ch]')) |
                            {root / 'libbeam/CMakeLists.txt', root / 'libbeam/src/engine.cpp',
                             root / 'libbeam/tests/core_beam_image_test.c', root / 'libbeam/tests/core_alloc_test.c',
+                            root / 'libbeam/tests/core_terms_atoms_test.c', root / 'libbeam/tools/generate_atoms.py',
+                            root / 'libbeam/tools/check_term_representation.py',
+                            root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
                             root / 'libbeam/tests/fixtures/first_slice.erl',
                             root / 'libbeam/tests/api_scaffold_test.cpp',
                             root / 'libbeam/include/libbeam/engine.hpp',
@@ -56,6 +59,10 @@ def main():
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
+                'beam/erts/emulator/beam/erl_term.h': '8e016126fb7a1bc1db8d31111601c0bea21d72207211bf91e1f3c127e943b5c2',
+                'beam/erts/emulator/beam/atom.c': '7d73c9f537444aa725c4dad64bce65460a7282fb0d3de4d2917f9f9cabd5a6d5',
+                'beam/erts/emulator/beam/hash.c': '8a90d388e20ad89f981b9a38731459be3ea82efaf92f3347e9af702f94d5e40c',
+                'beam/erts/emulator/beam/hash.h': '9d4523310ac9362320b463cc48cefe28e6f5a46acdacd80229352a8252afbe22',
                 'beam/erts/emulator/beam/erl_vm.h': '5fc1308a52c46629307cbe0fa085ca561ba1244b0252de1a59b1a35c53d8d02b',
                 'beam/lib/compiler/src/genop.tab': '0f999b3797672f28bfbd4007245a95637bd38b68ac67dcfcb95eacce29e0780e',
             }.items():
@@ -68,6 +75,8 @@ def main():
                 if not shutil.which(tool):
                     raise RuntimeError(f'Required reference tool missing: {tool}')
             run('compiler-version', ['cc', '--version'])
+            run('term-representation', ['python3', '-B', root / 'libbeam/tools/check_term_representation.py',
+                                        '--output', out / 'term-oracle'])
             run('configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'build',
                              '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                              '-DCMAKE_C_FLAGS=-Wall -Wextra -Werror'])
@@ -81,6 +90,7 @@ def main():
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
             native = run('native-fixture', [out / 'build/core_beam_image_test', fixture])
+            run('native-atom-binding', [out / 'build/core_terms_atoms_test', fixture])
             # Pass paths as plain arguments, never interpolate paths into Erlang code.
             reference_code = '''
                 [Path] = init:get_plain_arguments(),
@@ -121,14 +131,27 @@ def main():
                 pos += 8 + ((size + 3) & ~3)
             run('ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-fsanitize=undefined',
                                   '-fno-sanitize-recover=all', '-Ilibbeam/core', 'libbeam/core/alloc.c',
-                                  'libbeam/core/beam_image.c', 'libbeam/tests/core_beam_image_test.c',
+                                  'libbeam/core/utf8.c', 'libbeam/core/beam_image.c', 'libbeam/tests/core_beam_image_test.c',
                                   '-o', out / 'image-ubsan'])
             run('ubsan-fixture', [out / 'image-ubsan', fixture])
+            run('terms-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+                                      '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
+                                      '-I' + str(out / 'build/generated/atoms'), 'libbeam/core/alloc.c',
+                                      'libbeam/core/utf8.c', 'libbeam/core/beam_image.c', 'libbeam/core/atoms.c',
+                                      'libbeam/tests/core_terms_atoms_test.c', '-o', out / 'terms-ubsan'])
+            run('terms-ubsan-fixture', [out / 'terms-ubsan', fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
             run('release-ctest', ['ctest', '--test-dir', out / 'release', '--output-on-failure'])
             run('release-fixture', [out / 'release/core_beam_image_test', fixture])
+            run('release-atom-binding', [out / 'release/core_terms_atoms_test', fixture])
+            for filename in ('lb_atoms_generated.h', 'lb_atoms_generated.inc'):
+                first = (out / 'build/generated/atoms' / filename).read_bytes()
+                second = (out / 'release/generated/atoms' / filename).read_bytes()
+                if first != second:
+                    raise RuntimeError(f'Atom generation is not reproducible: {filename}')
+            summary['atom_generation_reproducible'] = True
             # Observe the real acceptance target; its failure is not converted
             # into a passing test or a requirement that future Engines stay red.
             run('engine-lifecycle-observed', [out / 'build/engine_lifecycle'], accepted=None)

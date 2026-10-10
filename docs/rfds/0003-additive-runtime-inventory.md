@@ -3,7 +3,8 @@
 
 # Additive runtime inventory and implementation order
 
-Baseline: **`8d7a4a67`**. Direction: [RFD 0003](0003-additive-runtime-construction.md).
+Initial inventory baseline: **`8d7a4a67`**; updated with the
+[A01/A02 term-and-atom slice](0003-terms-and-atoms.md). Direction: [RFD 0003](0003-additive-runtime-construction.md).
 First transplant: [owned BEAM images](0003-first-loader-slice.md).
 
 This is a source-grounded dependency and acceptance inventory, not a declaration-
@@ -19,7 +20,7 @@ parallel objective.
 |---|---|
 | Bootstrap allocation domain | Implemented, fallible, exact-base release, busy refusal, owner-local failure injection |
 | Owned BEAM image | Implemented structural preparation: copied bytes, UTF-8 file atom names, import/export metadata, code header, opaque chunks |
-| Runtime atom identities / Erlang terms | Not implemented in the new core |
+| Runtime atom identities / Erlang terms | Selected 64-bit tag/immediate/tuple/list primitives and owner-local atom tables/bindings implemented; full term operations, heap/GC and execution remain absent |
 | Instruction operand decoding / transformation / executable code | Not implemented |
 | Process context / heap / GC / interpreter execution | Not implemented |
 | C Engine / Isolate construction and retirement | Not implemented; allocation domains/images are not these objects |
@@ -106,8 +107,8 @@ All rows are outstanding in the additive implementation unless explicitly marked
 
 | ID / cluster | Source anchors and dependencies | Owner / lifetime obligation | Gate and evidence |
 |---|---|---|---|
-| A01 Platform/representation contract | `erl_vm.h`, `erl_term.h`, selected `sys.h` definitions; word width, endian, alignment, tags | Immutable definitions; no wholesale platform pre-init | G2: layout/tag boundaries and checked arithmetic, no alternate term representation |
-| A02 Term operations and atoms | `erl_term.*`, `atom.*`, existing namespace adaptations; predefined identities, NIL, smalls, tuples/lists | Isolate atom identity/storage; explicit context; no interning into old global table | G2: atom operands and tuple roots; G3: equal spellings in independent worlds |
+| A01 Platform/representation contract — **selected 64-bit boundary implemented** | `erl_vm.h`, `erl_term.h`, selected `sys.h` definitions; word width, endian, alignment, tags | Immutable definitions; no wholesale platform pre-init | G2: layout/tag boundaries and checked arithmetic, no alternate term representation |
+| A02 Term operations and atoms — **atoms/basic-term slice implemented; broader term operations pending** | `erl_term.*`, `atom.*`, existing namespace adaptations; predefined identities, NIL, smalls, tuples/lists | Isolate atom identity/storage; explicit context; no interning into old global table | G2: atom operands and tuple roots; G3: equal spellings in independent worlds |
 | A03 Opcode generation | `../utils/beam_makeops`, compiler `genop.tab` (full path below); common and `emu/` predicate/generator/ops/instruction tables; Makefile generation rules | Shared immutable generated implementation data; reproducible input record | G2: derive decoder/transform/emitter/dispatch from matching inputs, no opcode renumbering or mock loop |
 | A04 Full operand reader / temporary operations | `beam_file.c:beamcodereader_read_next`, tagged-number reader, integer/allocation-list marshalling, `BeamOpAllocator`, function-boundary synthesis | Prepared-module owner; fallible op/argument growth; drop temporary operations on every failure | G2: real compact encodings, signs/bignums, registers, labels, extended lists/type hints/literal indices and malformed boundaries |
 | A05 Runtime literal/type/lambda/line data | Remaining `beam_file.c` parsers, `external.c`, `big.*`, `beam_types.*`; optional compressed payload helpers | Isolate/module literal storage and off-heap resources; validation before publication | G2: actual literal fixture; G3: lambda metadata; explicit treatment of optional type/line/debug chunks |
@@ -179,8 +180,9 @@ separate meanings.
 **Target the A-cluster as a coherent first-execution path, not another standalone
 ownership-inventory sweep.**
 
-1. Freeze the selected generator inputs and establish the C term/layout/context
-   boundary (A01–A03). Record source provenance and needed adaptations.
+1. Reuse the implemented A01 representation and A02 atom/binding boundary. Next
+   admit the selected opcode generator inputs (A03), recording provenance and
+   adaptations. Broader A02 term operations continue with their actual consumers.
 2. Follow `beamfile_get_code` through real operand decoding, operation allocation,
    atoms/literals/types and transformation/emission (A04–A07). Every constructor
    gets failure injection and reverse cleanup when admitted—not later.

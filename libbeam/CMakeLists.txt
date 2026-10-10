@@ -5,8 +5,20 @@ project(libbeam LANGUAGES C CXX)
 
 # RFD 0003 additive C core. Component-only until real execution infrastructure
 # can back the public factory; never falls back to the diagnostic ERTS archive.
-add_library(libbeam_core STATIC core/alloc.c core/beam_image.c)
-target_include_directories(libbeam_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Perl REQUIRED)
+set(LIBBEAM_ATOM_GEN ${CMAKE_CURRENT_BINARY_DIR}/generated/atoms)
+add_custom_command(
+    OUTPUT ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.h ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.inc
+    COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_atoms.py
+        --perl ${PERL_EXECUTABLE} --output ${LIBBEAM_ATOM_GEN}
+    DEPENDS tools/generate_atoms.py tools/otp/make_tables core/otp/atom.names core/otp/bif.tab
+    VERBATIM)
+add_custom_target(libbeam_atom_definitions DEPENDS
+    ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.h ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.inc)
+add_library(libbeam_core STATIC core/alloc.c core/utf8.c core/beam_image.c core/atoms.c)
+add_dependencies(libbeam_core libbeam_atom_definitions)
+target_include_directories(libbeam_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core ${LIBBEAM_ATOM_GEN})
 target_compile_features(libbeam_core PUBLIC c_std_11)
 set_target_properties(libbeam_core PROPERTIES C_EXTENSIONS OFF)
 
@@ -44,6 +56,10 @@ target_link_libraries(two_isolates PRIVATE libbeam::libbeam)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(core_terms_atoms_test tests/core_terms_atoms_test.c)
+    target_link_libraries(core_terms_atoms_test PRIVATE libbeam_core)
+    add_test(NAME core_terms_atoms_lifetime COMMAND core_terms_atoms_test)
+    set_tests_properties(core_terms_atoms_lifetime PROPERTIES TIMEOUT 90)
     add_executable(core_alloc_test tests/core_alloc_test.c)
     target_link_libraries(core_alloc_test PRIVATE libbeam_core)
     add_test(NAME core_allocation_lifetime COMMAND core_alloc_test)

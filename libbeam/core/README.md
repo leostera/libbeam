@@ -3,16 +3,31 @@
 See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md).
 
 This directory is the new runtime construction boundary. Its explicit CMake target
-contains bootstrap allocation ownership and the first adapted BEAM-file parser.
+contains bootstrap allocation ownership, the adapted BEAM-file parser, selected
+64-bit BEAM term definitions, and owner-local atom tables/bindings.
 It does not include or link whole ERTS and cannot yet execute BEAM code. The public
 Engine factory remains blocked; the existing acceptance examples remain unchanged.
 
 `beam_image.c` prepares an owned, structurally checked image from ordinary BEAM
 bytes: code header, UTF-8 atom names, imports and exports. Unknown chunks remain
-in the owned copy. Names are file-local views, not interned runtime atoms; code,
-ETF literals, closures, type/debug/record data remain uninterpreted. This is not an
+in the owned copy. Image names remain file-local views; `atoms.c` can separately and transactionally
+bind them to real namespace atom words. Code, ETF literals, closures,
+type/debug/record data remain uninterpreted. This is not an
 executable module loader. See the [transplant record](../../docs/rfds/0003-first-loader-slice.md)
 for source hashes, validation differences, lifetime contract and remaining cluster.
+
+`term.h` preserves the selected flat 64-bit/non-reservation BEAM tag profile,
+checked small construction, and basic tuple/list storage access. It is an internal
+C interface, not arbitrary-word validation or a heap/GC. `atoms.c` owns copied
+UTF-8 names, stable indices and binding leases; failed batches roll back all their
+new entries/backing. A bare atom Eterm does not carry its namespace: callers must
+preserve context, and bindings check the expected owner. See the
+[term/atom admission record](../../docs/rfds/0003-terms-and-atoms.md).
+
+Predefined identities are built by the admitted OTP `make_tables` generator from
+[`otp/`](otp/) data. Python and Perl are build dependencies; only immutable atom
+outputs are compiled, not generated BIF implementations. No files are read by the
+runtime for this generation step.
 
 `alloc.c` is a serialized construction-time primitive, not a replacement for BEAM's
 heap/GC or a performant general runtime allocator. Callback state is owner-local,
@@ -35,7 +50,8 @@ ctest --test-dir "$build" --output-on-failure
 ```
 
 For a fresh compiled fixture, comparison with reference OTP, failure-prefix tests,
-mutation/truncation checks, debug/release builds and UBSan, run:
+mutation/truncation checks, term-macro comparison, atom binding/growth rollback,
+debug/release builds and UBSan, run:
 
 ```sh
 python3 -B libbeam/tools/run_additive_slice.py --output /tmp/unused-image-validation
@@ -44,7 +60,7 @@ python3 -B libbeam/tools/run_additive_slice.py --output /tmp/unused-image-valida
 The runner acquires the validation lock and requires a new output directory. It
 records source hashes and the installed reference OTP version; it does not claim
 the reference runtime is our implementation. It requires `erl`, `erlc`, CMake, a C
-compiler and `nm` (current tooling targets POSIX hosts).
+compiler, Perl and `nm` (current tooling targets POSIX hosts).
 
 These are component tests. They do not make `engine_lifecycle` or `two_isolates`
 pass, and they establish neither a security boundary nor complete BEAM validation.

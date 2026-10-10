@@ -3,7 +3,11 @@
 
 # RFD 0003: Build libbeam additively from BEAM components
 
-Status: **Accepted direction; first image-preparation slice implemented.**
+Status: **Accepted direction; image and term/atom component slices implemented.**
+
+See the [A01/A02 term-and-atom admission record](0003-terms-and-atoms.md) for the
+selected BEAM representation, namespace identities, transactional image bindings
+and remaining scope.
 
 The [additive runtime inventory](0003-additive-runtime-inventory.md) records the
 remaining dependency clusters, fixture-derived requirements and implementation

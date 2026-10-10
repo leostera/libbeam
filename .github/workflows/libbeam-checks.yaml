@@ -25,7 +25,11 @@ jobs:
           for config in Debug Release; do
             build=$(mktemp -d "${RUNNER_TEMP}/libbeam-core.XXXXXX")
             git rev-parse HEAD > "$build/source-revision.txt"
-            sha256sum libbeam/core/*.[ch] libbeam/tests/core_*_test.c > "$build/source-hashes.txt"
+            sha256sum libbeam/core/*.[ch] libbeam/tests/core_*_test.c \
+              libbeam/core/otp/atom.names libbeam/core/otp/bif.tab \
+              libbeam/tools/generate_atoms.py libbeam/tools/otp/make_tables \
+              libbeam/tools/check_term_representation.py > "$build/source-hashes.txt"
+            python3 -B libbeam/tools/check_term_representation.py --output "$build/term-oracle"
             cmake -S libbeam -B "$build" -DBUILD_TESTING=ON \
               -DCMAKE_BUILD_TYPE="$config" -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
             cmake --build "$build"

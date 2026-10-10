@@ -1,2 +1,6 @@
 .gitattributes export-ignore
 .gitignore export-ignore
+
+# Byte-identical admitted OTP inputs; preserve their original whitespace.
+libbeam/core/otp/atom.names -whitespace
+libbeam/tools/otp/make_tables -whitespace
