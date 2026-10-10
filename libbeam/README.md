@@ -46,6 +46,8 @@ terms, timers and complete retirement remained outstanding at that checkpoint.
 The [integration sweep progress](../docs/rfds/0002-integration-sweep-progress.md)
 now adds the real Engine constant arena and namespace-owned persistent-term
 storage, traps and deferred cleanup. The sweep is still incomplete.
+The [current ownership inventory](../docs/rfds/0002-current-ownership-inventory.md)
+separates completed storage/access migrations from remaining globals and lifecycle work.
 `engine_lifecycle` is the explicit create → shutdown → create executable target;
 it currently exits 1 at the first factory call, in both native and scaffold builds.
 [Native ownership migration](../docs/rfds/0002-native-ownership.md) introduces an

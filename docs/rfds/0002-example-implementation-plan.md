@@ -168,14 +168,18 @@ unfinished; bound controls cannot be force-freed.
 attach namespaces to Engine, migrate actual registered-name paths beneath each
 namespace, own driver-event storage beneath I/O, and track ERTS wrapper-created
 TLS keys from early initialization. This is not completion of the requested broad
-sweep: process/port tables, ETS, persistent terms, timers, queued retirement and
-remaining scheduler/thread-library/backend lifetime work are still outstanding.
+sweep: process/port tables, ETS, timers, queued retirement and remaining
+scheduler/thread-library/backend lifetime work are still outstanding.
+Persistent-term storage/work moved in the subsequent integration pass below;
+running retirement remains incomplete.
 
 **Integration sweep in progress:** [constant arenas and persistent-term ownership](0002-integration-sweep-progress.md)
 add real unpublished arena cleanup, namespace-scoped persistent tables and
 owner-retaining traps/update/deletion work. `engine_lifecycle` now expresses the
 public create → shutdown → create goal and remains red at its first create.
 This does not complete the approved inventory or the Engine lifecycle transaction.
+The [current ownership inventory](0002-current-ownership-inventory.md) consolidates
+what is owned, what remains global, and which lifecycle/access-path gaps remain.
 
 **API:** `Isolate::load_module`.
 

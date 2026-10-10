@@ -100,6 +100,9 @@ latency or density acceptance is claimed.
 
 ## Still in the approved sweep
 
+See the [current ownership inventory](0002-current-ownership-inventory.md) for
+consolidated status across this and earlier checkpoints.
+
 Scheduler/run-queue/sleep/auxiliary domains; async stop/join; remaining thread
 progress, TLS values and raw thread-library resources; clocks/topology; backend
 flags/locks/options and allocator draining; shared/world initialization split;

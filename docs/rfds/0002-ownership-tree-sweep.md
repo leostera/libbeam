@@ -71,14 +71,20 @@ views, not current-isolate selectors.
 
 ## Still required — do not mark the sweep complete
 
+This section records the `27ff6518` checkpoint. See the
+[current ownership inventory](0002-current-ownership-inventory.md) for consolidated
+status: `921fc4ad` subsequently moved persistent-term storage/update/deletion work
+and Engine constant-arena storage. Running retirement is still incomplete.
+
 - Separate shared initialization from diagnostic namespace/service construction.
 - Complete scheduler/run-queue/sleep/auxiliary ownership and queued-reference
   retirement, beyond existing allocator backing and scheduler handle ownership.
 - Retire TLS values, raw thread-library resources, backend flags/locks/options,
   allocator caches/pools/mappings and initialization state in dependency order.
-- Move process/PID and port tables, ETS/heirs/transfers, persistent-term tables
-  and update/deletion queues, timers and application/service roots beneath
-  isolates, with corresponding access paths and callback ownership.
+- Move process/PID and port tables, ETS/heirs/transfers, timers and
+  application/service roots beneath isolates, with corresponding access paths
+  and callback ownership. Persistent-term tables and update/deletion queues have
+  since moved; their running stop/drain protocol remains outstanding.
 - Complete explicit owner propagation through loader/ETF/import/fixup,
   interpreter/JIT, purger and literal-collector work.
 - Implement recoverable initialization, complete cold teardown and runtime-claim
