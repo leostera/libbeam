@@ -1,7 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Leandro Ostera <leandro@ostera.io>
 cmake_minimum_required(VERSION 3.20)
-project(libbeam LANGUAGES CXX)
+project(libbeam LANGUAGES C CXX)
+
+# RFD 0003 additive C core. Component-only until real execution infrastructure
+# can back the public factory; never falls back to the diagnostic ERTS archive.
+add_library(libbeam_core STATIC core/alloc.c core/beam_image.c)
+target_include_directories(libbeam_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
+target_compile_features(libbeam_core PUBLIC c_std_11)
+set_target_properties(libbeam_core PROPERTIES C_EXTENSIONS OFF)
 
 # The optional package is a frozen, hash-checked native build artifact, NOT an
 # embedded/standalone runtime mode. Without it, only API-scaffold tests can run.
@@ -37,6 +44,13 @@ target_link_libraries(two_isolates PRIVATE libbeam::libbeam)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(core_alloc_test tests/core_alloc_test.c)
+    target_link_libraries(core_alloc_test PRIVATE libbeam_core)
+    add_test(NAME core_allocation_lifetime COMMAND core_alloc_test)
+    add_executable(core_beam_image_test tests/core_beam_image_test.c)
+    target_link_libraries(core_beam_image_test PRIVATE libbeam_core)
+    add_test(NAME core_beam_image_lifetime COMMAND core_beam_image_test)
+    set_tests_properties(core_beam_image_lifetime PROPERTIES TIMEOUT 30)
     add_executable(api_scaffold_test tests/api_scaffold_test.cpp)
     target_link_libraries(api_scaffold_test PRIVATE libbeam::libbeam)
     if(LIBBEAM_ERTS_PACKAGE)

@@ -16,6 +16,21 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -B -m unittest discover -s libbeam/tools -p 'test_*.py' -v
+      - name: Check additive C components (not Engine acceptance)
+        shell: bash
+        run: |
+          set -euo pipefail
+          exec 9>"/tmp/otp-realm-validation-$(id -u).lock"
+          flock 9
+          for config in Debug Release; do
+            build=$(mktemp -d "${RUNNER_TEMP}/libbeam-core.XXXXXX")
+            git rev-parse HEAD > "$build/source-revision.txt"
+            sha256sum libbeam/core/*.[ch] libbeam/tests/core_*_test.c > "$build/source-hashes.txt"
+            cmake -S libbeam -B "$build" -DBUILD_TESTING=ON \
+              -DCMAKE_BUILD_TYPE="$config" -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
+            cmake --build "$build"
+            ctest --test-dir "$build" --output-on-failure
+          done
       - name: Check ordinary tracked snapshot layout
         run: |
           test -f beam/otp_build

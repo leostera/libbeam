@@ -27,7 +27,8 @@ independently owned, reduced-profile Erlang execution worlds on demand. A C++ ho
 would manage isolate lifecycle; ordinary Erlang programs would not need isolate-
 management APIs. Tenants supply BEAM bytecode only: no native extensions, ambient
 filesystem/network access or full conventional OTP-node environment is promised.
-We strip OTP down to what libbeam needs; preserving `erl` or full OTP behavior is
+We are now building libbeam additively from selected BEAM components, rather than
+stripping a whole OTP runtime down. Preserving `erl` or full OTP behavior is
 not a goal. Legacy failures matter only when they reveal a problem in required
 runtime behavior or supported language semantics.
 
@@ -37,14 +38,16 @@ shut it down safely. This is not a security boundary for untrusted workloads.**
 
 ## Layout
 
-- [`beam/`](beam/): tracked upstream OTP snapshot plus direct libbeam emulator changes.
-  Edit and commit these files normally; there is no submodule or patch-application step.
-- [`libbeam/`](libbeam/): build/link probes and the planned C++ embedding interface,
-  two-isolate host example and tests.
+- [`beam/`](beam/): tracked OTP source/reference plus the prior subtractive experiment.
+  This is modified source, not a pristine upstream checkout or a submodule.
+- [`libbeam/`](libbeam/): the new additive C core under `core/`, C++ embedding
+  interface, unchanged acceptance examples, tests and historical build/link probes.
 - [`docs/rfds/`](docs/rfds/): design proposals, contracts and historical evidence.
 
-Start with [RFD 0002: libbeam isolates](docs/rfds/0002-libbeam-isolates.md).
-It specifies the first executable proof: one native host, two simultaneously live
+Start with [RFD 0003: additive runtime construction](docs/rfds/0003-additive-runtime-construction.md).
+It adopts a C ownership layer and C transplants, retaining the C++ host API and
+[RFD 0002's isolate contract](docs/rfds/0002-libbeam-isolates.md).
+That contract specifies the executable proof: one native host, two simultaneously live
 isolates with conflicting same-name modules, independent local state, and safe
 teardown/recreation without restarting the engine. The latency objective is
 single-digit milliseconds to **first execution**, not application completion.
@@ -53,8 +56,9 @@ tracked gates; 1,000 sequential proof cycles do not prove 1,000 resident isolate
 The [two-isolate C++ example](libbeam/examples/two_isolates.md) now specifies the
 API we want, with same-module Erlang fixtures. Its CMake scaffold now links and
 runs, explicitly failing at `Engine::create` until real behavior is implemented.
-The [implementation plan](docs/rfds/0002-example-implementation-plan.md) makes the
-example—not broad runtime cleanup—the development driver.
+RFD 0003 supersedes the construction strategy in the earlier
+[implementation plan](docs/rfds/0002-example-implementation-plan.md), keeping the
+example—not broad runtime cleanup—as the development driver.
 The [build/link probes](libbeam/README.md#build-and-link-probes) and
 [real-runtime startup-return experiment](docs/rfds/0002-engine-start-evidence.md)
 are implemented starting points; they do not initialize independent isolates.
@@ -73,7 +77,9 @@ The old evidence is not acceptance for the clean-upstream implementation.
 
 An ordinary clone includes the source. Build in a fresh detached repository worktree
 as described in [`libbeam/README.md`](libbeam/README.md); do not reuse the old Realm
-build outputs. The active workflow checks Python tooling and snapshot layout only.
+build outputs. The source-check workflow now includes standalone additive C
+component tests in debug/release builds, alongside Python tooling and snapshot
+layout checks. These are not Engine or Isolate acceptance.
 Historical Realm and copied upstream workflows have been removed, not counted as passing.
 
 ## Source provenance and licenses

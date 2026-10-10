@@ -20,14 +20,21 @@ limitations under the License.
 %CopyrightEnd%
 -->
 
-# C++ embedding layer (in development)
+# C core and C++ embedding interface (in development)
+
+**Current direction:** [RFD 0003](../docs/rfds/0003-additive-runtime-construction.md)
+replaces whole-OTP reduction with additive construction in C. See [`core/`](core/)
+for bootstrap allocation ownership and the first owned BEAM-image parser. These
+components do not yet execute BEAM code or back the public factory. The native archive work below is preserved
+as diagnostic/reference evidence, not a fallback runtime for the new core.
 
 This directory contains build/link probes and an
 [API-first two-isolate example](examples/two_isolates.md). Its experimental C++
 library and CMake target now build and run, but deliberately fail at the first
 unfinished operation (`Engine::create`). No successful runtime behavior is faked.
-The [implementation plan](../docs/rfds/0002-example-implementation-plan.md) tracks
-the real engine, private worlds, execution and reclamation work ahead.
+RFD 0003 supersedes the construction strategy in the earlier
+[implementation plan](../docs/rfds/0002-example-implementation-plan.md), while
+retaining its real-engine, private-world, execution and reclamation goals.
 [Native archive integration](../docs/rfds/0002-native-api-link.md) now connects the
 C++ target to actual ERTS and retains joinable scheduler-thread handles. The public
 factory still refuses initialization until ownership/cleanup exists.

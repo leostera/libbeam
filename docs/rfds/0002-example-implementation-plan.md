@@ -3,6 +3,10 @@
 
 # RFD 0002: implement the two-isolate example, one real boundary at a time
 
+**Construction strategy superseded by [RFD 0003](0003-additive-runtime-construction.md).**
+The unchanged example and ownership contract remain acceptance targets; the
+subtractive implementation steps below are historical context.
+
 ## Working method
 
 The driver is [`two_isolates.cpp`](../../libbeam/examples/two_isolates.cpp).
