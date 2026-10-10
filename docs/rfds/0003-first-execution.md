@@ -7,6 +7,10 @@ Baseline: `1c47d6c3`. This continues the [loader checkpoint](0003-loader-program
 not the frozen subtractive experiment. See the [inventory](0003-additive-runtime-inventory.md)
 for the complete remaining contract.
 
+This records the profile at `c08f1e82`. The subsequent
+[owned-binary slice](0003-owned-binaries.md) adds real offheap payloads,
+copy/collection/retirement and a C-internal copied-byte invocation boundary.
+
 ## Scope: execution now exists; the full request is not finished
 
 The C core now executes the ordinary compiler-produced `first_slice.erl`, including

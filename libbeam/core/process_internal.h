@@ -12,6 +12,7 @@ struct LbProcess {
     const BeamInstr *i;
     Eterm reg[MAX_REG];
     Eterm *heap, *htop, *stop, *hend;
+    LbOffHeap off_heap;
     Eterm fvalue, freason;
     Uint arity, last_gc_cost;
     size_t collections, heap_reserved;
@@ -21,6 +22,8 @@ struct LbProcess {
 int lb_process_collect_live(LbProcess *,size_t,size_t);
 int lb_heap_reserve(LbProcess *,size_t,size_t);
 int lb_flat_size(LbAllocDomain *,Eterm,size_t *);
-Eterm lb_copy_flat(Eterm,Eterm **);
+/* Fallible only on binary reference/overhead exhaustion after size/reserve.
+ * Failure rolls back the new offheap prefix and heap top, never shared source. */
+Eterm lb_copy_flat(Eterm,Eterm **,LbOffHeap *);
 extern const BeamInstr lb_host_return[1];
 #endif

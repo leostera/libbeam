@@ -32,7 +32,8 @@ jobs:
               libbeam/tools/generate_atoms.py libbeam/tools/otp/make_tables \
               libbeam/tools/check_term_representation.py libbeam/tools/generate_opcodes.py \
               libbeam/tools/otp/beam_makeops libbeam/core/otp/loader-sources.json \
-              libbeam/core/otp/execution-sources.json libbeam/tools/project_transform.py \
+              libbeam/core/otp/execution-sources.json libbeam/core/otp/binary-sources.json \
+              libbeam/tools/check_binary_representation.py libbeam/tools/project_transform.py \
               libbeam/tools/project_dispatch.py \
               > "$build/source-hashes.txt"
             find libbeam/core/otp/opcodes -type f -print0 | sort -z | \

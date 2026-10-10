@@ -3,8 +3,8 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  * Full-copy collector adapted from erl_gc.h move_cons/move_boxed and erl_gc.c
  * sweep. Explicit heap/stack/X/result/exception roots replace global Process
- * machinery. Only the admitted tuple/list/big/float/heap-bit layouts enter here.
- * No generational, offheap, fun or map claim is made by this profile.
+ * machinery. Ordinary immutable binary references join tuple/list/big/float
+ * layouts. No generational collector, writable binaries, funs or maps yet.
  */
 #include "process_internal.h"
 #define MAX_HEAP_WORDS (64u*1024u*1024u/sizeof(Eterm))
@@ -15,6 +15,8 @@ static size_t boxed_words(Eterm header)
     switch(header&_HEADER_SUBTAG_MASK) {
     case ARITYVAL_SUBTAG:return arity?arity+1:2; /* owned empty-tuple read-ahead */
     case POS_BIG_SUBTAG:case NEG_BIG_SUBTAG:case FLOAT_SUBTAG:case HEAP_BITS_SUBTAG:return arity+1;
+    case BIN_REF_SUBTAG:ASSERT(header==LB_HEADER_BIN_REF); return LB_BIN_REF_WORDS;
+    case SUB_BITS_SUBTAG:ASSERT(header==LB_HEADER_SUB_BITS); return LB_SUB_BITS_WORDS;
     default:abort(); /* internal invariant: these representations are not admitted */
     }
 }
@@ -60,9 +62,20 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
         Eterm value=*scan;
         if(is_header(value)) {
             if(is_arity_value(value)) scan+=(value>>_HEADER_ARITY_OFFS)?1:2;
-            else scan+=boxed_words(value);
+            else {
+                if(value==LB_HEADER_SUB_BITS) {
+                    LbSubBits *sub=(LbSubBits *)scan;
+                    /* Ordinary immutable binaries keep their data address;
+                     * only the heap BinRef moves. No match context is admitted. */
+                    ASSERT(!(sub->base_flags&3));
+                    move_root(&sub->orig,&top);
+                    ASSERT(*boxed_val(sub->orig)==LB_HEADER_BIN_REF);
+                }
+                scan+=boxed_words(value);
+            }
         } else { move_root(scan,&top); ++scan; }
     }
+    lb_offheap_sweep(&p->off_heap);
     ASSERT(top<=stop && (size_t)(stop-top)>=need+S_RESERVED);
     p->heap=heap; p->htop=top; p->stop=stop; p->hend=heap+size;
     p->last_gc_cost=1+(Uint)(top-heap)/16; ++p->collections;
@@ -89,6 +102,8 @@ int lb_flat_size(LbAllocDomain *domain,Eterm term,size_t *out)
         else if(is_boxed(value)) {
             Eterm *p=boxed_val(value); words=boxed_words(*p);
             if(is_arity_value(*p)) { n=(size_t)(*p>>_HEADER_ARITY_OFFS); children=p+1; }
+            else if(*p==LB_HEADER_SUB_BITS) words=LB_REFC_BITS_WORDS;
+            else if(*p==LB_HEADER_BIN_REF) goto done; /* not a user term */
         } else if(!is_immed(value)) goto done;
         if(words>MAX_HEAP_WORDS-total) goto done;
         total+=words;
@@ -107,23 +122,32 @@ done:
     if(todo!=local) lb_release(domain,todo);
     return ok;
 }
-static void copy_root(Eterm *root,Eterm **top)
+static int copy_root(Eterm *root,Eterm **top,LbOffHeap *offheap)
 {
     Eterm *src,*dst=*top; size_t words;
-    if(is_boxed(*root)) { src=boxed_val(*root); words=boxed_words(*src); *root=make_boxed(dst); }
-    else if(is_list(*root)) { src=list_val(*root); words=2; *root=make_list(dst); }
-    else return;
-    memcpy(dst,src,words*sizeof(Eterm)); *top+=words;
+    if(is_boxed(*root)) {
+        src=boxed_val(*root);
+        if(*src==LB_HEADER_SUB_BITS) return lb_bitstring_copy_ref((const LbSubBits *)src,offheap,top,root);
+        words=boxed_words(*src); *root=make_boxed(dst);
+    } else if(is_list(*root)) { src=list_val(*root); words=2; *root=make_list(dst); }
+    else return 1;
+    memcpy(dst,src,words*sizeof(Eterm)); *top+=words; return 1;
 }
-Eterm lb_copy_flat(Eterm value,Eterm **top)
+Eterm lb_copy_flat(Eterm value,Eterm **top,LbOffHeap *offheap)
 {
-    Eterm *scan=*top;
-    copy_root(&value,top);
+    Eterm *begin=*top,*scan=begin;
+    LbBinRef *checkpoint=offheap->first;
+    if(!copy_root(&value,top,offheap)) goto fail;
     while(scan<*top) {
         if(is_header(*scan)) {
             if(is_arity_value(*scan)) scan+=(*scan>>_HEADER_ARITY_OFFS)?1:2;
-            else scan+=boxed_words(*scan);
-        } else { copy_root(scan,top); ++scan; }
+            else scan+=boxed_words(*scan); /* SubBits and BinRef already paired */
+        } else {
+            if(!copy_root(scan,top,offheap)) goto fail;
+            ++scan;
+        }
     }
     return value;
+fail:
+    lb_offheap_rollback(offheap,checkpoint); *top=begin; return THE_NON_VALUE;
 }

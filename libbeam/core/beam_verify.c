@@ -56,6 +56,16 @@ LbCodeStatus lb_verify_program(LoaderState *st)
     for(op=p->ops,i=0;op;op=op->next,++i) {
         p->error.stage="operation arity"; p->error.offset=op->offset;
         REQUIRE(op->op<NUM_GENERIC_OPS);
+        /* An unadmitted variadic instruction is unsupported, not malformed
+         * merely because it has more operands than the generic fixed prefix. */
+        switch(op->op) {
+        case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_label_1:case genop_line_1:
+        case genop_move_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:
+        case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
+        case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:
+        case genop_jump_1:case genop_is_eq_exact_3:case genop_badmatch_1:case genop_case_end_1:break;
+        default:p->error.stage=gen_opc[op->op].name; p->error.offset=op->offset; return LB_CODE_UNSUPPORTED;
+        }
         if(op->op!=genop_put_tuple2_2 && op->op!=genop_init_yregs_1)
             REQUIRE(op->arity==(unsigned)gen_opc[op->op].arity);
         nodes[i].op=op;
@@ -67,14 +77,6 @@ LbCodeStatus lb_verify_program(LoaderState *st)
         }
         nodes[i].function=function;
         if(op->op==genop_label_1) labels[op->a[0].val]=i;
-        switch(op->op) {
-        case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_label_1:case genop_line_1:
-        case genop_move_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:
-        case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
-        case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:
-        case genop_jump_1:case genop_is_eq_exact_3:case genop_badmatch_1:case genop_case_end_1:break;
-        default:p->error.stage=gen_opc[op->op].name; p->error.offset=op->offset; return LB_CODE_UNSUPPORTED;
-        }
     }
     tail%=n;
     while(pending) {

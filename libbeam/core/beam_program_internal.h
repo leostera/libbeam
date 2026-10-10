@@ -5,6 +5,7 @@
 #define LIBBEAM_CORE_BEAM_PROGRAM_INTERNAL_H
 #include "beam_program.h"
 #include "beam_reader.h"
+#include "binary.h"
 #include <string.h>
 typedef union LbPrepBlock { struct { union LbPrepBlock *next; } link; max_align_t alignment; } LbPrepBlock;
 typedef struct LbNamePatch { struct LbNamePatch *next; LbBeamBytes name; Eterm *destination; } LbNamePatch;
@@ -15,6 +16,7 @@ struct LbBeamProgram {
     LbAtomTable *atoms;
     LbBeamImage *image;
     LbPrepBlock *blocks;
+    LbOffHeap off_heap;
     size_t bytes;
     LbBeamError error;
     int retained;

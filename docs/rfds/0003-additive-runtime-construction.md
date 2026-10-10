@@ -9,7 +9,9 @@ The [first-execution record](0003-first-execution.md) connects the earlier
 [A03–A07 checkpoint](0003-loader-program.md) to real generated transformations,
 emission, publication, interpreter execution and copying GC for a limited profile.
 Full loader/literal/instruction breadth and Engine/Isolate API integration remain
-outstanding; neither unchanged public acceptance example passes.
+outstanding; neither unchanged public acceptance example passes. The subsequent
+[ordinary-binary slice](0003-owned-binaries.md) connects native payload lifetime to
+literal loading, metadata copies, collection and copied-byte invocation.
 
 See the [A01/A02 term-and-atom admission record](0003-terms-and-atoms.md) for the
 selected BEAM representation, namespace identities, transactional image bindings

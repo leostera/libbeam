@@ -25,14 +25,14 @@ static int info_size(LbProcess *p,LbCodeModule *m,Eterm what,size_t *size)
     }
     return 0;
 }
-static Eterm build_info(LbCodeModule *m,Eterm what,Eterm **hp)
+static Eterm build_info(LbProcess *process,LbCodeModule *m,Eterm what,Eterm **hp)
 {
     Eterm result=NIL; size_t i,count;
     if(what==am_module) return m->name;
     if(what==am_native) return am_false;
     if(what==am_nifs || what==am_native_addresses) return NIL;
-    if(what==am_attributes) return lb_copy_flat(m->attributes,hp);
-    if(what==am_compile) return lb_copy_flat(m->compile,hp);
+    if(what==am_attributes) return lb_copy_flat(m->attributes,hp,&process->off_heap);
+    if(what==am_compile) return lb_copy_flat(m->compile,hp,&process->off_heap);
     if(what==am_md5) {
         Eterm *p=*hp;
         p[0]=_make_header(3,HEAP_BITS_SUBTAG); p[1]=128; memcpy(p+2,m->md5,16);
@@ -54,15 +54,20 @@ Eterm lb_bif_module_info_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     LbCodeModule *m=find_module(p,args[0]);
     size_t size=25,i,n;
     Eterm result=NIL,*hp;
+    LbBinRef *checkpoint;
     (void)pc;
     if(!m) { p->freason=am_badarg; return THE_NON_VALUE; }
     for(i=0;i<5;++i) {
         if(!info_size(p,m,keys[i],&n) || !lb_size_add(size,n,&size)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }
     }
     if(!lb_heap_reserve(p,size,1)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }
-    hp=p->htop;
+    hp=p->htop; checkpoint=p->off_heap.first;
     for(i=0;i<5;++i) {
-        Eterm value=build_info(m,keys[i],&hp),tuple;
+        Eterm value=build_info(p,m,keys[i],&hp),tuple;
+        if(is_non_value(value)) {
+            lb_offheap_rollback(&p->off_heap,checkpoint);
+            p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE;
+        }
         tuple=TUPLE2(hp,keys[i],value); hp+=3;
         result=CONS(hp,tuple,result); hp+=2;
     }
@@ -76,6 +81,7 @@ Eterm lb_bif_module_info_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
     (void)pc;
     if(!m || !info_size(p,m,what,&size)) { p->freason=am_badarg; return THE_NON_VALUE; }
     if(!lb_heap_reserve(p,size,2)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }
-    hp=p->htop; result=build_info(m,what,&hp);
+    hp=p->htop; result=build_info(p,m,what,&hp);
+    if(is_non_value(result)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }
     ASSERT((size_t)(hp-p->htop)==size); p->htop=hp; return result;
 }

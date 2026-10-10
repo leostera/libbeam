@@ -36,12 +36,31 @@ LbProcessStatus lb_process_create(const LbCodeEntry *entry,const Eterm *args,siz
     p->i=entry->entry->dispatch.addresses[0]; p->status=LB_PROCESS_READY;
     ++module->users; *out=p; return LB_PROCESS_READY;
 }
+LbProcessStatus lb_process_create_binary(const LbCodeEntry *entry,const void *bytes,size_t size,
+                                        size_t words,LbProcess **out)
+{
+    LbProcess *p;
+    LbProcessStatus status;
+    Eterm argument=NIL;
+    if(!out) return LB_PROCESS_INVALID;
+    *out=NULL;
+    if(size>LB_MAX_BINARY_BYTES || (size && !bytes)) return LB_PROCESS_INVALID;
+    status=lb_process_create(entry,&argument,1,words,&p);
+    if(status!=LB_PROCESS_READY) return status;
+    if(!lb_heap_reserve(p,lb_bitstring_heap_words(size*8),1) ||
+       lb_bitstring_build(p->entry_module->space->domain,&p->off_heap,&p->htop,
+                          bytes,size*8,0,&p->reg[0])!=LB_ALLOC_OK) {
+        lb_process_destroy(p); return LB_PROCESS_NO_MEMORY;
+    }
+    *out=p; return LB_PROCESS_READY;
+}
 void lb_process_destroy(LbProcess *p)
 {
     LbCodeModule *module; LbAllocDomain *d;
     if(!p) return;
     if(p->running) abort(); /* internal serialized API misuse, not a guest path */
     module=p->entry_module; d=module->space->domain;
+    lb_offheap_clear(&p->off_heap);
     lb_release(d,p->heap); lb_release(d,p);
     if(!module->users) abort(); --module->users;
 }

@@ -10,7 +10,7 @@
     "beam/erts/emulator/beam/code_ix.h": "58fa70f6931feb5c9248cddb65abbe5d6800f3e3c0f0d914d9fe55ec0b2fd821",
     "beam/erts/emulator/beam/export.h": "dcfa68db96b336560487c6ca6d99c12b4e19fb29fa097b1aefbbf607783e4169"
   },
-  "other_inputs": ["loader-sources.json", "opcodes/manifest.json"],
+  "other_inputs": ["loader-sources.json", "binary-sources.json", "opcodes/manifest.json"],
   "profile": {
     "wordsize": 64,
     "dispatch": "OTP NO_JUMP_TABLE numeric specific-instruction words",
@@ -19,7 +19,7 @@
     "native_imports": ["erlang:get_module_info/1", "erlang:get_module_info/2"],
     "native_kind": "heavy; these owned implementations may collect",
     "threading": "serialized explicit-context bounded executor; no workers or TLS",
-    "literals": "existing bounded ETF subset; no offheap/fun/map admission",
+    "literals": "bounded ETF subset plus ordinary immutable offheap binaries (binary-sources.json); no fun/map admission",
     "remaining": "Full A05/A06/A07 breadth, A12 Engine/Isolate API and all B-cluster stateful execution remain outstanding"
   }
 }

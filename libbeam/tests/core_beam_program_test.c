@@ -4,6 +4,7 @@
 #include "beam_program.h"
 #include "beam_reader.h"
 #include "beam_select.h"
+#include "binary.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -194,7 +195,7 @@ static void literal_shapes(void) {
     Buffer operand={0},etf,file; Eterm value; unsigned variant;
     CHECK(lb_atoms_create(d,8192,&t)==LB_ATOM_OK);
     tag(&operand,TAG_z,4); tag(&operand,TAG_u,0);
-    for(variant=0;variant<5;++variant) {
+    for(variant=0;variant<7;++variant) {
         etf=(Buffer){0}; byte(&etf,131);
         switch(variant) {
         case 0: /* [7 | {}] */
@@ -203,6 +204,11 @@ static void literal_shapes(void) {
         case 2: byte(&etf,70); byte(&etf,0x3f); byte(&etf,0xf0); for(unsigned i=0;i<6;++i) byte(&etf,0); break;
         case 3: byte(&etf,77); u32(&etf,1); byte(&etf,3); byte(&etf,0xff); break;
         case 4: byte(&etf,110); byte(&etf,0); byte(&etf,0); break;
+        case 5: case 6:
+            byte(&etf,variant==5?109:77); u32(&etf,65);
+            if(variant==6) byte(&etf,1);
+            for(unsigned i=0;i<65;++i) byte(&etf,0xff);
+            break;
         }
         file=make_image(&operand,&etf,0);
         CHECK(lb_beam_program_prepare(d,t,file.data,file.size,&p,&error)==LB_BEAM_OK);
@@ -215,8 +221,21 @@ static void literal_shapes(void) {
                 CHECK(boxed_val(value)[1]==UINT64_C(0x3ff0000000000000)); break;
         case 3: CHECK(boxed_val(value)[1]==3 && ((unsigned char *)(boxed_val(value)+2))[0]==0xe0); break;
         case 4: CHECK(value==make_small(0)); break;
+        case 5: case 6: {
+            LbBitstringView view;
+            CHECK(lb_bitstring_view(value,&view) && !view.bit_offset && view.bit_size==(variant==5?520u:513u));
+            CHECK(view.data[0]==0xff && view.data[64]==(variant==5?0xff:0x80)); break;
+        }
         }
         lb_beam_program_destroy(p);
+        if(variant>=5) {
+            size_t live=h.live,bytes=h.bytes,count=lb_atoms_count(t);
+            Buffer bad=etf; byte(&bad,0); file=make_image(&operand,&bad,0);
+            CHECK(lb_beam_program_prepare(d,t,file.data,file.size,&p,&error)==LB_BEAM_BAD_FORMAT && !p);
+            CHECK(h.live==live && h.bytes==bytes && lb_atoms_count(t)==count);
+            file=make_image(&operand,&etf,0); failure_prefixes(file.data,file.size,0);
+            file=make_image(&operand,&etf,1); failure_prefixes(file.data,file.size,0);
+        }
     }
     CHECK(lb_atoms_destroy(t)==LB_ATOM_OK && lb_alloc_domain_destroy(d)==LB_ALLOC_OK && !h.live);
 }

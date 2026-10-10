@@ -4,8 +4,9 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  * Transplants/adaptations: external.c dec_term's intrusive pending-term chain,
  * beam_file.c literal table readers, big.c bytes_to_big, erl_bits.h heap bits.
- * Factory/trapping/distribution/offheap contexts are NOT emulated here. Only
- * explicitly supported terms are admitted into the owned preparation arena.
+ * Factory/trapping/distribution contexts are NOT emulated here. Ordinary
+ * binary references have real owner-local offheap lifetime; other resource
+ * terms are not admitted into the owned preparation arena.
  */
 #include "beam_program_internal.h"
 #include "utf8.h"
@@ -140,19 +141,22 @@ static int decode_term(LbBeamProgram *p, LbBeamReader *r, Eterm *root)
             *objp=make_list(hp)|TAG_LITERAL_PTR;
             for(i=0;i<n;++i) { hp[i*2]=make_small(s[i]); hp[i*2+1]=i+1==n ? NIL : make_list(hp+2*i+2)|TAG_LITERAL_PTR; }
             break;
-        case 109: case 77: { /* BINARY_EXT, BIT_BINARY_EXT; real on-heap layout */
+        case 109: case 77: { /* BINARY_EXT, BIT_BINARY_EXT */
             unsigned tail=8;
-            size_t bits, words;
+            size_t bits, words, offheap_bytes=0;
             REQUIRE(lb_reader_u32(r,&n));
             if(tag==77) REQUIRE(lb_reader_u8(r,&tail) && tail>=1 && tail<=8 && n>0);
             REQUIRE(lb_reader_bytes(r,n,&s));
-            /* No fake BinRef/atomic counter/offheap release compatibility layer. */
-            if(n>64) return lb_pfail(p,LB_BEAM_UNSUPPORTED);
-            bits=n ? (size_t)(n-1)*8+tail : 0; words=2+((size_t)n+7)/8;
+            if(n>LB_MAX_BINARY_BYTES) return lb_pfail(p,LB_BEAM_LIMIT);
+            bits=n ? (size_t)(n-1)*8+tail : 0; words=lb_bitstring_heap_words(bits);
             hp=lb_palloc(p,words,sizeof(Eterm)); if(!hp) return 0;
-            hp[0]=((words-1)<<_HEADER_ARITY_OFFS)|HEAP_BITS_SUBTAG; hp[1]=bits;
-            if(n) { memcpy(hp+2,s,n); ((unsigned char *)(hp+2))[n-1]&=(unsigned char)(0xff<<(8-tail)); }
-            *objp=make_boxed(hp)|TAG_LITERAL_PTR; break;
+            if(n>LB_ONHEAP_BINARY_LIMIT) {
+                offheap_bytes=lb_binary_allocation_size(n);
+                if(offheap_bytes>LB_BEAM_MAX_BYTES-p->bytes) return lb_pfail(p,LB_BEAM_LIMIT);
+            }
+            if(lb_bitstring_build(p->domain,&p->off_heap,&hp,s,bits,TAG_LITERAL_PTR,objp)!=LB_ALLOC_OK)
+                return lb_pfail(p,LB_BEAM_NO_MEMORY);
+            p->bytes+=offheap_bytes; break;
         }
         case 70: { /* NEW_FLOAT_EXT */
             Uint bits; double number;

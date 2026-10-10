@@ -1,7 +1,8 @@
 # Additive C core
 
 See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md) and the
-[first-execution record](../../docs/rfds/0003-first-execution.md).
+[first-execution record](../../docs/rfds/0003-first-execution.md) and
+[ordinary-binary extension](../../docs/rfds/0003-owned-binaries.md).
 
 This is the C runtime construction boundary, not a whole-ERTS link. It now loads
 and executes ordinary `first_slice.erl` through generated BEAM transformations,
@@ -34,6 +35,9 @@ acceptance examples remain blocked at the public factory.
 - `process.c`, `heap.c`: explicit X/Y/continuation/reduction/exception state,
   bounded generated interpreter dispatch and selected copying-GC algorithms.
   No workers, scheduler-data TLS, global process table or implicit OTP services.
+- `binary.c`: real immutable refcounted payloads, native BinRef/SubBits layouts,
+  owner-local offheap chains, GC sweep and physical release. Literal/metadata
+  decoding and copied byte-input invocation share this constructor.
 - `bif_info.c`, `md5.c`: the two positive-listed `get_module_info` BIFs and actual
   metadata/checksum behavior, not placeholders for compiler-generated imports.
 
@@ -41,12 +45,16 @@ All control APIs are serialized. Entry/process handles retain actual code and it
 literal storage. Returned term views borrow the process until its next mutating
 call or destruction. Runtime collection preserves outstanding heap reservations;
 new stack slots are valid roots even at host instruction-budget safepoints.
+Metadata copies retain binary payloads independently of source code arenas.
+`lb_process_create_binary` copies host bytes into a real arity-one invocation;
+this is not yet the public asynchronous binary-call contract.
 
 ## Deliberate limits
 
 The current literal/GC profile includes smalls, bignums, atoms, tuples, lists,
-finite binary64 floats and heap bitstrings up to 64 bytes. Maps, offheap/large
-binaries, fun objects, PIDs, ports and refs remain unsupported. Lambda declarations
+finite binary64 floats, heap bitstrings up to 64 bytes and ordinary immutable
+refcounted binaries above that threshold. Maps, writable/magic/resource binaries,
+fun objects, PIDs, ports and refs remain unsupported. Lambda declarations
 are not closure objects. Attributes/compile ETF is decoded for executable
 admission; ordinary line/debug/feature metadata is passive, while executable
 `DbgB` and record `Recs` metadata is refused. Source-line instrumentation is absent.

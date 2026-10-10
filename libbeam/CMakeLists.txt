@@ -39,7 +39,7 @@ add_custom_target(libbeam_opcode_definitions DEPENDS
 find_package(ZLIB REQUIRED)
 add_library(libbeam_core STATIC core/alloc.c core/utf8.c core/beam_image.c core/atoms.c
     core/opcodes.c core/beam_reader.c core/beam_program.c core/beam_decode.c
-    core/beam_metadata.c core/beam_literals.c core/beam_select.c
+    core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c
     core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/md5.c core/process.c core/heap.c core/bif_info.c)
 add_dependencies(libbeam_core libbeam_atom_definitions libbeam_opcode_definitions)
 target_link_libraries(libbeam_core PUBLIC ZLIB::ZLIB)
@@ -81,6 +81,10 @@ target_link_libraries(two_isolates PRIVATE libbeam::libbeam)
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(core_binary_test tests/core_binary_test.c)
+    target_link_libraries(core_binary_test PRIVATE libbeam_core)
+    add_test(NAME core_binary_components COMMAND core_binary_test)
+    set_tests_properties(core_binary_components PROPERTIES TIMEOUT 90)
     add_executable(core_code_test tests/core_code_test.c)
     target_link_libraries(core_code_test PRIVATE libbeam_core)
     add_test(NAME core_code_components COMMAND core_code_test)

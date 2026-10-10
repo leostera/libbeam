@@ -36,6 +36,7 @@ void lb_beam_program_destroy(LbBeamProgram *p)
     LbAllocDomain *domain;
     if(!p) return;
     domain=p->domain;
+    lb_offheap_clear(&p->off_heap);
     while(p->blocks) {
         LbPrepBlock *block=p->blocks; p->blocks=block->link.next;
         if(lb_alloc_domain_release(domain,block)!=LB_ALLOC_OK) abort();

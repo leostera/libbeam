@@ -1,0 +1,24 @@
+{
+  "baseline": "c08f1e82",
+  "scope": "Ordinary immutable Binary/BinRef/ErlSubBits layouts, construction, sharing, copying-GC offheap sweep and destruction. Not whole-file admission or writable/magic/NIF/distribution binary support.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_binary.h": "68a59f8e4567236b8bbc38621aac15a61ed486658cb0a754fcdc378da7d6c0db",
+    "beam/erts/emulator/beam/erl_bits.h": "5a72bb9b9c14690d55ff94912faf3e8f0e9914e155593d2c6aa7474c3ff5bfec",
+    "beam/erts/emulator/beam/erl_bits.c": "2b803014c329c7c2c30e60c0bffda90911985b9ce1703952e7315e28694ccdb6",
+    "beam/erts/emulator/beam/erl_gc.c": "e420c7b61d0f3df557384a13357ba7b4c9e819ba242feae5a72e5141b97994b4",
+    "beam/erts/emulator/beam/erl_gc.h": "f1be3b3f40976409563a861e4881a7b2a1c774e6531cc3613f6304953c4fdf2d",
+    "beam/erts/emulator/beam/copy.c": "3a545dd7dc73c816a70897d07d4c353d27f7c8589938073c87da414f3d43e860",
+    "beam/erts/emulator/beam/erl_message.c": "b35e3f0a62dcd86e02f2249d917c801f8c16dc8d35f810c46581212e7d9bab49",
+    "beam/erts/emulator/beam/erl_message.h": "ce7b97ef8dcb560430ee5e2a0f5886b34ac62d51444c0d22a2ecef194329bdfd",
+    "beam/erts/emulator/beam/external.c": "cbfdfcef0f756c468c6f2fc8a23d478a01daeddb3a4db8e240a8590252a4414b",
+    "beam/erts/emulator/beam/erl_term.h": "8e016126fb7a1bc1db8d31111601c0bea21d72207211bf91e1f3c127e943b5c2"
+  },
+  "adaptations": [
+    "Fallible explicit-domain allocation; an aligned owner prefix precedes the native-shaped binary header and immutable payload.",
+    "Real C11 atomic word reference count replaces ethread's reference-count primitive; domain/heap/control APIs remain serialized.",
+    "Only ordinary immutable binaries enter the offheap chain. Actual BinRef/SubBits layouts and the 64-byte heap threshold are preserved.",
+    "Loader and process destruction release offheap references before freeing heap/arena storage; copying-GC updates moved references and releases dead ones.",
+    "Flat metadata copies acquire their own binary references and roll back on reference-count exhaustion; raw literals retain code ownership.",
+    "Execution witnesses are ordinary compiler-produced binary literal/identity/tuple/module_info functions, not a new executor or bytecode."
+  ]
+}
