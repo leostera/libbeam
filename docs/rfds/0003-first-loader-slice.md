@@ -136,6 +136,10 @@ platforms, security, resource quotas, or performance.
 
 ## Execution dependency cluster still to admit
 
+The [additive runtime inventory](0003-additive-runtime-inventory.md) expands this
+cluster into source anchors, ownership/retirement obligations, actual fixture
+requirements and the proposed next implementation pass.
+
 | Upstream anchors under `beam/erts/emulator/beam/` | Boundary that remains |
 |---|---|
 | `beam_file.c:beamfile_get_code`, code reader and `BeamOpAllocator` | Decode operands against real atoms/literals/types; retain prepared-code storage |

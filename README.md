@@ -45,7 +45,9 @@ shut it down safely. This is not a security boundary for untrusted workloads.**
 - [`docs/rfds/`](docs/rfds/): design proposals, contracts and historical evidence.
 
 Start with [RFD 0003: additive runtime construction](docs/rfds/0003-additive-runtime-construction.md).
-It adopts a C ownership layer and C transplants, retaining the C++ host API and
+The [runtime work inventory](docs/rfds/0003-additive-runtime-inventory.md) maps
+remaining dependencies to first execution and the unchanged two-Isolate example.
+RFD 0003 adopts a C ownership layer and C transplants, retaining the C++ host API and
 [RFD 0002's isolate contract](docs/rfds/0002-libbeam-isolates.md).
 That contract specifies the executable proof: one native host, two simultaneously live
 isolates with conflicting same-name modules, independent local state, and safe

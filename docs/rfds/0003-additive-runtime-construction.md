@@ -3,7 +3,11 @@
 
 # RFD 0003: Build libbeam additively from BEAM components
 
-Status: **Accepted direction; implementation beginning.**
+Status: **Accepted direction; first image-preparation slice implemented.**
+
+The [additive runtime inventory](0003-additive-runtime-inventory.md) records the
+remaining dependency clusters, fixture-derived requirements and implementation
+order. Neither executable Isolates nor Engine lifecycle acceptance passes yet.
 
 ## Decision
 
