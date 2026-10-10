@@ -16,20 +16,27 @@
  * ETS/persistent terms, application processes/heaps and their timers/messages.
  * Shared queues may carry such work, but must retain its isolate owner.
  *
- * Only the first two engine-owned components are migrated in this slice. The
- * remaining VM globals still prevent independent runtime initialization. There
- * is deliberately no default/current-engine accessor or fake isolate container.
+ * The intrusive namespace ownership tree is managed on the control thread.
+ * Namespace containers are not yet runnable public Isolates. Remaining VM
+ * globals still prevent independent runtime initialization.
  */
 struct ErtsSchedulerThreadGroup;
 struct ErtsIoPollGroup;
 struct ErtsThreadProgressDomain;
 struct ErtsAllocatorDomain;
+struct ErtsEngineThreadKeys;
+struct ErtsIsolateNamespaceState;
 struct ErtsEngine {
     enum ErlRuntimeStartupPhase startup_phase;
     struct ErtsSchedulerThreadGroup *scheduler_threads;
     struct ErtsIoPollGroup *io_poll_group;
     struct ErtsThreadProgressDomain *thread_progress;
     struct ErtsAllocatorDomain *allocators;
+    struct ErtsEngineThreadKeys *thread_keys;
+    struct ErtsIsolateNamespaceState *namespace_states;
+    struct ErtsIsolateNamespaceState *diagnostic_namespace;
+    size_t namespace_count;
+    int namespace_admission_closed;
 };
 
 #endif

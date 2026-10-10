@@ -5075,7 +5075,7 @@ define _etp-fd-print-events
 end
 
 define etp-fd
-    set $etp_fd_state = &drv_ev_state.v[$arg0]
+    set $etp_fd_state = &erts_io_event_state->v[$arg0]
     printf "fd: %d\n", $arg0
     
     printf "  type: "
@@ -5173,9 +5173,9 @@ end
 
 define etp-fd-dump
     set $etp_fd_dump_i = 0
-    set $etp_fd_dump_len = drv_ev_state.len.counter
+    set $etp_fd_dump_len = erts_io_event_state->len.counter
     while $etp_fd_dump_i < $etp_fd_dump_len
-        set $etp_fd_dump_state = &drv_ev_state.v[$etp_fd_dump_i]
+        set $etp_fd_dump_state = &erts_io_event_state->v[$etp_fd_dump_i]
         set $should_display = $etp_fd_dump_state->flags != 0
         set $should_display |= $etp_fd_dump_state->events != etp_poll_ev_none && $etp_fd_dump_state->events != 0
         set $should_display |= $etp_fd_dump_state->active_events != etp_poll_ev_none && $etp_fd_dump_state->active_events != 0

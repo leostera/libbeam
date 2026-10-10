@@ -8,6 +8,7 @@
 #include "erl_module_table.h"
 #include "erl_export_literals.h"
 #include "erl_export_namespace.h"
+#include "erl_registry.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,6 +20,13 @@ typedef struct ErtsIsolateNamespaceState ErtsIsolateNamespaceState;
 typedef struct ErtsCodeTable ErtsCodeTable;
 typedef struct ErtsCodeSpace ErtsCodeSpace;
 ErtsCodeSpace *erts_isolate_namespace_code_space(ErtsIsolateNamespaceState *);
+ErtsRegistry *erts_isolate_namespace_registry(ErtsIsolateNamespaceState *);
+ErtsEngine *erts_isolate_namespace_engine(ErtsIsolateNamespaceState *);
+/* Control-thread/engine-wide serialization, as for native lifecycle operations.
+ * Counts metadata namespaces, NOT runnable/public Isolates. Closing admission
+ * does not stop existing processes or retire children. */
+size_t erts_engine_namespace_count(const ErtsEngine *);
+void erts_engine_close_namespace_admission(ErtsEngine *);
 typedef struct ErtsCatchNamespace ErtsCatchNamespace;
 typedef struct ErtsRangeNamespace ErtsRangeNamespace;
 typedef struct ErtsModuleNamespace ErtsModuleNamespace;
@@ -43,7 +51,8 @@ ErtsModuleTable **erts_isolate_namespace_module_slots(ErtsIsolateNamespaceState 
 /* Exclusive unpublished owner, no live terms, code or other borrowers.
  * Preflights all children; refuses without partially releasing the state. */
 /* Acquire requires an existing owner/lease. Disposal and new admission must be
- * externally serialized; releasing the last borrower does not destroy state. */
+ * externally serialized across the engine; releasing the last borrower does
+ * not destroy state or remove the parent's ownership entry. */
 void erts_isolate_namespace_acquire(ErtsIsolateNamespaceState *);
 void erts_isolate_namespace_release(ErtsIsolateNamespaceState *);
 erts_aint_t erts_isolate_namespace_borrowers(ErtsIsolateNamespaceState *);

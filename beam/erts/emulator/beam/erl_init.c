@@ -28,6 +28,7 @@
 #include <ctype.h>
 #include "erl_vm.h"
 #include "erl_engine.h"
+#include "erl_engine_thread_keys.h"
 #include "erl_isolate_state.h"
 #include "global.h"
 #include "erl_process.h"
@@ -109,12 +110,11 @@ static void prepare_runtime(ErtsEngine *engine, int argc, char **argv);
  * operations receive their owner explicitly; this is not a current-engine API.
  * Remove the one-runtime restriction only as the remaining globals migrate. */
 static ErtsEngine *claimed_engine;
-/* Diagnostic host's retained world-state handle, not an Engine-owned namespace. */
-static ErtsIsolateNamespaceState *diagnostic_namespace;
-
+/* Fixed bootstrap boundary. The engine owns this namespace; never use this
+ * accessor to select among private worlds. */
 ErtsIsolateNamespaceState *erts_diagnostic_namespace(void)
 {
-    return diagnostic_namespace;
+    return claimed_engine ? claimed_engine->diagnostic_namespace : NULL;
 }
 
 static erts_atomic_t exiting;
@@ -277,6 +277,7 @@ erl_init(ErtsEngine *engine, int ncpu,
          int module_tab_sz,
          int export_tab_sz)
 {
+    ErtsIsolateNamespaceState *diagnostic_namespace;
     init_global_literals();
     erts_monitor_link_init();
     erts_bif_unique_init();
@@ -310,7 +311,7 @@ erl_init(ErtsEngine *engine, int ncpu,
     erts_init_fun_table(erts_isolate_namespace_funs(diagnostic_namespace));
     erts_record_init_table(erts_isolate_namespace_records(diagnostic_namespace));
     init_module_table(erts_isolate_namespace_module_state(diagnostic_namespace));
-    init_register_table();
+    init_register_table(erts_isolate_namespace_registry(diagnostic_namespace));
     init_message();
 #ifdef BEAMASM
     beamasm_init();
@@ -369,7 +370,7 @@ erl_spawn_system_process(Process* parent, Eterm mod, Eterm func, Eterm args,
 
     so->flags |= SPO_SYSTEM_PROC;
 
-    res = erl_create_process(diagnostic_namespace, parent, mod, func, args, so);
+    res = erl_create_process(erts_diagnostic_namespace(), parent, mod, func, args, so);
 
     return res;
 }
@@ -390,7 +391,7 @@ erl_first_process_otp(char* mod_name, int argc, char** argv)
      */
 
     erts_init_empty_process(&parent);
-    parent.namespace_owner = diagnostic_namespace; /* Borrowed bootstrap parent. */
+    parent.namespace_owner = erts_diagnostic_namespace(); /* Borrowed bootstrap parent. */
     erts_proc_lock(&parent, ERTS_PROC_LOCK_MAIN);
 
     hp = HAlloc(&parent, argc*2 + 4);
@@ -1315,6 +1316,8 @@ claim_runtime(ErtsEngine *engine)
         return 2;
     if (claimed_engine || engine->startup_phase != ERL_RUNTIME_UNCLAIMED)
         return 1;
+    if (erts_engine_init_thread_keys(engine))
+        return 2;
     claimed_engine = engine;
     engine->startup_phase = ERL_RUNTIME_PREPARING;
     return 0;

@@ -46,6 +46,7 @@ print("EXPORT_TABLE_OK reload_and_stub_lookup=true private_execution=false", flu
 print("CODE_SPACE_EXECUTION_OK local_funs=true native_records=true catches_and_stacktraces=true diagnostic_world=true", flush=True)
 print("OWNER_LIFETIME_OK prepared_drop=true retained_literals=true process_exit=true diagnostic_world=true", flush=True)
 print("ALLOCATOR_MEMORY_OK external_accounting=true live_statistics=true", flush=True)
+print("REGISTRY_OWNER_OK names=true sends=true process_and_port_exit=true diagnostic_world=true", flush=True)
 print(f"HOST_STARTUP_RETURNED pid={pid} second_start=rejected", flush=True)
 print(f"BEAM_STARTUP_OK pid={pid}", flush=True)
 print("EXECUTABLE_PORTS_DENIED checks=11 forker_port=false", flush=True)
@@ -62,7 +63,7 @@ print("HOST_CONTROL_OK engine_shutdown=false isolates_created=0 process_exit=tru
             self.assertEqual(result['status'], 'passed')
             self.assertFalse(result['engine_shutdown'])
             self.assertTrue(result['explicit_engine_owner_checked'])
-            for marker in ('HOST_ENGINE_OWNER_OK', 'ALLOCATOR_MEMORY_OK'):
+            for marker in ('HOST_ENGINE_OWNER_OK', 'ALLOCATOR_MEMORY_OK', 'REGISTRY_OWNER_OK'):
                 marker_line = next(line for line in code.splitlines(True)
                                    if line.startswith(f'print("{marker}'))
                 for copies in (0, 2):

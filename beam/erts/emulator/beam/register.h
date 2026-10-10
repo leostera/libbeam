@@ -34,6 +34,8 @@
 #include "erl_port.h"
 #undef ERL_PORT_GET_PORT_TYPE_ONLY__
 
+typedef struct ErtsRegistry ErtsRegistry;
+
 typedef struct reg_proc
 {
     HashBucket bucket;  /* MUST BE LOCATED AT TOP OF STRUCT!!! */
@@ -41,10 +43,11 @@ typedef struct reg_proc
 			   'pt' is non-NULL */
     Port *pt;		/* The port registered */
     Eterm name;         /* Atom name */
+    ErtsRegistry *owner; /* Entry owner; private port admission is still refused. */
 } RegProc;
 
 int process_reg_sz(void);
-void init_register_table(void);
+void init_register_table(ErtsRegistry *);
 void register_info(fmtfn_t, void *);
 int erts_register_name(Process *, Eterm, Eterm);
 Eterm erts_whereis_name_to_id(Process *, Eterm);

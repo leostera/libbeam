@@ -8,6 +8,7 @@
 run() ->
     #{status := standalone_startup_passed} = startup_probe:run(),
     fd_eof(),
+    registry_owner(),
     no_executable_ports(),
     no_signal_administration(),
     atom_storage(),
@@ -42,10 +43,40 @@ allocator_memory() ->
 fd_eof() ->
     Port = erlang:open_port({fd, 0, 0}, [in, binary, eof]),
     Ref = erlang:monitor(port, Port),
+    true = register(libbeam_registered_fd, Port),
+    Port = whereis(libbeam_registered_fd),
     receive {Port, eof} -> ok after 5000 -> error(fd_eof_timeout) end,
     true = erlang:port_close(Port),
     receive {'DOWN', Ref, port, Port, normal} -> ok
-    after 5000 -> error(fd_close_timeout) end.
+    after 5000 -> error(fd_close_timeout) end,
+    undefined = whereis(libbeam_registered_fd),
+    expect_badarg(fun() -> register(libbeam_registered_fd, Port) end).
+
+registry_owner() ->
+    Worker = spawn(fun() ->
+        receive {From, ping} -> From ! {self(), pong} end,
+        receive stop -> ok end
+    end),
+    Ref = monitor(process, Worker),
+    true = register(libbeam_registered_worker, Worker),
+    Worker = whereis(libbeam_registered_worker),
+    true = lists:member(libbeam_registered_worker, registered()),
+    expect_badarg(fun() -> register(libbeam_registered_worker, self()) end),
+    libbeam_registered_worker ! {self(), ping},
+    receive {Worker, pong} -> ok after 5000 -> error(registry_send_timeout) end,
+    true = unregister(libbeam_registered_worker),
+    undefined = whereis(libbeam_registered_worker),
+    true = register(libbeam_registered_worker, Worker),
+    Worker ! stop,
+    receive {'DOWN', Ref, process, Worker, normal} -> ok
+    after 5000 -> error(registry_exit_timeout) end,
+    undefined = whereis(libbeam_registered_worker),
+    false = lists:member(libbeam_registered_worker, registered()),
+    io:format("REGISTRY_OWNER_OK names=true sends=true process_and_port_exit=true diagnostic_world=true~n").
+
+expect_badarg(Fun) ->
+    try Fun() of Value -> error({expected_badarg, Value})
+    catch error:badarg -> ok end.
 
 no_executable_ports() ->
     Ports = lists:sort(erlang:ports()),

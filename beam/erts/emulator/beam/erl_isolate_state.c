@@ -8,6 +8,7 @@
 #include "erl_vm.h"
 #include "global.h"
 #include "erl_isolate_state.h"
+#include "erl_engine.h"
 #include "erl_code_table.h"
 #include "erl_record.h"
 #include "erl_fun.h"
@@ -18,6 +19,8 @@
 
 struct ErtsIsolateNamespaceState {
     ErtsEngine *engine;
+    ErtsIsolateNamespaceState *engine_prev, *engine_next;
+    ErtsRegistry *registry;
     erts_atomic_t borrowers;
     ErtsAtomNamespace *atoms;
     ErtsModuleTable *modules[ERTS_NUM_CODE_IX];
@@ -37,7 +40,8 @@ static ErtsIsolateNamespaceState *create_state(ErtsEngine *engine,
 {
     ErtsIsolateNamespaceState *state;
     int i;
-    if (!engine || module_limit <= 0 || export_limit <= 0)
+    if (!engine || engine->namespace_admission_closed ||
+        module_limit <= 0 || export_limit <= 0)
         return NULL;
     state = calloc(1, sizeof(*state));
     if (!state)
@@ -62,6 +66,11 @@ static ErtsIsolateNamespaceState *create_state(ErtsEngine *engine,
     }
     state->module_state = erts_module_namespace_create(state->modules);
     state->code_space = erts_code_space_create(state);
+    state->registry = erts_registry_create(state);
+    state->engine_next = engine->namespace_states;
+    if (state->engine_next) state->engine_next->engine_prev = state;
+    engine->namespace_states = state;
+    engine->namespace_count++;
     return state;
 }
 
@@ -83,13 +92,39 @@ ErtsIsolateNamespaceState *erts_isolate_namespace_create_diagnostic(
     ErtsEngine *engine, int atom_limit, int module_limit, int export_limit)
 {
     ErtsIsolateNamespaceState *state;
-    ASSERT(erl_runtime_startup_phase(engine) == ERL_RUNTIME_PREPARING);
+    if (!engine || erl_runtime_startup_phase(engine) != ERL_RUNTIME_PREPARING ||
+        engine->diagnostic_namespace)
+        return NULL;
     state = create_state(engine, atom_limit,
                          module_limit > 0 ? module_limit : erts_module_table_default_limit(),
                          export_limit > 0 ? export_limit : erts_export_namespace_default_limit());
-    if (state)
+    if (state) {
+        ASSERT(!engine->diagnostic_namespace);
         state->bound = 1;
+        engine->diagnostic_namespace = state;
+    }
     return state;
+}
+
+size_t erts_engine_namespace_count(const ErtsEngine *engine)
+{
+    return engine ? engine->namespace_count : 0;
+}
+
+void erts_engine_close_namespace_admission(ErtsEngine *engine)
+{
+    ASSERT(engine);
+    engine->namespace_admission_closed = 1;
+}
+
+ErtsEngine *erts_isolate_namespace_engine(ErtsIsolateNamespaceState *state)
+{
+    return state ? state->engine : NULL;
+}
+
+ErtsRegistry *erts_isolate_namespace_registry(ErtsIsolateNamespaceState *state)
+{
+    return state ? state->registry : NULL;
 }
 
 ErtsCodeSpace *erts_isolate_namespace_code_space(ErtsIsolateNamespaceState *state) { return state->code_space; }
@@ -161,7 +196,8 @@ int erts_isolate_namespace_discard(ErtsIsolateNamespaceState *state)
         !erts_catch_namespace_can_discard(state->catches) ||
         !erts_range_namespace_can_discard(state->ranges) ||
         !erts_module_namespace_can_discard(state->module_state) ||
-        !erts_code_space_can_discard(state->code_space))
+        !erts_code_space_can_discard(state->code_space) ||
+        !erts_registry_can_discard(state->registry))
         return 1;
     /* Preflight ALL slots before freeing any of them. No partial destruction
      * if a later slot retains code or metadata references. */
@@ -173,6 +209,7 @@ int erts_isolate_namespace_discard(ErtsIsolateNamespaceState *state)
         ASSERT(!result);
         (void) result;
     }
+    erts_registry_discard(state->registry);
     erts_code_space_discard(state->code_space);
     erts_module_namespace_discard(state->module_state);
     erts_range_namespace_discard(state->ranges);
@@ -182,6 +219,11 @@ int erts_isolate_namespace_discard(ErtsIsolateNamespaceState *state)
     erts_export_namespace_discard(state->exports);
     erts_export_literals_discard(state->export_literals);
     erts_atom_namespace_discard_unpublished(state->atoms);
+    if (state->engine_prev) state->engine_prev->engine_next = state->engine_next;
+    else state->engine->namespace_states = state->engine_next;
+    if (state->engine_next) state->engine_next->engine_prev = state->engine_prev;
+    ASSERT(state->engine->namespace_count);
+    state->engine->namespace_count--;
     free(state);
     return 0;
 }

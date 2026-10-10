@@ -164,6 +164,13 @@ rollback and live allocation/statistics paths are checked. Draining/stopping
 active allocators, releasing mappings and the complete Engine transaction remain
 unfinished; bound controls cannot be force-freed.
 
+**Partial ownership-tree sweep:** [parent/child membership and runtime roots](0002-ownership-tree-sweep.md)
+attach namespaces to Engine, migrate actual registered-name paths beneath each
+namespace, own driver-event storage beneath I/O, and track ERTS wrapper-created
+TLS keys from early initialization. This is not completion of the requested broad
+sweep: process/port tables, ETS, persistent terms, timers, queued retirement and
+remaining scheduler/thread-library/backend lifetime work are still outstanding.
+
 **API:** `Isolate::load_module`.
 
 **First storage extraction:** [owned module tables](0002-owned-module-tables.md)

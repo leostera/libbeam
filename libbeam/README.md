@@ -39,7 +39,10 @@ aggregate poll-group rollback, cold I/O release and owned thread-progress/TLS
 release. [Allocator ownership](../docs/rfds/0002-owned-allocator-domain.md) now
 puts major allocator/backing/mapper storage under the engine and retains aligned
 allocation bases for explicit release. Complete Engine initialization/shutdown
-remains unfinished.
+remains unfinished. The [partial ownership-tree sweep](../docs/rfds/0002-ownership-tree-sweep.md)
+adds Engine namespace membership, namespace-owned registered names, owned I/O
+event state and an early ERTS TLS-key ledger. Process/port tables, ETS, persistent
+terms, timers and complete retirement remain outstanding—not everything is moved.
 [Native ownership migration](../docs/rfds/0002-native-ownership.md) introduces an
 explicit `ErtsEngine`, engine-owned lifecycle/handle-registry state, and scheduler
 owner references. Remaining globals are classified by engine versus isolate

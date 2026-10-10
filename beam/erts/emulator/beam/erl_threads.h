@@ -514,6 +514,14 @@ ERTS_GLB_INLINE void erts_write_lock(erts_rwlock_t *lock);
 ERTS_GLB_INLINE void erts_write_unlock(erts_rwlock_t *lock);
 ERTS_GLB_INLINE int erts_lc_rwlock_is_rlocked(erts_rwlock_t *lock);
 ERTS_GLB_INLINE int erts_lc_rwlock_is_rwlocked(erts_rwlock_t *lock);
+#ifdef __cplusplus
+extern "C" {
+#endif
+int erts_engine_track_tsd_key(erts_tsd_key_t key);
+int erts_engine_delete_tsd_key(erts_tsd_key_t key);
+#ifdef __cplusplus
+}
+#endif
 ERTS_GLB_INLINE void erts_tsd_key_create(erts_tsd_key_t *keyp, char *keyname);
 ERTS_GLB_INLINE void erts_tsd_key_delete(erts_tsd_key_t key);
 ERTS_GLB_INLINE void erts_tsd_set(erts_tsd_key_t key, void *value);
@@ -2410,12 +2418,17 @@ erts_tsd_key_create(erts_tsd_key_t *keyp, char *keyname)
     int res = ethr_tsd_key_create(keyp, keyname);
     if (res)
 	erts_thr_fatal_error(res, "create thread specific data key");
+    res = erts_engine_track_tsd_key(*keyp);
+    if (res) {
+        (void) ethr_tsd_key_delete(*keyp);
+        erts_thr_fatal_error(res, "own thread specific data key");
+    }
 }
 
 ERTS_GLB_INLINE void
 erts_tsd_key_delete(erts_tsd_key_t key)
 {
-    int res = ethr_tsd_key_delete(key);
+    int res = erts_engine_delete_tsd_key(key);
     if (res)
 	erts_thr_fatal_error(res, "delete thread specific data key");
 }

@@ -101,6 +101,7 @@ def run_host(command, cwd, env, log, timeout=60):
                     or text.splitlines().count('ATOM_STORAGE_OK copied_names=true empty_binary=true') != 1
                     or text.splitlines().count('OWNER_LIFETIME_OK prepared_drop=true retained_literals=true process_exit=true diagnostic_world=true') != 1
                     or text.splitlines().count('ALLOCATOR_MEMORY_OK external_accounting=true live_statistics=true') != 1
+                    or text.splitlines().count('REGISTRY_OWNER_OK names=true sends=true process_and_port_exit=true diagnostic_world=true') != 1
                     or text.splitlines().count('CODE_SPACE_EXECUTION_OK local_funs=true native_records=true catches_and_stacktraces=true diagnostic_world=true') != 1
                     or text.splitlines().count('EXPORT_TABLE_OK reload_and_stub_lookup=true private_execution=false') != 1
                     or text.splitlines().count('EXPORT_LITERAL_OK gc_roundtrip_and_dispatch=true') != 1
@@ -205,6 +206,9 @@ def main():
                  source / 'erts/emulator/beam/erl_embed.h',
                  source / 'erts/emulator/beam/erl_engine.h',
                  source / 'erts/emulator/beam/erl_engine.c',
+                 source / 'erts/emulator/beam/erl_engine_thread_keys.c',
+                 source / 'erts/emulator/beam/erl_engine_thread_keys.h',
+                 source / 'erts/emulator/beam/erl_threads.h',
                  source / 'erts/emulator/beam/export.c',
                  source / 'erts/emulator/beam/export.h',
                  source / 'erts/emulator/beam/erl_export_namespace.h',
@@ -252,6 +256,10 @@ def main():
                  source / 'erts/emulator/beam/erl_atom_namespace.h',
                  source / 'erts/emulator/beam/erl_isolate_state.c',
                  source / 'erts/emulator/beam/erl_isolate_state.h',
+                 source / 'erts/emulator/beam/erl_registry.h',
+                 source / 'erts/emulator/beam/register.c',
+                 source / 'erts/emulator/beam/register.h',
+                 tools.parent / 'tests/native_ownership_tree_test.c',
                  source / 'erts/emulator/beam/erl_module_table.h',
                  source / 'erts/emulator/beam/module.c',
                  source / 'erts/emulator/beam/module.h',
@@ -355,6 +363,8 @@ def main():
                 (output / 'compile-settings.log').read_text().splitlines()
                 if line.startswith(('CC=', 'CFLAGS=', 'INCLUDES=')))
             components = [
+                ('ownership-tree', 'native_ownership_tree_test.c',
+                 'NATIVE_OWNERSHIP_TREE_OK parent_membership=true registry_children=true owned_thread_keys=true guarded_retirement=true private_execution=false'),
                 ('allocator-domain', 'native_allocator_domain_test.c',
                  'NATIVE_ALLOCATOR_DOMAIN_OK owned_dispatch=true retained_bases=true permanent_release=true engine_shutdown=false'),
                 ('unstarted-poll', 'native_unstarted_poll_test.c',

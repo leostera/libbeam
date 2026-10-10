@@ -41,6 +41,7 @@
 #include "erl_check_io.h"
 #include "erl_io_poll_group.h"
 #include "erl_engine.h"
+#include "erl_isolate_state.h"
 #include "erl_thr_progress.h"
 #include "erl_bif_unique.h"
 #include "erl_proc_sig_queue.h"
@@ -163,6 +164,7 @@ struct ErtsIoPollGroup {
     ErtsPollSet **primary;
     ErtsPollSet *scheduler, *fallback;
     ErtsPollThread *thread_base, *primary_threads;
+    struct drv_ev_state_shared *events;
     int sets, threads, total_threads;
     int bound;
     erts_atomic32_t borrowed;
@@ -192,7 +194,7 @@ static int io_poll_group_is_cold(ErtsIoPollGroup *g)
 
 int erts_io_poll_group_can_discard(ErtsIoPollGroup *g)
 {
-    return g && !g->bound && io_poll_group_is_cold(g);
+    return g && !g->bound && !g->events && io_poll_group_is_cold(g);
 }
 
 int erts_io_poll_group_discard(ErtsIoPollGroup *g)
@@ -348,7 +350,9 @@ struct drv_ev_state_shared {
 
 int ERTS_WRITE_UNLIKELY(erts_no_pollsets) = 1;
 int ERTS_WRITE_UNLIKELY(erts_no_poll_threads) = 1;
-struct drv_ev_state_shared drv_ev_state;
+/* Fixed engine view for runtime/debugger consumers; owned by its I/O group. */
+struct drv_ev_state_shared *erts_io_event_state;
+#define drv_ev_state (*erts_io_event_state)
 
 /* Used by etp */
 ErtsPollEvents etp_poll_ev_none = ERTS_POLL_EV_NONE;
@@ -2688,6 +2692,9 @@ erts_init_check_io(ErtsEngine *engine, int *argc, char **argv)
         erts_exit(ERTS_ERROR_EXIT, "Cannot create I/O poll group: %s\n", erl_errno_id(errno));
     diagnostic_io = engine->io_poll_group;
     diagnostic_io->bound = 1;
+    diagnostic_io->events = erts_alloc(ERTS_ALC_T_DRV_EV_STATE, sizeof(*diagnostic_io->events));
+    sys_memzero(diagnostic_io->events, sizeof(*diagnostic_io->events));
+    erts_io_event_state = diagnostic_io->events;
 
     for (j=0; j < ERTS_CHECK_IO_DRV_EV_STATE_LOCK_CNT; j++) {
         erts_mtx_init(&drv_ev_state.locks[j].lck, "drv_ev_state", make_small(j),
@@ -2737,6 +2744,7 @@ int erts_discard_check_io_unstarted(ErtsEngine *engine)
     /* All checks precede mutation. This is one cleanup stage, not shutdown:
      * prohibit further namespace admission while other substrate cleanup is
      * still outstanding. No prepared/running transition can resume this state. */
+    erts_engine_close_namespace_admission(engine);
     engine->startup_phase = ERL_RUNTIME_RELEASING;
     for (i = 0; i < ERTS_CHECK_IO_DRV_EV_STATE_LOCK_CNT; ++i)
         erts_mtx_destroy(&drv_ev_state.locks[i].lck);
@@ -2745,6 +2753,9 @@ int erts_discard_check_io_unstarted(ErtsEngine *engine)
     drv_ev_state.v = NULL;
     drv_ev_state.max_fds = 0;
     erts_atomic_set_nob(&drv_ev_state.len, 0);
+    erts_free(ERTS_ALC_T_DRV_EV_STATE, g->events);
+    g->events = NULL;
+    erts_io_event_state = NULL;
     diagnostic_io = NULL;
     engine->io_poll_group = NULL;
     g->bound = 0;
@@ -2760,6 +2771,7 @@ int erts_discard_check_io_unstarted(ErtsEngine *engine)
 int
 erts_check_io_max_files(void)
 {
+    if (!erts_io_event_state) return 0;
 #ifdef  ERTS_SYS_CONTINOUS_FD_NUMBERS
     return drv_ev_state.max_fds;
 #else
@@ -2775,7 +2787,7 @@ erts_check_io_size(void)
     int i;
 
     if (!diagnostic_io) return 0;
-    res += sizeof(*diagnostic_io);
+    res += sizeof(*diagnostic_io) + sizeof(*diagnostic_io->events);
     res += sizeof(ErtsPollSet *) * diagnostic_io->sets;
     res += sizeof(ErtsPollThread) * diagnostic_io->total_threads;
     for (i = 0; i < diagnostic_io->total_threads; ++i)
