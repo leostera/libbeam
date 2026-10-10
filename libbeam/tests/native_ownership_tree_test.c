@@ -72,7 +72,12 @@ int main(int argc, char **argv)
         CHECK(erts_isolate_namespace_registry(a) != erts_isolate_namespace_registry(b));
         CHECK(erts_registry_count(erts_isolate_namespace_registry(a)) == 0);
         CHECK(erts_registry_count(erts_isolate_namespace_registry(b)) == 0);
+        CHECK(erts_isolate_namespace_persistent(a) != erts_isolate_namespace_persistent(b));
+        CHECK(erts_persistent_state_can_discard(erts_isolate_namespace_persistent(a)));
+        CHECK(is_non_value(erts_persistent_term_get(a, am_undefined)));
+        CHECK(is_non_value(erts_persistent_term_get(b, am_undefined)));
         erts_isolate_namespace_acquire(b);
+        CHECK(!erts_persistent_state_can_discard(erts_isolate_namespace_persistent(b)));
         CHECK(erts_isolate_namespace_discard(b) == 1);
         CHECK(erts_engine_namespace_count(engine) == 4);
         erts_isolate_namespace_release(b);

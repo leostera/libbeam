@@ -37,6 +37,8 @@
 #include "bif.h"
 #include "erl_map.h"
 #include "erl_binary.h"
+#include "erl_isolate_state.h"
+#include "erl_persistent_state.h"
 
 /*
  * Parameters for the hash table.
@@ -49,6 +51,7 @@
 
 
 typedef struct delete_op {
+    ErtsPersistentTermState *owner;
     enum { DELETE_OP_TUPLE, DELETE_OP_TABLE } type;
     struct delete_op* next;
     ErtsThrPrgrLaterOp thr_prog_op;
@@ -81,6 +84,7 @@ static ERTS_INLINE Uint sizeof_HashTable(Uint sz)
 }
 
 typedef struct trap_data {
+    ErtsPersistentTermState *owner;
     HashTable* table;
     Uint idx;
     Uint remaining;
@@ -117,6 +121,7 @@ typedef enum {
 } ErtsPersistentTermPutCommonTrapLocation;
 
 typedef struct {
+    ErtsPersistentTermState *owner;
     ErtsPersistentTermPutCommonTrapLocation trap_location;
     Eterm key;
     Eterm term;
@@ -133,6 +138,7 @@ typedef enum {
 } ErtsPersistentTermErase1TrapLocation;
 
 typedef struct {
+    ErtsPersistentTermState *owner;
     ErtsPersistentTermErase1TrapLocation trap_location;
     Eterm key;
     HashTable* old_table;
@@ -149,12 +155,13 @@ typedef struct {
  */
 
 static Eterm put_common(Process* process, Eterm key, Eterm term, Eterm new);
-static HashTable* create_initial_table(void);
+static HashTable* create_initial_table(ErtsPersistentTermState *state);
 static Uint lookup(HashTable* hash_table, Eterm key, Eterm *bucket);
 static int is_erasable(HashTable* hash_table, Uint idx);
 static HashTable* copy_table(ErtsPersistentTermCpyTableCtx* ctx);
 static int try_seize_update_permission(Process* c_p);
-static void release_update_permission(int release_updater);
+static void release_update_permission_for(ErtsPersistentTermState *state, int release_updater);
+#define release_update_permission(RELEASE) release_update_permission_for(state, RELEASE)
 static void table_updater(void* table);
 static void scheduled_deleter(void* delete_op);
 static void delete_table(HashTable* table);
@@ -184,7 +191,7 @@ static BIF_RETTYPE persistent_term_info_trap(BIF_ALIST_1);
  * Pointer to the current hash table.
  */
 
-static erts_atomic_t the_hash_table;
+/* Mutable persistent-term roots are namespace-owned. */
 
 /*
  * Queue of processes waiting to update the hash table.
@@ -195,23 +202,34 @@ struct update_queue_item {
     struct update_queue_item* next;
 };
 
-static erts_mtx_t update_table_permission_mtx;
-static struct update_queue_item* update_queue = NULL;
-static Process* updater_process = NULL;
+struct ErtsPersistentTermState {
+    ErtsIsolateNamespaceState *namespace_owner;
+    erts_atomic_t table;
+    erts_mtx_t update_lock, delete_lock;
+    struct update_queue_item *waiters;
+    Process *updater;
+    ErtsThrPrgrLaterOp later_op;
+    Uint fast_index;
+    Eterm fast_term;
+    DeleteOp *head, **tail;
+    int bound;
+};
 
-/* Protected by update_table_permission_mtx */
-static ErtsThrPrgrLaterOp thr_prog_op;
+static ErtsPersistentTermState *persistent_for(Process *p)
+{
+    return erts_isolate_namespace_persistent(p ? p->namespace_owner : erts_diagnostic_namespace());
+}
 
-static Uint fast_update_index;
-static Eterm fast_update_term = THE_NON_VALUE;
-
-/*
- * Queue of hash tables to be deleted.
- */
-
-static erts_mtx_t delete_queue_mtx;
-static DeleteOp* delete_queue_head = NULL;
-static DeleteOp** delete_queue_tail = &delete_queue_head;
+/* Lexical aliases for the explicit state argument/local, never TLS selectors. */
+#define the_hash_table (state->table)
+#define update_table_permission_mtx (state->update_lock)
+#define update_queue (state->waiters)
+#define updater_process (state->updater)
+#define fast_update_index (state->fast_index)
+#define fast_update_term (state->fast_term)
+#define delete_queue_mtx (state->delete_lock)
+#define delete_queue_head (state->head)
+#define delete_queue_tail (state->tail)
 
 /*
  * The following variables are only used during crash dumping. They
@@ -221,9 +239,16 @@ static DeleteOp** delete_queue_tail = &delete_queue_head;
 ErtsLiteralArea** erts_persistent_areas;
 Uint erts_num_persistent_areas;
 
-void erts_init_bif_persistent_term(void)
+ErtsPersistentTermState *erts_persistent_state_create(ErtsIsolateNamespaceState *owner)
 {
+    ErtsPersistentTermState *state;
     HashTable* hash_table;
+    ASSERT(owner);
+    state = erts_alloc(ERTS_ALC_T_PERSISTENT_TERM, sizeof(*state));
+    sys_memzero(state, sizeof(*state));
+    state->namespace_owner = owner;
+    state->fast_term = THE_NON_VALUE;
+    state->tail = &state->head;
 
     /*
      * Initialize the mutex protecting updates.
@@ -231,9 +256,7 @@ void erts_init_bif_persistent_term(void)
 
     erts_mtx_init(&update_table_permission_mtx,
                   "update_persistent_term_permission",
-                  NIL,
-                  ERTS_LOCK_FLAGS_PROPERTY_STATIC |
-                  ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
+                  NIL, ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
 
     /*
      * Initialize delete queue.
@@ -241,17 +264,42 @@ void erts_init_bif_persistent_term(void)
 
     erts_mtx_init(&delete_queue_mtx,
                   "persistent_term_delete_permission",
-                  NIL,
-                  ERTS_LOCK_FLAGS_PROPERTY_STATIC |
-                  ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
+                  NIL, ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
 
     /*
      * Allocate a small initial hash table.
      */
 
-    hash_table = create_initial_table();
+    hash_table = create_initial_table(state);
     erts_atomic_init_nob(&the_hash_table, (erts_aint_t)hash_table);
+    return state;
+}
 
+int erts_persistent_state_can_discard(ErtsPersistentTermState *state)
+{
+    HashTable *table;
+    if (!state || state->bound || state->updater || state->waiters || state->head ||
+        erts_isolate_namespace_borrowers(state->namespace_owner))
+        return 0;
+    table = (HashTable *)erts_atomic_read_nob(&state->table);
+    return table->num_entries == 0 && table->num_to_delete == 0;
+}
+
+int erts_persistent_state_discard(ErtsPersistentTermState *state)
+{
+    if (!erts_persistent_state_can_discard(state)) return 1;
+    erts_free(ERTS_ALC_T_PERSISTENT_TERM, (void *)erts_atomic_read_nob(&state->table));
+    erts_mtx_destroy(&state->update_lock);
+    erts_mtx_destroy(&state->delete_lock);
+    erts_free(ERTS_ALC_T_PERSISTENT_TERM, state);
+    return 0;
+}
+
+void erts_init_bif_persistent_term(void)
+{
+    ErtsPersistentTermState *state = persistent_for(NULL);
+    ASSERT(state && !state->bound);
+    state->bound = 1;
     /*
      * Initialize export entry for traps
      */
@@ -295,11 +343,15 @@ void erts_init_bif_persistent_term(void)
 static int persistent_term_put_common_bin_dtor(Binary *context_bin)
 {
     ErtsPersistentTermPutCommonContext* ctx = ERTS_MAGIC_BIN_DATA(context_bin);
+    ErtsPersistentTermState *state = ctx->owner;
     if (ctx->cpy_ctx.new_table != NULL) {
         erts_free(ERTS_ALC_T_PERSISTENT_TERM, ctx->cpy_ctx.new_table);
         release_update_permission(0);
     }
-    return 1;
+    /* The context itself retains the namespace through physical binary free. */
+    erts_magic_binary_free(context_bin);
+    erts_isolate_namespace_release(state->namespace_owner);
+    return 0; /* Destructor performed the physical free. */
 }
 /*
  * A linear congruential generator that is used in the debug emulator to trap
@@ -323,6 +375,7 @@ BIF_RETTYPE persistent_term_put_new_2(BIF_ALIST_2)
 
 BIF_RETTYPE persistent_term_get_0(BIF_ALIST_0)
 {
+    ErtsPersistentTermState *state = persistent_for(BIF_P);
     HashTable* hash_table;
     TrapData* trap_data;
     Eterm res = NIL;
@@ -356,7 +409,7 @@ BIF_RETTYPE persistent_term_get_0(BIF_ALIST_0)
 }
 
 static ERTS_INLINE Eterm
-persistent_term_get(Eterm key)
+persistent_term_get(ErtsPersistentTermState *state, Eterm key)
 {
     HashTable* hash_table = (HashTable *) erts_atomic_read_nob(&the_hash_table);
     Eterm bucket;
@@ -372,14 +425,14 @@ persistent_term_get(Eterm key)
 }
 
 Eterm
-erts_persistent_term_get(Eterm key)
+erts_persistent_term_get(ErtsIsolateNamespaceState *owner, Eterm key)
 {
-    return persistent_term_get(key);
+    return persistent_term_get(erts_isolate_namespace_persistent(owner), key);
 }
 
 BIF_RETTYPE persistent_term_get_1(BIF_ALIST_1)
 {
-    Eterm result = persistent_term_get(BIF_ARG_1);
+    Eterm result = persistent_term_get(persistent_for(BIF_P), BIF_ARG_1);
     if (is_non_value(result)) {
         BIF_ERROR(BIF_P, BADARG);
     }
@@ -389,7 +442,7 @@ BIF_RETTYPE persistent_term_get_1(BIF_ALIST_1)
 
 BIF_RETTYPE persistent_term_get_2(BIF_ALIST_2)
 {
-    Eterm result = persistent_term_get(BIF_ARG_1);
+    Eterm result = persistent_term_get(persistent_for(BIF_P), BIF_ARG_1);
     if (is_non_value(result)) {
         result = BIF_ARG_2;
     }
@@ -400,6 +453,7 @@ BIF_RETTYPE persistent_term_get_2(BIF_ALIST_2)
 static int persistent_term_erase_1_ctx_bin_dtor(Binary *context_bin)
 {
     ErtsPersistentTermErase1Context* ctx = ERTS_MAGIC_BIN_DATA(context_bin);
+    ErtsPersistentTermState *state = ctx->owner;
     if (ctx->cpy_ctx.new_table != NULL) {
         if (ctx->cpy_ctx.copy_type == ERTS_PERSISTENT_TERM_CPY_TEMP) {
             erts_free(ERTS_ALC_T_PERSISTENT_TERM_TMP, ctx->cpy_ctx.new_table);
@@ -411,11 +465,14 @@ static int persistent_term_erase_1_ctx_bin_dtor(Binary *context_bin)
         }
         release_update_permission(0);
     }
-    return 1;
+    erts_magic_binary_free(context_bin);
+    erts_isolate_namespace_release(state->namespace_owner);
+    return 0; /* Destructor performed the physical free. */
 }
 
 BIF_RETTYPE persistent_term_erase_1(BIF_ALIST_1)
 {
+    ErtsPersistentTermState *state = persistent_for(BIF_P);
     static const Uint ITERATIONS_PER_RED = 32;
     ErtsPersistentTermErase1Context* ctx;
     Eterm state_mref = THE_NON_VALUE;
@@ -441,6 +498,7 @@ BIF_RETTYPE persistent_term_erase_1(BIF_ALIST_1)
         state_mref = BIF_ARG_1;
         state_bin = erts_magic_ref2bin(state_mref);
         ctx = ERTS_MAGIC_BIN_DATA(state_bin);
+        if (ctx->owner != state) BIF_ERROR(BIF_P, BADARG);
         ASSERT(BIF_P->flags & F_DISABLE_GC);
         erts_set_gc_state(BIF_P, 1);
         switch (ctx->trap_location) {
@@ -461,6 +519,8 @@ BIF_RETTYPE persistent_term_erase_1(BIF_ALIST_1)
          * IMPORTANT: The following two fields are used to detect if
          * persistent_term_erase_1_ctx_bin_dtor needs to free memory
          */
+        ctx->owner = state;
+        erts_isolate_namespace_acquire(state->namespace_owner);
         ctx->cpy_ctx.new_table = NULL;
         ctx->tmp_table = NULL;
     }
@@ -487,7 +547,7 @@ BIF_RETTYPE persistent_term_erase_1(BIF_ALIST_1)
             fast_update_index = ctx->entry_index;
             fast_update_term = NIL;
             ctx->old_table->num_entries--;
-            erts_schedule_thr_prgr_later_op(table_updater, ctx->old_table, &thr_prog_op);
+            erts_schedule_thr_prgr_later_op(table_updater, ctx->old_table, &state->later_op);
         }
         else {
             Uint new_size;
@@ -532,7 +592,7 @@ BIF_RETTYPE persistent_term_erase_1(BIF_ALIST_1)
             ctx->tmp_table = NULL;
 
             mark_for_deletion(ctx->old_table, ctx->entry_index);
-            erts_schedule_thr_prgr_later_op(table_updater, ctx->new_table, &thr_prog_op);
+            erts_schedule_thr_prgr_later_op(table_updater, ctx->new_table, &state->later_op);
         }
         suspend_updater(BIF_P);
         BUMP_REDS(BIF_P, (max_iterations - iterations_until_trap) / ITERATIONS_PER_RED);
@@ -550,6 +610,7 @@ BIF_RETTYPE persistent_term_erase_1(BIF_ALIST_1)
 
 BIF_RETTYPE erts_internal_erase_persistent_terms_0(BIF_ALIST_0)
 {
+    ErtsPersistentTermState *state = persistent_for(BIF_P);
     HashTable* old_table;
     HashTable* new_table;
 
@@ -560,14 +621,15 @@ BIF_RETTYPE erts_internal_erase_persistent_terms_0(BIF_ALIST_0)
     old_table = (HashTable *) erts_atomic_read_nob(&the_hash_table);
     old_table->first_to_delete = 0;
     old_table->num_to_delete = old_table->allocated;
-    new_table = create_initial_table();
-    erts_schedule_thr_prgr_later_op(table_updater, new_table, &thr_prog_op);
+    new_table = create_initial_table(state);
+    erts_schedule_thr_prgr_later_op(table_updater, new_table, &state->later_op);
     suspend_updater(BIF_P);
     ERTS_BIF_YIELD_RETURN(BIF_P, am_true);
 }
 
 BIF_RETTYPE persistent_term_info_0(BIF_ALIST_0)
 {
+    ErtsPersistentTermState *state = persistent_for(BIF_P);
     HashTable* hash_table;
     TrapData* trap_data;
     Eterm res = NIL;
@@ -588,7 +650,7 @@ BIF_RETTYPE persistent_term_info_0(BIF_ALIST_0)
     trap_data->idx = 0;
     trap_data->remaining = hash_table->num_entries;
     trap_data->memory = 0;
-    trap_data->got_update_permission = 0;
+    trap_data->got_update_permission = 1;
     res = do_info(BIF_P, trap_data);
     if (trap_data->remaining == 0) {
         release_update_permission(0);
@@ -597,13 +659,14 @@ BIF_RETTYPE persistent_term_info_0(BIF_ALIST_0)
         BIF_RET(res);
     } else {
         BUMP_ALL_REDS(BIF_P);
-        BIF_TRAP2(&persistent_term_info_export, BIF_P, magic_ref, res);
+        BIF_TRAP1(&persistent_term_info_export, BIF_P, magic_ref);
     }
 }
 
 void
 erts_init_persistent_dumping(void)
 {
+    ErtsPersistentTermState *state = persistent_for(NULL);
     HashTable* hash_table = (HashTable *) erts_atomic_read_nob(&the_hash_table);
     ErtsLiteralArea** area_p;
     Uint i;
@@ -641,6 +704,7 @@ persistent_term_put_common_trap(BIF_ALIST_3)
 
 static Eterm put_common(Process* c_p, Eterm key, Eterm term, Eterm new)
 {
+    ErtsPersistentTermState *state = persistent_for(c_p);
     static const Uint ITERATIONS_PER_RED = 32;
     ErtsPersistentTermPutCommonContext* ctx;
     Eterm state_mref = THE_NON_VALUE;
@@ -669,6 +733,7 @@ static Eterm put_common(Process* c_p, Eterm key, Eterm term, Eterm new)
         state_mref = key;
         state_bin = erts_magic_ref2bin(state_mref);
         ctx = ERTS_MAGIC_BIN_DATA(state_bin);
+        if (ctx->owner != state) BIF_ERROR(c_p, BADARG);
         ASSERT(c_p->flags & F_DISABLE_GC);
         erts_set_gc_state(c_p, 1);
         ASSERT(ctx->trap_location == PUT_COMMON_TRAP_LOCATION_NEW_KEY);
@@ -685,6 +750,8 @@ static Eterm put_common(Process* c_p, Eterm key, Eterm term, Eterm new)
          * IMPORTANT: The following field is used to detect if
          * persistent_term_put_common_ctx_bin_dtor needs to free memory
          */
+        ctx->owner = state;
+        erts_isolate_namespace_acquire(state->namespace_owner);
         ctx->cpy_ctx.new_table = NULL;
     }
 
@@ -776,7 +843,7 @@ static Eterm put_common(Process* c_p, Eterm key, Eterm term, Eterm new)
          * consistent view of table&term without memory barrier in every get/1.
          */
         erts_schedule_thr_prgr_later_op(table_updater, ctx->hash_table,
-                                        &thr_prog_op);
+                                        &state->later_op);
         suspend_updater(c_p);
     }
 
@@ -785,13 +852,14 @@ static Eterm put_common(Process* c_p, Eterm key, Eterm term, Eterm new)
 }
 
 static HashTable*
-create_initial_table(void)
+create_initial_table(ErtsPersistentTermState *state)
 {
     HashTable* hash_table;
     int i;
 
     hash_table = (HashTable *) erts_alloc(ERTS_ALC_T_PERSISTENT_TERM,
                                           sizeof_HashTable(INITIAL_SIZE));
+    hash_table->delete_op = (DeleteOp){.owner = state, .type = DELETE_OP_TABLE};
     hash_table->allocated = INITIAL_SIZE;
     hash_table->num_entries = 0;
     hash_table->mask = INITIAL_SIZE-1;
@@ -806,6 +874,7 @@ create_initial_table(void)
 static BIF_RETTYPE
 persistent_term_get_all_trap(BIF_ALIST_2)
 {
+    ErtsPersistentTermState *state = persistent_for(BIF_P);
     TrapData* trap_data;
     Eterm res = BIF_ARG_2;
     Uint bump_reds;
@@ -814,6 +883,7 @@ persistent_term_get_all_trap(BIF_ALIST_2)
     ASSERT(is_list(BIF_ARG_2));
     mbp = erts_magic_ref2bin(BIF_ARG_1);
     trap_data = ERTS_MAGIC_BIN_DATA(mbp);
+    if (trap_data->owner != state) BIF_ERROR(BIF_P, BADARG);
     bump_reds = trap_data->remaining;
     res = do_get_all(BIF_P, trap_data, res);
     ASSERT(is_list(res));
@@ -903,6 +973,7 @@ do_get_all(Process* c_p, TrapData* trap_data, Eterm res)
 static BIF_RETTYPE
 persistent_term_info_trap(BIF_ALIST_1)
 {
+    ErtsPersistentTermState *state = persistent_for(BIF_P);
     TrapData* trap_data = (TrapData *) BIF_ARG_1;
     Eterm res;
     Uint bump_reds;
@@ -910,6 +981,7 @@ persistent_term_info_trap(BIF_ALIST_1)
 
     mbp = erts_magic_ref2bin(BIF_ARG_1);
     trap_data = ERTS_MAGIC_BIN_DATA(mbp);
+    if (trap_data->owner != state) BIF_ERROR(BIF_P, BADARG);
     bump_reds = trap_data->remaining;
     res = do_info(BIF_P, trap_data);
     if (trap_data->remaining > 0) {
@@ -968,7 +1040,7 @@ do_info(Process* c_p, TrapData* trap_data)
         Uint memory;
         Uint hsz = MAP_SZ(2);
 
-        memory = sizeof(HashTable) + (trap_data->table->allocated-1) *
+        memory = sizeof(*trap_data->owner) + sizeof(HashTable) + (trap_data->table->allocated-1) *
                                      sizeof(Eterm) + trap_data->memory;
         (void) erts_bld_uint(NULL, &hsz, hash_table->num_entries);
         (void) erts_bld_uint(NULL, &hsz, memory);
@@ -988,6 +1060,10 @@ alloc_trap_data(Process* c_p)
     Binary* mbp = erts_create_magic_binary(sizeof(TrapData),
                                            cleanup_trap_data);
     Eterm* hp;
+    TrapData *data = ERTS_MAGIC_BIN_DATA(mbp);
+    sys_memzero(data, sizeof(*data));
+    data->owner = persistent_for(c_p);
+    erts_isolate_namespace_acquire(data->owner->namespace_owner);
 
     hp = HAlloc(c_p, ERTS_MAGIC_REF_THING_SIZE);
     return erts_mk_magic_ref(&hp, &MSO(c_p), mbp);
@@ -997,10 +1073,12 @@ static int
 cleanup_trap_data(Binary *bp)
 {
     TrapData* trap_data = ERTS_MAGIC_BIN_DATA(bp);
-
+    ErtsPersistentTermState *state = trap_data->owner;
     if (trap_data->got_update_permission)
         release_update_permission(0);
-    return 1;
+    erts_magic_binary_free(bp);
+    erts_isolate_namespace_release(state->namespace_owner);
+    return 0; /* Destructor performed the physical free. */
 }
 
 static Uint
@@ -1052,6 +1130,7 @@ copy_table(ErtsPersistentTermCpyTableCtx* ctx)
     }
     ctx->new_table = (HashTable *) erts_alloc(alloc_type,
                                               sizeof_HashTable(ctx->new_size));
+    ctx->new_table->delete_op.owner = ctx->old_table->delete_op.owner;
     if (ctx->old_table->allocated == ctx->new_size &&
         (ctx->copy_type == ERTS_PERSISTENT_TERM_CPY_NO_REHASH ||
          ctx->copy_type == ERTS_PERSISTENT_TERM_CPY_TEMP)) {
@@ -1175,6 +1254,7 @@ table_updater(void* data)
 {
     HashTable* old_table;
     HashTable* new_table;
+    ErtsPersistentTermState *state = ((HashTable *)data)->delete_op.owner;
     UWord cleanup_bytes;
 
     old_table = (HashTable *) erts_atomic_read_nob(&the_hash_table);
@@ -1184,15 +1264,14 @@ table_updater(void* data)
         ASSERT(is_value(fast_update_term));
         ASSERT(fast_update_index < old_table->allocated);
         set_bucket(old_table, fast_update_index, fast_update_term);
-#ifdef DEBUG
         fast_update_term = THE_NON_VALUE;
-#endif
 
         if (is_not_nil(old_bucket))  {
             OldLiteral *olp = alloc_old_literal();
             ASSERT(is_tuple_arity(old_bucket,2));
             olp->term = old_bucket;
             olp->area = term_to_area(old_bucket);
+            olp->delete_op.owner = state;
             olp->delete_op.type = DELETE_OP_TUPLE;
             olp->delete_op.is_scheduled = 1;
             append_to_delete_queue(&olp->delete_op);
@@ -1244,6 +1323,7 @@ scheduled_deleter(void* data)
 
     while (dop) {
         DeleteOp* next = dop->next;
+        ErtsIsolateNamespaceState *owner = dop->owner->namespace_owner;
         ASSERT(!dop->is_scheduled);
         switch (dop->type) {
         case DELETE_OP_TUPLE: {
@@ -1260,6 +1340,7 @@ scheduled_deleter(void* data)
         default:
             ASSERT(!!"Invalid DeleteOp");
         }
+        erts_isolate_namespace_release(owner);
         dop = next;
     }
 }
@@ -1312,6 +1393,7 @@ delete_tuple(Eterm term)
 static int
 try_seize_update_permission(Process* c_p)
 {
+    ErtsPersistentTermState *state = persistent_for(c_p);
     int success;
 
     ASSERT(!erts_thr_progress_is_blocking()); /* to avoid deadlock */
@@ -1322,6 +1404,7 @@ try_seize_update_permission(Process* c_p)
     success = (updater_process == NULL);
     if (success) {
         updater_process = c_p;
+        erts_isolate_namespace_acquire(state->namespace_owner);
     } else {
         struct update_queue_item* qitem;
         qitem = erts_alloc(ERTS_ALC_T_PERSISTENT_LOCK_Q, sizeof(*qitem));
@@ -1336,7 +1419,7 @@ try_seize_update_permission(Process* c_p)
 }
 
 static void
-release_update_permission(int release_updater)
+release_update_permission_for(ErtsPersistentTermState *state, int release_updater)
 {
     erts_mtx_lock(&update_table_permission_mtx);
     ASSERT(updater_process != NULL);
@@ -1363,12 +1446,14 @@ release_update_permission(int release_updater)
 	erts_free(ERTS_ALC_T_PERSISTENT_LOCK_Q, qitem);
     }
     erts_mtx_unlock(&update_table_permission_mtx);
+    erts_isolate_namespace_release(state->namespace_owner);
 }
 
 static void
 suspend_updater(Process* c_p)
 {
 #ifdef DEBUG
+    ErtsPersistentTermState *state = persistent_for(c_p);
     ASSERT(c_p != NULL);
     erts_mtx_lock(&update_table_permission_mtx);
     ASSERT(updater_process == c_p);
@@ -1381,6 +1466,8 @@ suspend_updater(Process* c_p)
 static void
 append_to_delete_queue(DeleteOp* dop)
 {
+    ErtsPersistentTermState *state = dop->owner;
+    erts_isolate_namespace_acquire(state->namespace_owner);
     erts_mtx_lock(&delete_queue_mtx);
     dop->next = NULL;
     *delete_queue_tail = dop;
@@ -1391,6 +1478,7 @@ append_to_delete_queue(DeleteOp* dop)
 static DeleteOp*
 list_to_delete(DeleteOp* scheduled_dop)
 {
+    ErtsPersistentTermState *state = scheduled_dop->owner;
     DeleteOp* dop;
     DeleteOp* dop_list;
 
@@ -1519,6 +1607,7 @@ void
 erts_debug_foreach_persistent_term_off_heap(void (*func)(ErlOffHeap *, void *),
                                             void *arg)
 {
+    ErtsPersistentTermState *state = persistent_for(NULL);
     HashTable *tbl;
     DeleteOp *dop;
     struct debug_la_oh fa;
@@ -1549,6 +1638,7 @@ erts_debug_foreach_persistent_term_off_heap(void (*func)(ErlOffHeap *, void *),
 
 Eterm erts_debug_persistent_term_xtra_info(Process* c_p)
 {
+    ErtsPersistentTermState *state = persistent_for(c_p);
     HashTable* hash_table = (HashTable *) erts_atomic_read_nob(&the_hash_table);
     Uint hsz = MAP_SZ(1);
     Eterm *hp;

@@ -27,6 +27,11 @@ if(LIBBEAM_ERTS_PACKAGE)
     target_link_libraries(engine_prepare_probe PRIVATE libbeam::libbeam libbeam_erts)
 endif()
 
+# Red acceptance target until real unbooted teardown/restart exists. Deliberately
+# not registered as an expected-failure CTest.
+add_executable(engine_lifecycle examples/engine_lifecycle.cpp)
+target_link_libraries(engine_lifecycle PRIVATE libbeam::libbeam)
+
 add_executable(two_isolates examples/two_isolates.cpp)
 target_link_libraries(two_isolates PRIVATE libbeam::libbeam)
 

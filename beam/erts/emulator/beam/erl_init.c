@@ -278,7 +278,7 @@ erl_init(ErtsEngine *engine, int ncpu,
          int export_tab_sz)
 {
     ErtsIsolateNamespaceState *diagnostic_namespace;
-    init_global_literals();
+    init_global_literals(engine);
     erts_monitor_link_init();
     erts_bif_unique_init();
     erts_proc_sig_queue_init(); /* Must be after erts_bif_unique_init(); */

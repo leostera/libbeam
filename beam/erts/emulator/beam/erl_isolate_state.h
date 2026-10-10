@@ -9,6 +9,7 @@
 #include "erl_export_literals.h"
 #include "erl_export_namespace.h"
 #include "erl_registry.h"
+#include "erl_persistent_state.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -21,6 +22,7 @@ typedef struct ErtsCodeTable ErtsCodeTable;
 typedef struct ErtsCodeSpace ErtsCodeSpace;
 ErtsCodeSpace *erts_isolate_namespace_code_space(ErtsIsolateNamespaceState *);
 ErtsRegistry *erts_isolate_namespace_registry(ErtsIsolateNamespaceState *);
+ErtsPersistentTermState *erts_isolate_namespace_persistent(ErtsIsolateNamespaceState *);
 ErtsEngine *erts_isolate_namespace_engine(ErtsIsolateNamespaceState *);
 /* Control-thread/engine-wide serialization, as for native lifecycle operations.
  * Counts metadata namespaces, NOT runnable/public Isolates. Closing admission

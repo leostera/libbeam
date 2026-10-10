@@ -28,6 +28,7 @@
 #include "global.h"
 #include "erl_global_literals.h"
 #include "erl_mmap.h"
+#include "erl_engine.h"
 
 
 #define GLOBAL_LITERAL_INITIAL_SIZE (1<<16)
@@ -49,7 +50,14 @@ Eterm ERTS_WRITE_UNLIKELY(ERTS_GLOBAL_LIT_EMPTY_BINARY);
  * allocated literal chunk, and the heap pointer from concurrent access until 
  * the literal tag is set.
  */
-erts_mtx_t global_literal_lock;
+struct ErtsGlobalLiteralArena {
+    erts_mtx_t lock;
+    struct global_literal_chunk *chunks;
+    Uint build_size;
+    Uint bytes;
+    int bound;
+};
+static ErtsGlobalLiteralArena *diagnostic_literals;
 
 /* Bump allocator for global literal chunks, allocating them in
  * reasonably large chunks to simplify crash dumping and avoid fragmenting the
@@ -59,12 +67,10 @@ erts_mtx_t global_literal_lock;
 struct global_literal_chunk {
     struct global_literal_chunk *next;
     Eterm *chunk_end;
+    void *allocation_base;
 
     ErtsLiteralArea area;
-} *global_literal_chunk = NULL;
-
-/* The size of the global literal term that is being built */
-Uint global_literal_build_size;
+};
 
 
 ErtsLiteralArea *erts_global_literal_iterate_area(ErtsLiteralArea *prev)
@@ -83,29 +89,32 @@ ErtsLiteralArea *erts_global_literal_iterate_area(ErtsLiteralArea *prev)
             return NULL;
         }
     } else {
-        next = global_literal_chunk;
+        next = diagnostic_literals ? diagnostic_literals->chunks : NULL;
     }
 
-    return &next->area;
+    return next ? &next->area : NULL;
 }
 
-static void expand_shared_global_literal_area(Uint heap_size)
+static void expand_shared_global_literal_area(ErtsGlobalLiteralArena *arena, Uint heap_size)
 {
     const size_t size = (offsetof(struct global_literal_chunk, area)
                          + ERTS_LITERAL_AREA_ALLOC_SIZE(heap_size));
     struct global_literal_chunk *chunk;
                         
 #ifndef DEBUG 
-    chunk = (struct global_literal_chunk *) erts_alloc(ERTS_ALC_T_LITERAL, size); 
+    chunk = (struct global_literal_chunk *) erts_alloc(ERTS_ALC_T_LITERAL, size);
+    chunk->allocation_base = chunk;
+    arena->bytes += size;
 #else
     /* erts_mem_guard requires the memory area to be page aligned. Overallocate
      * and align the address to ensure that is the case. */
-    UWord address;
-    address = (UWord) erts_alloc(ERTS_ALC_T_LITERAL, size + sys_page_size * 2);
-    address = (address + (sys_page_size - 1)) & ~(sys_page_size - 1);
+    void *base = erts_alloc(ERTS_ALC_T_LITERAL, size + sys_page_size * 2);
+    UWord address = ((UWord)base + (sys_page_size - 1)) & ~(sys_page_size - 1);
     chunk = (struct global_literal_chunk *) address;
+    chunk->allocation_base = base;
+    arena->bytes += size + sys_page_size * 2;
 
-    for (int i = 0; i < heap_size; i++) {
+    for (Uint i = 0; i < heap_size; i++) {
         chunk->area.start[i] = ERTS_HOLE_MARKER;
     }
 #endif
@@ -114,26 +123,30 @@ static void expand_shared_global_literal_area(Uint heap_size)
     chunk->chunk_end = &(chunk->area.start[heap_size]);
     chunk->area.retained_namespace = NULL; /* Immutable engine constants. */
     chunk->area.off_heap = NULL;
-    chunk->next = global_literal_chunk;
+    chunk->next = arena->chunks;
 
-    global_literal_chunk = chunk;
+    arena->chunks = chunk;
 }
 
-Eterm *erts_global_literal_allocate(Uint heap_size, struct erl_off_heap_header ***ohp)
+Eterm *erts_global_literal_arena_allocate(ErtsGlobalLiteralArena *arena, Uint heap_size,
+                                        struct erl_off_heap_header ***ohp)
 {
-    erts_mtx_lock(&global_literal_lock);
+    struct global_literal_chunk *chunk;
+    if (!arena || !heap_size || heap_size > ((~(Uint)0) / sizeof(Eterm)) / 2)
+        return NULL;
+    erts_mtx_lock(&arena->lock);
 
-    ASSERT(global_literal_chunk->area.end <= global_literal_chunk->chunk_end &&
-           global_literal_chunk->area.end >= global_literal_chunk->area.start);
-    if (global_literal_chunk->chunk_end - global_literal_chunk->area.end < heap_size) {
-        expand_shared_global_literal_area(heap_size + GLOBAL_LITERAL_EXPAND_SIZE);
+    chunk = arena->chunks;
+    ASSERT(chunk->area.end <= chunk->chunk_end && chunk->area.end >= chunk->area.start);
+    if (chunk->chunk_end - chunk->area.end < heap_size) {
+        expand_shared_global_literal_area(arena, heap_size + GLOBAL_LITERAL_EXPAND_SIZE);
+        chunk = arena->chunks;
     }
 
-    *ohp = &global_literal_chunk->area.off_heap;
+    *ohp = &chunk->area.off_heap;
 
 #ifdef DEBUG
     {
-        struct global_literal_chunk *chunk = global_literal_chunk;
         erts_mem_guard(chunk,
                        (byte*)(chunk->area.end + heap_size) - (byte*)chunk,
                        1, 
@@ -141,22 +154,20 @@ Eterm *erts_global_literal_allocate(Uint heap_size, struct erl_off_heap_header *
     }
 #endif
 
-    global_literal_build_size = heap_size;
+    arena->build_size = heap_size;
 
-    return global_literal_chunk->area.end;
+    return chunk->area.end;
 }
 
-void erts_global_literal_register(Eterm *variable) {
-    struct global_literal_chunk *chunk = global_literal_chunk;
+void erts_global_literal_arena_register(ErtsGlobalLiteralArena *arena, Eterm *variable) {
+    struct global_literal_chunk *chunk = arena->chunks;
 
-    ASSERT(ptr_val(*variable) >= chunk->area.end &&
-           ptr_val(*variable) < (chunk->area.end + global_literal_build_size));
+    ASSERT(arena->build_size && ptr_val(*variable) >= chunk->area.end &&
+           ptr_val(*variable) < (chunk->area.end + arena->build_size));
 
-    erts_set_literal_tag(variable,
-                         chunk->area.end,
-                         global_literal_build_size);
-    
-    chunk->area.end += global_literal_build_size;
+    erts_set_literal_tag(variable, chunk->area.end, arena->build_size);
+    chunk->area.end += arena->build_size;
+    arena->build_size = 0;
 
     ASSERT(chunk->area.end <= chunk->chunk_end &&
            chunk->area.end >= chunk->area.start);
@@ -170,7 +181,66 @@ void erts_global_literal_register(Eterm *variable) {
                    0);
 #endif
 
-    erts_mtx_unlock(&global_literal_lock);
+    erts_mtx_unlock(&arena->lock);
+}
+
+Eterm *erts_global_literal_allocate(Uint size, struct erl_off_heap_header ***ohp)
+{
+    return erts_global_literal_arena_allocate(diagnostic_literals, size, ohp);
+}
+
+void erts_global_literal_register(Eterm *variable)
+{
+    erts_global_literal_arena_register(diagnostic_literals, variable);
+}
+
+ErtsGlobalLiteralArena *erts_global_literal_arena_create(Uint initial_size)
+{
+    ErtsGlobalLiteralArena *arena;
+    if (!initial_size || initial_size > ((~(Uint)0) / sizeof(Eterm)) / 2) return NULL;
+    arena = erts_alloc(ERTS_ALC_T_LITERAL, sizeof(*arena));
+    sys_memzero(arena, sizeof(*arena));
+    arena->bytes = sizeof(*arena);
+    erts_mtx_init(&arena->lock, "global_literals", NIL, ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
+    expand_shared_global_literal_area(arena, initial_size);
+    return arena;
+}
+
+Uint erts_global_literal_arena_bytes(ErtsGlobalLiteralArena *arena)
+{
+    Uint bytes;
+    if (!arena) return 0;
+    erts_mtx_lock(&arena->lock);
+    bytes = arena->bytes;
+    erts_mtx_unlock(&arena->lock);
+    return bytes;
+}
+
+int erts_global_literal_arena_discard(ErtsGlobalLiteralArena *arena)
+{
+    struct global_literal_chunk *chunk;
+    if (!arena || arena->bound || arena->build_size) return 1;
+    /* Exclusive unpublished disposal: no term pointers may have escaped. */
+    chunk = arena->chunks;
+    while (chunk) {
+        struct global_literal_chunk *next;
+        void *base;
+        ErlOffHeap off_heap;
+#ifdef DEBUG
+        erts_mem_guard(chunk, (byte *)chunk->chunk_end - (byte *)chunk, 1, 1);
+#endif
+        next = chunk->next;
+        base = chunk->allocation_base;
+        ASSERT(!chunk->area.retained_namespace);
+        ERTS_INIT_OFF_HEAP(&off_heap);
+        off_heap.first = chunk->area.off_heap;
+        erts_cleanup_offheap(&off_heap);
+        erts_free(ERTS_ALC_T_LITERAL, base);
+        chunk = next;
+    }
+    erts_mtx_destroy(&arena->lock);
+    erts_free(ERTS_ALC_T_LITERAL, arena);
+    return 0;
 }
 
 static void init_empty_tuple(void) {
@@ -200,12 +270,12 @@ static void init_empty_binary(void)
 }
 
 void
-init_global_literals(void)
+init_global_literals(ErtsEngine *engine)
 {
-    erts_mtx_init(&global_literal_lock, "global_literals", NIL,
-        ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
-    
-    expand_shared_global_literal_area(GLOBAL_LITERAL_INITIAL_SIZE);
+    ASSERT(engine && !engine->global_literals && !diagnostic_literals);
+    engine->global_literals = erts_global_literal_arena_create(GLOBAL_LITERAL_INITIAL_SIZE);
+    diagnostic_literals = engine->global_literals;
+    diagnostic_literals->bound = 1;
     init_empty_tuple();
     init_empty_binary();
 }

@@ -171,6 +171,12 @@ TLS keys from early initialization. This is not completion of the requested broa
 sweep: process/port tables, ETS, persistent terms, timers, queued retirement and
 remaining scheduler/thread-library/backend lifetime work are still outstanding.
 
+**Integration sweep in progress:** [constant arenas and persistent-term ownership](0002-integration-sweep-progress.md)
+add real unpublished arena cleanup, namespace-scoped persistent tables and
+owner-retaining traps/update/deletion work. `engine_lifecycle` now expresses the
+public create → shutdown → create goal and remains red at its first create.
+This does not complete the approved inventory or the Engine lifecycle transaction.
+
 **API:** `Isolate::load_module`.
 
 **First storage extraction:** [owned module tables](0002-owned-module-tables.md)

@@ -9,6 +9,7 @@ run() ->
     #{status := standalone_startup_passed} = startup_probe:run(),
     fd_eof(),
     registry_owner(),
+    persistent_owner(),
     no_executable_ports(),
     no_signal_administration(),
     atom_storage(),
@@ -73,6 +74,50 @@ registry_owner() ->
     undefined = whereis(libbeam_registered_worker),
     false = lists:member(libbeam_registered_worker, registered()),
     io:format("REGISTRY_OWNER_OK names=true sends=true process_and_port_exit=true diagnostic_world=true~n").
+
+persistent_owner() ->
+    Items = lists:seq(1, 192),
+    lists:foreach(fun(I) ->
+        ok = persistent_term:put({?MODULE, persistent, I},
+                                #{number => I, data => binary:copy(<<I:32>>, 64)})
+    end, Items),
+    Snapshot = persistent_term:get(),
+    #{count := Count, memory := Memory} = persistent_term:info(),
+    true = Count >= 192,
+    true = Memory > 0,
+    Workers = [spawn_monitor(fun() ->
+        lists:foreach(fun(I) ->
+            Key = {?MODULE, concurrent, W, I},
+            ok = persistent_term:put(Key, {W, I}),
+            {W, I} = persistent_term:get(Key),
+            true = persistent_term:erase(Key)
+        end, lists:seq(1, 16))
+    end) || W <- lists:seq(1, 4)],
+    Parent = self(),
+    {Reader, ReaderRef} = spawn_monitor(fun() ->
+        Parent ! {self(), reading},
+        persistent_reader()
+    end),
+    receive {Reader, reading} -> ok after 5000 -> error(reader_start_timeout) end,
+    exit(Reader, kill),
+    receive {'DOWN', ReaderRef, process, Reader, killed} -> ok
+    after 5000 -> error(reader_exit_timeout) end,
+    lists:foreach(fun({Pid, Ref}) ->
+        receive {'DOWN', Ref, process, Pid, normal} -> ok
+        after 5000 -> error(persistent_writer_timeout) end
+    end, Workers),
+    lists:foreach(fun(I) -> true = persistent_term:erase({?MODULE, persistent, I}) end, Items),
+    missing = persistent_term:get({?MODULE, persistent, 1}, missing),
+    true = erlang:garbage_collect(),
+    {{?MODULE, persistent, 1}, #{number := 1, data := Retained}} =
+        lists:keyfind({?MODULE, persistent, 1}, 1, Snapshot),
+    256 = byte_size(Retained),
+    io:format("PERSISTENT_OWNER_OK growth=true trapped_reads=true concurrent_updates=true retained_literals=true diagnostic_world=true~n").
+
+persistent_reader() ->
+    _ = persistent_term:info(),
+    _ = persistent_term:get(),
+    persistent_reader().
 
 expect_badarg(Fun) ->
     try Fun() of Value -> error({expected_badarg, Value})

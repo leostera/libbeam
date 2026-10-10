@@ -5117,7 +5117,7 @@ erts_is_this_node_alive(void)
      * set if dynamic node name has been enabled.
      */
     dyn_name_key = TUPLE2(&tmp_heap[0], am_erts_internal, am_dynamic_node_name);
-    dyn_name_value = erts_persistent_term_get(dyn_name_key);
+    dyn_name_value = erts_persistent_term_get(erts_diagnostic_namespace(), dyn_name_key);
     if (is_value(dyn_name_value) && dyn_name_value != am_false) {
         return !0;
     }

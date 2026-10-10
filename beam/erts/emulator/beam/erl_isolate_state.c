@@ -21,6 +21,7 @@ struct ErtsIsolateNamespaceState {
     ErtsEngine *engine;
     ErtsIsolateNamespaceState *engine_prev, *engine_next;
     ErtsRegistry *registry;
+    ErtsPersistentTermState *persistent;
     erts_atomic_t borrowers;
     ErtsAtomNamespace *atoms;
     ErtsModuleTable *modules[ERTS_NUM_CODE_IX];
@@ -67,6 +68,7 @@ static ErtsIsolateNamespaceState *create_state(ErtsEngine *engine,
     state->module_state = erts_module_namespace_create(state->modules);
     state->code_space = erts_code_space_create(state);
     state->registry = erts_registry_create(state);
+    state->persistent = erts_persistent_state_create(state);
     state->engine_next = engine->namespace_states;
     if (state->engine_next) state->engine_next->engine_prev = state;
     engine->namespace_states = state;
@@ -122,6 +124,10 @@ ErtsEngine *erts_isolate_namespace_engine(ErtsIsolateNamespaceState *state)
     return state ? state->engine : NULL;
 }
 
+ErtsPersistentTermState *erts_isolate_namespace_persistent(ErtsIsolateNamespaceState *state)
+{
+    return state ? state->persistent : NULL;
+}
 ErtsRegistry *erts_isolate_namespace_registry(ErtsIsolateNamespaceState *state)
 {
     return state ? state->registry : NULL;
@@ -197,7 +203,8 @@ int erts_isolate_namespace_discard(ErtsIsolateNamespaceState *state)
         !erts_range_namespace_can_discard(state->ranges) ||
         !erts_module_namespace_can_discard(state->module_state) ||
         !erts_code_space_can_discard(state->code_space) ||
-        !erts_registry_can_discard(state->registry))
+        !erts_registry_can_discard(state->registry) ||
+        !erts_persistent_state_can_discard(state->persistent))
         return 1;
     /* Preflight ALL slots before freeing any of them. No partial destruction
      * if a later slot retains code or metadata references. */
@@ -209,6 +216,7 @@ int erts_isolate_namespace_discard(ErtsIsolateNamespaceState *state)
         ASSERT(!result);
         (void) result;
     }
+    erts_persistent_state_discard(state->persistent);
     erts_registry_discard(state->registry);
     erts_code_space_discard(state->code_space);
     erts_module_namespace_discard(state->module_state);

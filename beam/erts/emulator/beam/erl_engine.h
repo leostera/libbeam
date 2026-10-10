@@ -25,6 +25,7 @@ struct ErtsIoPollGroup;
 struct ErtsThreadProgressDomain;
 struct ErtsAllocatorDomain;
 struct ErtsEngineThreadKeys;
+struct ErtsGlobalLiteralArena;
 struct ErtsIsolateNamespaceState;
 struct ErtsEngine {
     enum ErlRuntimeStartupPhase startup_phase;
@@ -33,6 +34,7 @@ struct ErtsEngine {
     struct ErtsThreadProgressDomain *thread_progress;
     struct ErtsAllocatorDomain *allocators;
     struct ErtsEngineThreadKeys *thread_keys;
+    struct ErtsGlobalLiteralArena *global_literals;
     struct ErtsIsolateNamespaceState *namespace_states;
     struct ErtsIsolateNamespaceState *diagnostic_namespace;
     size_t namespace_count;

@@ -42,7 +42,12 @@ allocation bases for explicit release. Complete Engine initialization/shutdown
 remains unfinished. The [partial ownership-tree sweep](../docs/rfds/0002-ownership-tree-sweep.md)
 adds Engine namespace membership, namespace-owned registered names, owned I/O
 event state and an early ERTS TLS-key ledger. Process/port tables, ETS, persistent
-terms, timers and complete retirement remain outstanding—not everything is moved.
+terms, timers and complete retirement remained outstanding at that checkpoint.
+The [integration sweep progress](../docs/rfds/0002-integration-sweep-progress.md)
+now adds the real Engine constant arena and namespace-owned persistent-term
+storage, traps and deferred cleanup. The sweep is still incomplete.
+`engine_lifecycle` is the explicit create → shutdown → create executable target;
+it currently exits 1 at the first factory call, in both native and scaffold builds.
 [Native ownership migration](../docs/rfds/0002-native-ownership.md) introduces an
 explicit `ErtsEngine`, engine-owned lifecycle/handle-registry state, and scheduler
 owner references. Remaining globals are classified by engine versus isolate
