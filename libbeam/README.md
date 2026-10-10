@@ -49,6 +49,9 @@ exports/literals, funs, records, catches, ranges, old-code locks, unsealed track
 and coordinated table transactions. Diagnostic execution uses those components.
 Private loader/process context propagation, executable/literal retirement and
 public Engine/Isolate construction remain unfinished.
+[Namespace lifetime flow](../docs/rfds/0002-namespace-lifetime-flow.md) now connects
+process/spawn affinity and loader/code/literal leases, but is only a partial
+checkpoint of that migration.
 [`../beam/`](../beam/) is a tracked OTP snapshot. Edit emulator sources directly
 and commit them alongside embedding changes; there is no submodule or patch series.
 No Realm implementation is part of the active source.

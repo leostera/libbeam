@@ -40,6 +40,7 @@ Eterm erts_export_literal_create(ErtsExportLiterals *owner, Export *export)
     ErlFunThing *lambda = (ErlFunThing *) area->start;
     Eterm term;
     area->end = area->start + ERL_FUN_SIZE;
+    area->retained_namespace = NULL; /* Parent/pool lifetime, not a detached lease. */
     area->off_heap = NULL;
     lambda->thing_word = MAKE_FUN_HEADER(export->info.mfa.arity, 0, 1);
     lambda->entry.exp = export;

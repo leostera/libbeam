@@ -95,6 +95,7 @@ typedef struct {
  * This structure contains all information about the module being loaded.
  */
 struct LoaderState_ {
+    ErtsIsolateNamespaceState *namespace_owner; /* Retained until destructor. */
     /*
      * The following are used mainly for diagnostics.
      */

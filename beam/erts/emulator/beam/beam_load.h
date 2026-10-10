@@ -33,6 +33,7 @@
 
 #include "erl_bif_table.h"
 #include "beam_code.h"
+#include "erl_isolate_state.h"
 
 Eterm beam_make_current_old(Process *c_p, ErtsProcLocks c_p_locks,
                             Eterm module);
@@ -55,6 +56,7 @@ typedef struct LoaderState_ LoaderState;
 #include "emu/load.h"
 #endif
 
+ErtsIsolateNamespaceState *erts_prepared_code_owner(Binary *magic);
 int beam_load_prepared_dtor(Binary *magic);
 void beam_load_prepared_free(Binary *magic);
 

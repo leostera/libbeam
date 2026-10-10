@@ -142,6 +142,12 @@ loading, local closures, native records, catches and stack traces use these same
 components. Private loader/process context propagation, executable/literal
 retirement and public Engine/Isolate construction remain unfinished.
 
+**Lifetime flow checkpoint:** [namespace lifetime flow](0002-namespace-lifetime-flow.md)
+adds explicit process/spawn affinity, prepared-code provenance and leases through
+process destruction, loaded-code purge and literal release. It is not completion
+of the loader/retirement/world-service migration; private admission stays refused
+at diagnostic-only execution boundaries.
+
 **API:** `Isolate::load_module`.
 
 **First storage extraction:** [owned module tables](0002-owned-module-tables.md)

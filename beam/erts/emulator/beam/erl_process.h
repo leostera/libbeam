@@ -40,6 +40,7 @@
 #endif
 
 typedef struct process Process;
+typedef struct ErtsIsolateNamespaceState ErtsIsolateNamespaceState;
 
 #define ERTS_PROCESS_LOCK_ONLY_PROC_LOCK_TYPE__
 #include "erl_process_lock.h" /* Only pull out important types... */
@@ -1103,6 +1104,9 @@ struct process {
     Sint return_trace_frames;   /* Number of return trace frames on stack */
     Uint reds;                  /* No of reductions for this process  */
     Eterm group_leader;         /* Pid in charge (can be boxed) */
+    /* Set before PID publication, inherited at spawn, immutable until final
+     * process destruction. Dirty shadows borrow their real process's lease. */
+    ErtsIsolateNamespaceState *namespace_owner;
     Eterm ftrace;               /* Latest exception stack trace dump */
 
     Process *next;              /* Pointer to next process in run queue */
@@ -2164,7 +2168,7 @@ void
 erts_send_local_spawn_reply(Process *parent, ErtsProcLocks parent_locks,
                             Process *child, Eterm tag, Eterm ref,
                             Eterm result, Eterm token);
-Eterm erl_create_process(Process*, Eterm, Eterm, Eterm, ErlSpawnOpts*);
+Eterm erl_create_process(ErtsIsolateNamespaceState*, Process*, Eterm, Eterm, Eterm, ErlSpawnOpts*);
 void erts_set_self_exiting(Process *, Eterm);
 void erts_do_exit_process(Process*, Eterm);
 void erts_continue_exit_process(Process *);

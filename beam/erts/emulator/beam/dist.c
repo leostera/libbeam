@@ -50,6 +50,7 @@
 #include "erl_proc_sig_queue.h"
 #include "erl_global_literals.h"
 #include "erl_map.h"
+#include "erl_isolate_state.h"
 
 #define DIST_CTL_DEFAULT_SIZE 64
 
@@ -3014,7 +3015,8 @@ int erts_net_message(Port *prt,
         so.opts = opts;
 
         args = CONS(&tmp_heap[0], mfa, NIL);
-        pid = erl_create_process(NULL,
+        /* Distribution is still diagnostic-only, outside the isolate profile. */
+        pid = erl_create_process(erts_diagnostic_namespace(), NULL,
                                  am_erts_internal,
                                  am_dist_spawn_init,
                                  args,

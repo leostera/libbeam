@@ -112,6 +112,11 @@ static ErtsEngine *claimed_engine;
 /* Diagnostic host's retained world-state handle, not an Engine-owned namespace. */
 static ErtsIsolateNamespaceState *diagnostic_namespace;
 
+ErtsIsolateNamespaceState *erts_diagnostic_namespace(void)
+{
+    return diagnostic_namespace;
+}
+
 static erts_atomic_t exiting;
 
 erts_atomic32_t erts_writing_erl_crash_dump;
@@ -364,7 +369,7 @@ erl_spawn_system_process(Process* parent, Eterm mod, Eterm func, Eterm args,
 
     so->flags |= SPO_SYSTEM_PROC;
 
-    res = erl_create_process(parent, mod, func, args, so);
+    res = erl_create_process(diagnostic_namespace, parent, mod, func, args, so);
 
     return res;
 }
@@ -385,6 +390,7 @@ erl_first_process_otp(char* mod_name, int argc, char** argv)
      */
 
     erts_init_empty_process(&parent);
+    parent.namespace_owner = diagnostic_namespace; /* Borrowed bootstrap parent. */
     erts_proc_lock(&parent, ERTS_PROC_LOCK_MAIN);
 
     hp = HAlloc(&parent, argc*2 + 4);

@@ -78,6 +78,7 @@ int beam_load_prepare_emit(LoaderState *stp) {
     hdr->compile_ptr = NULL;
     hdr->compile_size = 0;
     hdr->compile_size_on_heap = 0;
+    hdr->namespace_owner = stp->namespace_owner;
     hdr->literal_area = NULL;
     hdr->md5_ptr = NULL;
     hdr->are_nifs = NULL;
@@ -238,6 +239,10 @@ int beam_load_prepared_dtor(Binary* magic)
         stp->func_line = NULL;
     }
 
+    if (stp->namespace_owner) {
+        erts_isolate_namespace_release(stp->namespace_owner);
+        stp->namespace_owner = NULL;
+    }
     return 1;
 }
 
@@ -322,6 +327,7 @@ int beam_load_finish_emit(LoaderState *stp) {
 
         lit_asize = ERTS_LITERAL_AREA_ALLOC_SIZE(tot_lit_size);
         literal_area = erts_alloc(ERTS_ALC_T_LITERAL, lit_asize);
+        erts_literal_area_init_owner(literal_area, stp->namespace_owner);
         ptr = &literal_area->start[0];
         literal_area->end = ptr + tot_lit_size;
 

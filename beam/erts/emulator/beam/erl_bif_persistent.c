@@ -752,6 +752,7 @@ static Eterm put_common(Process* c_p, Eterm key, Eterm term, Eterm new)
         ERTS_INIT_OFF_HEAP(&code_off_heap);
         lit_area_size = ERTS_LITERAL_AREA_ALLOC_SIZE(term_size);
         literal_area = erts_alloc(ERTS_ALC_T_LITERAL, lit_area_size);
+        erts_literal_area_init_owner(literal_area, c_p->namespace_owner);
         ptr = &literal_area->start[0];
         literal_area->end = ptr + term_size;
         ctx->tuple = copy_shared_perform(ctx->tuple, term_size, &info, &ptr, &code_off_heap);

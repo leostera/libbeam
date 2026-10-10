@@ -14,6 +14,7 @@
 #include "erl_module_namespace.h"
 #include "beam_catches.h"
 #include "beam_ranges.h"
+#include "beam_load.h"
 #define CHECK(expr) do { if (!(expr)) { \
     fprintf(stderr, "code-space check failed at line %d: %s\n", __LINE__, #expr); \
     return 1; } } while (0)
@@ -37,6 +38,34 @@ int main(int argc, char **argv)
     a = erts_isolate_namespace_create(engine, 8192, 4096);
     b = erts_isolate_namespace_create(engine, 8192, 4096);
     CHECK(a && b);
+    {
+        Binary *prepared = erts_alloc_loader_state(a);
+        Binary *foreign = erts_alloc_loader_state(b);
+        Eterm module = am_erlang;
+        Process scratch;
+        ErtsLiteralArea *area;
+        erts_init_empty_process(&scratch);
+        scratch.namespace_owner = a; /* Borrowed, not a published process. */
+        CHECK(erts_isolate_namespace_borrowers(a) == 1);
+        CHECK(erts_isolate_namespace_discard(a) == 1);
+        CHECK(erts_finish_loading(foreign, &scratch, 0, &module) == am_badarg);
+        CHECK(erts_isolate_namespace_borrowers(b) == 1);
+        CHECK(erts_prepare_loading(foreign, &scratch, NIL, &module, NULL, 0) == am_badarg);
+        CHECK(erts_isolate_namespace_borrowers(b) == 0);
+        CHECK(beam_load_prepared_dtor(prepared) == 1);
+        CHECK(erts_isolate_namespace_borrowers(a) == 0);
+        CHECK(beam_load_prepared_dtor(prepared) == 1);
+        beam_load_prepared_free(prepared);
+        area = erts_alloc(ERTS_ALC_T_LITERAL, ERTS_LITERAL_AREA_ALLOC_SIZE(0));
+        area->off_heap = NULL;
+        area->end = area->start;
+        erts_literal_area_init_owner(area, a);
+        CHECK(erts_isolate_namespace_borrowers(a) == 1);
+        CHECK(erts_isolate_namespace_discard(a) == 1);
+        CHECK(erts_isolate_namespace_borrowers(b) == 0);
+        erts_release_literal_area(area);
+        CHECK(erts_isolate_namespace_borrowers(a) == 0);
+    }
     ca = erts_isolate_namespace_code_space(a);
     cb = erts_isolate_namespace_code_space(b);
     CHECK(erts_code_space_active(ca) == 0 && erts_code_space_staging(ca) == 1);

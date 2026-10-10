@@ -99,6 +99,7 @@ def run_host(command, cwd, env, log, timeout=60):
                     or text.splitlines().count('HOST_SIGNALS_OK dispositions=9 altstack=true mask=true usr1_delivered=true') != 1
                     or not host_markers(text, process.pid)
                     or text.splitlines().count('ATOM_STORAGE_OK copied_names=true empty_binary=true') != 1
+                    or text.splitlines().count('OWNER_LIFETIME_OK prepared_drop=true retained_literals=true process_exit=true diagnostic_world=true') != 1
                     or text.splitlines().count('CODE_SPACE_EXECUTION_OK local_funs=true native_records=true catches_and_stacktraces=true diagnostic_world=true') != 1
                     or text.splitlines().count('EXPORT_TABLE_OK reload_and_stub_lookup=true private_execution=false') != 1
                     or text.splitlines().count('EXPORT_LITERAL_OK gc_roundtrip_and_dispatch=true') != 1

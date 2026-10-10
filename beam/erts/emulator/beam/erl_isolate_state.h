@@ -42,6 +42,13 @@ ErtsModuleTable *erts_isolate_namespace_module_at(ErtsIsolateNamespaceState *, u
 ErtsModuleTable **erts_isolate_namespace_module_slots(ErtsIsolateNamespaceState *);
 /* Exclusive unpublished owner, no live terms, code or other borrowers.
  * Preflights all children; refuses without partially releasing the state. */
+/* Acquire requires an existing owner/lease. Disposal and new admission must be
+ * externally serialized; releasing the last borrower does not destroy state. */
+void erts_isolate_namespace_acquire(ErtsIsolateNamespaceState *);
+void erts_isolate_namespace_release(ErtsIsolateNamespaceState *);
+erts_aint_t erts_isolate_namespace_borrowers(ErtsIsolateNamespaceState *);
+/* Fixed bootstrap/distribution boundary, never a current-isolate selector. */
+ErtsIsolateNamespaceState *erts_diagnostic_namespace(void);
 int erts_isolate_namespace_discard(ErtsIsolateNamespaceState *);
 #ifdef __cplusplus
 }

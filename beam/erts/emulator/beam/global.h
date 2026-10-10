@@ -946,11 +946,15 @@ void erts_debug_foreach_release_literal_area_off_heap(void (*func)(ErlOffHeap *,
                                                       void *arg);
 
 typedef struct ErtsLiteralArea_ {
+    /* Lease follows detached code/persistent literals through deferred release.
+     * NULL for engine constants and separately parent-owned literal pools. */
+    struct ErtsIsolateNamespaceState *retained_namespace;
     struct erl_off_heap_header *off_heap;
     Eterm *end;
     Eterm start[]; /* beginning of area */
 } ErtsLiteralArea;
 
+void erts_literal_area_init_owner(ErtsLiteralArea *, struct ErtsIsolateNamespaceState *);
 void erts_queue_release_literals(Process *c_p, ErtsLiteralArea* literals);
 
 #define ERTS_LITERAL_AREA_ALLOC_SIZE(N) \
@@ -974,7 +978,7 @@ typedef struct {
     const Eterm* fname_ptr;     /* Pointer to fname table */
 } FunctionInfo;
 
-Binary* erts_alloc_loader_state(void);
+Binary* erts_alloc_loader_state(ErtsIsolateNamespaceState *);
 
 /* Return the module name (a tagged atom) for the prepared code in the magic
  * binary, or NIL if the binary does not contain prepared code. */

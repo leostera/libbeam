@@ -32,6 +32,7 @@
 #include "erl_vm.h"
 #include "global.h"
 #include "erl_process.h"
+#include "erl_isolate_state.h"
 #include "erl_engine.h"
 #include "error.h"
 #include "bif.h"
@@ -6471,6 +6472,7 @@ make_proxy_proc(Process *prev_proxy, Process *proc, erts_aint32_t prio)
         erts_init_runq_proc(proxy, rq, bound);
     }
 
+    proxy->namespace_owner = proc->namespace_owner; /* Borrowed via real-proc ref. */
     proxy->common.id = proc->common.id;
     ASSERT(proxy->u.real_proc == NULL);
     proxy->u.real_proc = proc;
@@ -12210,12 +12212,14 @@ static void delete_process(Process* p);
 void
 erts_free_proc(Process *p)
 {
+    ErtsIsolateNamespaceState *owner = p->namespace_owner;
     erts_proc_lock_fin(p);
     ASSERT(erts_atomic32_read_nob(&p->state) & ERTS_PSFLG_FREE);
     ASSERT(0 == erts_proc_read_refc(p));
     if (p->flags & F_DELAYED_DEL_PROC)
 	delete_process(p);
     erts_free(ERTS_ALC_T_PROC, (void *) p);
+    erts_isolate_namespace_release(owner);
 }
 
 typedef struct {
@@ -12246,7 +12250,7 @@ static void early_init_process_struct(void *varg, Eterm data)
 ** Allocate process and find out where to place next process.
 */
 static Process*
-alloc_process(ErtsRunQueue *rq, int bound, erts_aint32_t state)
+alloc_process(ErtsIsolateNamespaceState *owner, ErtsRunQueue *rq, int bound, erts_aint32_t state)
 {
     ErtsEarlyProcInit init_arg;
     Process *p;
@@ -12255,7 +12259,9 @@ alloc_process(ErtsRunQueue *rq, int bound, erts_aint32_t state)
     if (!p)
 	return NULL;
 
-    ASSERT(rq);
+    ASSERT(rq && owner);
+    p->namespace_owner = owner;
+    erts_isolate_namespace_acquire(owner);
 
     init_arg.proc = (Process *) p;
     init_arg.state = state;
@@ -12269,6 +12275,7 @@ alloc_process(ErtsRunQueue *rq, int bound, erts_aint32_t state)
 			       (void *) &init_arg,
 			       early_init_process_struct)) {
 	erts_free(ERTS_ALC_T_PROC, p);
+        erts_isolate_namespace_release(owner);
 	return NULL;
     }
 
@@ -12503,7 +12510,7 @@ erts_parse_spawn_opts(ErlSpawnOpts *sop, Eterm opts_list, Eterm *tag,
 }
 
 Eterm
-erl_create_process(Process* parent, /* Parent of process (default group leader). */
+erl_create_process(ErtsIsolateNamespaceState *owner, Process* parent, /* Parent of process (default group leader). */
 		   Eterm mod,	/* Tagged atom for module. */
 		   Eterm func,	/* Tagged atom for function. */
 		   Eterm args,	/* Arguments for function (must be well-formed list). */
@@ -12556,6 +12563,14 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
      * Check for errors.
      */
 
+    /* Execution still uses diagnostic dispatch boundaries. Do not admit a
+     * private process until those boundaries carry the owner as well. */
+    if (!owner || owner != erts_diagnostic_namespace() ||
+        (parent && parent->namespace_owner != owner)) {
+        so->error_code = BADARG;
+        goto error;
+    }
+
     if (is_not_atom(mod) || is_not_atom(func) || ((arity = erts_list_length(args)) < 0)) {
 	so->error_code = BADARG;
 	goto error;
@@ -12601,7 +12616,8 @@ erl_create_process(Process* parent, /* Parent of process (default group leader).
     }
     ASSERT(rq);
 
-    p = alloc_process(rq, bound, state); /* All proc locks are locked by this thread
+    ASSERT(owner && (!parent || parent->namespace_owner == owner));
+    p = alloc_process(owner, rq, bound, state); /* All proc locks are locked by this thread
                                             on success */
     if (!p) {
 	erts_send_error_to_logger_str(group_leader, "Too many processes\n");
@@ -13270,6 +13286,7 @@ erts_send_local_spawn_reply(Process *parent, ErtsProcLocks parent_locks,
 
 void erts_init_empty_process(Process *p)
 {
+    p->namespace_owner = NULL; /* Non-world scratch process until explicitly bound. */
     p->htop = NULL;
     p->stop = NULL;
     p->hend = NULL;

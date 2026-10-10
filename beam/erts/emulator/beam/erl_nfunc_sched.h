@@ -286,6 +286,7 @@ erts_make_dirty_shadow_proc(ErtsSchedulerData *esdp, Process *c_p)
 	       | ERTS_PSFLG_PROXY));
 
     sproc->next = c_p;
+    sproc->namespace_owner = c_p->namespace_owner;
     sproc->common.id = c_p->common.id;
 
     erts_cache_dirty_shadow_proc(sproc);

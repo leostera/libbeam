@@ -13,6 +13,7 @@ run() ->
     atom_storage(),
     export_literals(),
     export_tables(),
+    owner_lifetime(),
     3.75 = float_div(7.5, 2.0),
     1.25 = binary_to_float(<<"1.25">>),
     <<"1.250">> = float_to_binary(1.25, [{decimals, 3}]),
@@ -93,6 +94,33 @@ export_tables() ->
     1 = F(), % The same external fun resolves again through autoload.
     io:format("EXPORT_TABLE_OK reload_and_stub_lookup=true private_execution=false~n"),
     io:format("CODE_SPACE_EXECUTION_OK local_funs=true native_records=true catches_and_stacktraces=true diagnostic_world=true~n").
+
+owner_lifetime() ->
+    {ok, Beam} = file:read_file(code:which(export_namespace_probe)),
+    lists:foreach(fun(_) -> drop_prepared(Beam) end, lists:seq(1, 64)),
+    true = erlang:garbage_collect(),
+    Retained = export_namespace_probe:literal(),
+    Encoded = term_to_binary(Retained),
+    Key = {?MODULE, owner_lifetime},
+    ok = persistent_term:put(Key, Retained),
+    Retained = persistent_term:get(Key),
+    true = persistent_term:erase(Key),
+    true = code:delete(export_namespace_probe),
+    true = code:soft_purge(export_namespace_probe),
+    receive after 20 -> ok end,
+    true = erlang:garbage_collect(),
+    Encoded = term_to_binary(Retained),
+    Parent = self(),
+    {Child, Monitor} = spawn_monitor(fun() -> Parent ! {retained, Retained} end),
+    receive {retained, Retained} -> ok after 5000 -> error(retained_timeout) end,
+    receive {'DOWN', Monitor, process, Child, normal} -> ok
+    after 5000 -> error(child_exit_timeout) end,
+    io:format("OWNER_LIFETIME_OK prepared_drop=true retained_literals=true process_exit=true diagnostic_world=true~n").
+
+drop_prepared(Beam) ->
+    Ref = erts_internal:prepare_loading(export_namespace_probe, Beam),
+    true = is_reference(Ref),
+    ok.
 
 code_tables(Version) ->
     Closure = export_namespace_probe:closure(10),

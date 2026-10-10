@@ -112,6 +112,7 @@ static void expand_shared_global_literal_area(Uint heap_size)
 
     chunk->area.end = &(chunk->area.start[0]);
     chunk->chunk_end = &(chunk->area.start[heap_size]);
+    chunk->area.retained_namespace = NULL; /* Immutable engine constants. */
     chunk->area.off_heap = NULL;
     chunk->next = global_literal_chunk;
 

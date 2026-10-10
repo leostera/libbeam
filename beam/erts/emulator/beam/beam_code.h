@@ -57,6 +57,9 @@ typedef struct BeamDebugTab_ BeamDebugTab;
  * about the loaded module.
  */
 typedef struct beam_code_header {
+    /* Prepared code borrows the loader's lease. Publication takes one lease per
+     * physical code allocation, released only after purge frees that allocation. */
+    struct ErtsIsolateNamespaceState *namespace_owner;
     /*
      * Number of functions.
      */

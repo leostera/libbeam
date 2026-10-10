@@ -18,6 +18,7 @@
 
 struct ErtsIsolateNamespaceState {
     ErtsEngine *engine;
+    erts_atomic_t borrowers;
     ErtsAtomNamespace *atoms;
     ErtsModuleTable *modules[ERTS_NUM_CODE_IX];
     ErtsExportLiterals *export_literals;
@@ -42,6 +43,7 @@ static ErtsIsolateNamespaceState *create_state(ErtsEngine *engine,
     if (!state)
         return NULL;
     state->engine = engine;
+    erts_atomic_init_nob(&state->borrowers, 0);
     state->atoms = erts_atom_namespace_create(atom_limit);
     if (!state->atoms) {
         free(state);
@@ -128,10 +130,30 @@ ErtsModuleTable **erts_isolate_namespace_module_slots(ErtsIsolateNamespaceState 
     return state->modules;
 }
 
+void erts_isolate_namespace_acquire(ErtsIsolateNamespaceState *state)
+{
+    ASSERT(state);
+    erts_atomic_inc_nob(&state->borrowers);
+}
+
+void erts_isolate_namespace_release(ErtsIsolateNamespaceState *state)
+{
+    erts_aint_t remaining;
+    ASSERT(state);
+    remaining = erts_atomic_dec_read_relb(&state->borrowers);
+    ASSERT(remaining >= 0);
+    (void) remaining;
+}
+
+erts_aint_t erts_isolate_namespace_borrowers(ErtsIsolateNamespaceState *state)
+{
+    return erts_atomic_read_acqb(&state->borrowers);
+}
+
 int erts_isolate_namespace_discard(ErtsIsolateNamespaceState *state)
 {
     int i;
-    if (!state || state->bound ||
+    if (!state || state->bound || erts_isolate_namespace_borrowers(state) ||
         !erts_export_literals_can_discard(state->export_literals) ||
         !erts_export_namespace_can_discard(state->exports) ||
         !erts_code_table_can_discard(state->funs) ||

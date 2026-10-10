@@ -247,7 +247,7 @@ erts_internal_prepare_loading_2(BIF_ALIST_2)
         BIF_ERROR(BIF_P, BADARG);
     }
 
-    magic = erts_alloc_loader_state();
+    magic = erts_alloc_loader_state(BIF_P->namespace_owner);
     reason = erts_prepare_loading(magic, BIF_P, BIF_P->group_leader,
                                   &BIF_ARG_1, code, size);
 
@@ -386,6 +386,8 @@ finish_loading_1(BIF_ALIST_1)
 	    goto badarg;
 	}
 	p[i].code = erts_magic_ref2bin(term);
+        if (erts_prepared_code_owner(p[i].code) != BIF_P->namespace_owner)
+            goto badarg;
 	p[i].module = erts_module_for_prepared_code(p[i].code);
 	if (p[i].module == NIL) {
 	    goto badarg;
@@ -2249,6 +2251,7 @@ BIF_RETTYPE erts_internal_purge_module_2(BIF_ALIST_2)
             if (!modp->old.code_hdr) {
                 ERTS_BIF_PREP_RET(ret, am_false);
             } else {
+                ErtsIsolateNamespaceState *code_owner = modp->old.code_hdr->namespace_owner;
                 literals = (modp->old.code_hdr)->literal_area;
 
                 /* Unload any NIF library. */
@@ -2295,6 +2298,7 @@ BIF_RETTYPE erts_internal_purge_module_2(BIF_ALIST_2)
                 modp->old.code_hdr = NULL;
                 modp->old.code_length = 0;
                 modp->old.catches = BEAM_CATCHES_NIL;
+                erts_isolate_namespace_release(code_owner);
                 ERTS_BIF_PREP_RET(ret, am_true);
             }
 
