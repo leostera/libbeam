@@ -5,6 +5,7 @@
  * A joinable worker is started lazily by actual asynchronous task admission.
  */
 #include "code_internal.h"
+#include "executor.h"
 
 static void release_catalog(LbEngine *engine)
 {
@@ -15,7 +16,7 @@ static void release_catalog(LbEngine *engine)
 static void release_control(LbEngine *engine)
 {
     LbAllocDomain *domain=engine->domain;
-    assert(!engine->owner_live && !engine->spaces && !engine->tasks);
+    assert(!engine->owner_live && !engine->spaces && !engine->tasks && !engine->worlds);
     release_catalog(engine);
     lb_release(domain,engine);
     if(lb_alloc_domain_destroy(domain)!=LB_ALLOC_OK) abort();
@@ -65,19 +66,33 @@ LbEngineStatus lb_engine_shutdown(LbEngine *engine)
 {
     if(!engine) return LB_ENGINE_INVALID;
     if(!lb_engine_is_open(engine)) return LB_ENGINE_CLOSED;
-    if(engine->spaces || engine->tasks || engine->control_borrow) return LB_ENGINE_BUSY;
-    release_catalog(engine); return LB_ENGINE_OK;
+    if(engine->control_borrow) return LB_ENGINE_BUSY;
+    lb_engine_enter(engine);
+    if(engine->spaces || engine->tasks || engine->worlds) {
+        lb_engine_leave(engine); return LB_ENGINE_BUSY;
+    }
+    engine->closed=1; /* close admission before dropping serialization to join */
+    lb_engine_leave(engine); release_catalog(engine); return LB_ENGINE_OK;
 }
 void lb_engine_release(LbEngine *engine)
 {
     if(!engine) return;
     if(!engine->owner_live) abort(); /* duplicate consumption of an internal handle */
-    engine->owner_live=0;
-    lb_engine_release_if_detached(engine);
+    if(engine->control_borrow) { engine->owner_live=0; return; }
+    if(engine->sync_ready) {
+        lb_engine_enter(engine); engine->owner_live=0; lb_engine_leave(engine);
+    } else {
+        engine->owner_live=0; lb_engine_release_detached(engine);
+    }
 }
-void lb_engine_release_if_detached(LbEngine *engine)
+int lb_engine_is_detached(const LbEngine *engine)
 {
-    if(!engine->owner_live && !engine->spaces && !engine->tasks && !engine->control_borrow) release_control(engine);
+    return !engine->owner_live && !engine->spaces && !engine->tasks && !engine->worlds && !engine->control_borrow;
+}
+void lb_engine_release_detached(LbEngine *engine)
+{
+    if(!lb_engine_is_detached(engine)) abort();
+    release_control(engine);
 }
 void lb_engine_space_published(LbEngine *engine)
 {
@@ -88,5 +103,9 @@ void lb_engine_space_released(LbEngine *engine)
 {
     if(!engine->spaces) abort();
     --engine->spaces;
-    lb_engine_release_if_detached(engine);
+    /* The worker now retires world code spaces and orphan task controls. Only
+     * host leave may decide final disposal with a live worker, under its mutex,
+     * then unlock and join. No unlocked ownership reads and no worker self-join. */
+    if(!engine->worker_started && !engine->control_borrow && lb_engine_is_detached(engine))
+        lb_engine_release_detached(engine);
 }

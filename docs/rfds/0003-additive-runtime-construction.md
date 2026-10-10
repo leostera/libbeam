@@ -3,20 +3,22 @@
 
 # RFD 0003: Build libbeam additively from BEAM components
 
-Status: **Accepted direction; selected BEAM execution and G1 Engine lifetime demonstrated.**
+Status: **Accepted direction; G1 lifetime and M2 selected-profile public Isolate execution demonstrated.**
 
 The [first-execution record](0003-first-execution.md) connects the earlier
 [A03–A07 checkpoint](0003-loader-program.md) to real generated transformations,
 emission, publication, interpreter execution and copying GC for a limited profile.
-Full loader/literal/instruction breadth and Isolate API integration remain
+Full loader/literal/instruction breadth and stateful process machinery remain
 outstanding. The subsequent [C Engine lifecycle integration](0003-engine-lifecycle.md)
 passes the unchanged create/shutdown/recreate target over this actual substrate;
-the unchanged stateful two-Isolate target still refuses Isolate creation. The subsequent
+the unchanged stateful two-Isolate target still refuses unsupported module admission. The subsequent
 [ordinary-binary slice](0003-owned-binaries.md) connects native payload lifetime to
 literal loading, metadata copies, collection and copied-byte invocation. The
 [owned executor](0003-owned-executor.md) now runs that actual machinery on one lazy
-shared worker, with construction rollback, cancellation and physical join; public
-world/call completion remains outstanding.
+shared worker, with construction rollback, cancellation and physical join.
+[Public Isolates and calls](0003-public-isolates.md) now connect it to copied transport,
+capacity, once-only results and physical selected-world reclamation. M3/M4 remain
+outstanding; real persistent Erlang processes are not implemented by call handles.
 
 See the [A01/A02 term-and-atom admission record](0003-terms-and-atoms.md) for the
 selected BEAM representation, namespace identities, transactional image bindings

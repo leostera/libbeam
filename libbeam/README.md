@@ -30,14 +30,16 @@ The [first-execution record](../docs/rfds/0003-first-execution.md) covers genera
 transforms/dispatch, copying GC, module-info BIFs and guarded code retirement.
 The [Engine lifecycle integration](../docs/rfds/0003-engine-lifecycle.md) connects
 that actual execution substrate to the C++ factory and passes the unchanged
-create/shutdown/recreate target. Full A03–A07 breadth and public Isolate lifecycle
-remain unfinished. Native archive work below is diagnostic/reference evidence,
+create/shutdown/recreate target. [Public Isolates and calls](../docs/rfds/0003-public-isolates.md)
+now execute the selected profile on the worker, with copied transport and physical
+reclamation. Full A03–A07 breadth and stateful process machinery remain unfinished. Native archive work below is diagnostic/reference evidence,
 not a fallback runtime for the new core.
 
 This directory contains build/link probes and an
 [API-first two-isolate example](examples/two_isolates.md). Its experimental C++
-library and CMake target now build and run, but the example fails at the first
-unfinished operation (`Engine::create_isolate`). No successful world is faked.
+library and CMake target now build and execute selected-profile modules. The
+unchanged example still refuses its unsupported stateful module during loading;
+no successful world execution or persistent process is faked.
 RFD 0003 supersedes the construction strategy in the earlier
 [implementation plan](../docs/rfds/0002-example-implementation-plan.md), while
 retaining its real-engine, private-world, execution and reclamation goals.
@@ -89,8 +91,8 @@ and commit them alongside embedding changes; there is no submodule or patch seri
 No Realm implementation is part of the active source.
 
 [RFD 0002](../docs/rfds/0002-libbeam-isolates.md) defines the first proof and its
-acceptance criteria. The C++ API scaffold is not a functioning isolate runtime or
-stable SDK. The archive-link probe does not start an engine;
+acceptance criteria. The selected-profile C++ API is not a stable SDK or a full
+Erlang-process runtime. The archive-link probe does not start an engine;
 the separate experimental native entry below does, without shutdown or isolates.
 The initial interface is intended to manage one engine and multiple freshly created
 isolates with bounded binary requests/results and explicit stop/reclamation.

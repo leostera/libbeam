@@ -34,8 +34,9 @@ runtime behavior or supported language semantics.
 
 **The public C++ Engine now passes create → shutdown → create over the actual
 additive C execution substrate; [lifecycle evidence](docs/rfds/0003-engine-lifecycle.md).
-The Isolate/call/reclamation API and stateful proof remain unimplemented. The C core
-executes a limited BEAM profile with copying GC and owned code/binary retirement.
+[Public Isolates, copied calls and physical reclamation](docs/rfds/0003-public-isolates.md)
+now execute a limited BEAM profile on the Engine worker, with copying GC and owned
+code/binary retirement. The stateful proof still requires missing Erlang machinery.
 The older native startup experiment still cannot shut down safely. This is not a
 security boundary for untrusted workloads.**
 
@@ -60,7 +61,7 @@ Concurrent density, execution budgets/eviction and suspend/resume have separate
 tracked gates; 1,000 sequential proof cycles do not prove 1,000 resident isolates.
 The [two-isolate C++ example](libbeam/examples/two_isolates.md) now specifies the
 API we want, with same-module Erlang fixtures. It links and runs against the real
-C Engine, explicitly failing at `Engine::create_isolate` until world lifecycle exists.
+C runtime, now failing at admission of the unsupported stateful module profile.
 RFD 0003 supersedes the construction strategy in the earlier
 [implementation plan](docs/rfds/0002-example-implementation-plan.md), keeping the
 example—not broad runtime cleanup—as the development driver.

@@ -4,7 +4,8 @@
 
 // EXPERIMENTAL API: signatures express the target contract below.
 // Engine construction/shutdown own the additive C execution substrate.
-// Isolate/call/reclamation operations remain explicitly unsupported.
+// Isolate/call/reclamation operate on the explicitly admitted BEAM profile;
+// the stateful Erlang-process fixture still requires additional runtime machinery.
 // No implicit worlds or OTP startup; no stable public ABI claim.
 #include <chrono>
 #include <cstddef>
@@ -97,6 +98,7 @@ private:
     friend class Engine;
     struct Impl;
     explicit Isolate(std::unique_ptr<Impl>);
+    Result<Call> invoke(bool starting, std::string_view, std::string_view, ByteView);
     std::unique_ptr<Impl> impl_;
 };
 
@@ -118,7 +120,8 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-// All management/wait operations initially use one host control thread. No host
+// All handles must be managed/destroyed on the Engine's host control thread;
+// management/wait methods reject another thread. No host
 // callbacks run under VM locks. Inputs (including MFA names) are copied on
 // admission. Guest calls run in ordinary isolate-owned Erlang processes.
 // Target bounds: 64 KiB/call payload or result, 64 outstanding calls/isolate,

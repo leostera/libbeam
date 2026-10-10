@@ -20,7 +20,8 @@
     "native_kind": "heavy; these owned implementations may collect",
     "threading": "explicit-context bounded executor; one lazy joinable POSIX worker per Engine; Engine mutex serializes raw loader/heap/domain access; no tenant TLS",
     "literals": "bounded ETF subset plus ordinary immutable offheap binaries (binary-sources.json); no fun/map admission",
-    "engine": "Owned shared native catalog and allocation substrate; spaces retain the C Engine through physical destruction; C++ factory uses this lifecycle",
-    "remaining": "Full A05/A06/A07 breadth, A12 Isolate/call/reclamation API and B-cluster stateful execution remain outstanding"
+    "engine": "Owned shared native catalog and allocation substrate; C worlds and tasks retain Engine through physical retirement; worker-side orphan/space retirement and host lifetime checks share the mutex; final join follows host unlock",
+    "host_protocol": "C world/call/reclamation ownership and thin C++ adapter; copied binary input/output, reserved capacity, once-only completion and physical selected-world retirement; no additional opcode or BIF admission",
+    "remaining": "Full A05/A06/A07 breadth and B-cluster stateful process execution/retirement remain outstanding; selected-profile public Isolates are implemented"
   }
 }

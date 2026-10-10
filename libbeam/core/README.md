@@ -4,15 +4,17 @@ See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md) and the
 [first-execution record](../../docs/rfds/0003-first-execution.md) and
 [ordinary-binary extension](../../docs/rfds/0003-owned-binaries.md) and
 [C Engine lifecycle](../../docs/rfds/0003-engine-lifecycle.md) and
-[owned asynchronous executor](../../docs/rfds/0003-owned-executor.md).
+[owned asynchronous executor](../../docs/rfds/0003-owned-executor.md) and
+[public Isolates/calls](../../docs/rfds/0003-public-isolates.md).
 
 This is the C runtime construction boundary, not a whole-ERTS link. It now loads
 and executes ordinary `first_slice.erl` through generated BEAM transformations,
 specific-instruction words and generated interpreter cases. Tuple allocation,
 copying GC, literal/atom returns, `module_info/0,1`, bounded yields, exceptions and
 physical code retirement have execution consumers. This is a **limited profile**,
-not full A03–A07 coverage or a functioning public Isolate API. The unchanged Engine
-lifecycle target passes over this substrate; stateful Isolate creation still refuses.
+not full A03–A07 coverage or full Erlang process machinery. Public Isolates now run
+this profile with copied calls and physical reclamation. The unchanged Engine
+lifecycle target passes; the stateful example still refuses unsupported module imports/instructions.
 
 ## Boundaries
 
@@ -22,7 +24,11 @@ lifecycle target passes over this substrate; stateful Isolate creation still ref
   or implicit world. The C++ factory owns this C handle.
 - `executor.c`: one lazy joinable POSIX worker shared by real retained task/process
   contexts. Bounded generated execution, cancellation at safepoints and physical
-  join/cleanup. Tasks still are not the public binary Call/Isolate protocol.
+  join/cleanup. Internal raw tasks and public calls use the same interpreter.
+- `world.c`: C world/call/reclamation ownership, private code-space loading, bounded
+  copied transport and once-only completion. Closing cancels pending invocations;
+  reclamation physically frees code/atoms/heaps while finite host controls survive.
+  Future spawned processes, mailboxes and timers still need real drain consumers.
 - `alloc.c`: serialized fallible allocation domains, exact-base release and busy
   destruction. Not a guest quota or a performant carrier allocator.
 - `term.h`, `atoms.c`: selected flat 64-bit BEAM terms and private atom namespaces.
@@ -53,14 +59,17 @@ lifecycle target passes over this substrate; stateful Isolate creation still ref
   metadata/checksum behavior, not placeholders for compiler-generated imports.
 
 All control APIs are serialized. With a worker, raw code/heap/domain access must
-hold the Engine control borrow; internal task APIs acquire it themselves.
+hold the Engine control borrow; task/world APIs acquire it themselves. Worker-side
+orphan completion and code retirement also mutate ownership: final-detachment and
+shutdown checks therefore occur under the mutex, with disposal/join after unlock.
 Entry/process handles retain actual code and its
 literal storage. Returned term views borrow the process until its next mutating
 call or destruction. Runtime collection preserves outstanding heap reservations;
 new stack slots are valid roots even at host instruction-budget safepoints.
 Metadata copies retain binary payloads independently of source code arenas.
-`lb_process_create_binary` copies host bytes into a real arity-one invocation;
-this is not yet the public asynchronous binary-call contract.
+`lb_process_create_binary` copies host bytes into a real arity-one invocation.
+`world.c` applies the public 64-KiB input/output, 64-call and 1-MiB reservation limits;
+C++ copies ready outputs into independently host-owned vectors before consumption.
 
 ## Deliberate limits
 

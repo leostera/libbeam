@@ -51,9 +51,17 @@ int main() {
         auto engine = std::move(original);
         auto moved = original.shutdown(deadline());
         CHECK(moved && moved->code == ErrorCode::invalid_state);
-        auto unsupported = engine.create_isolate();
-        CHECK(std::holds_alternative<Error>(unsupported));
-        CHECK(std::get<Error>(unsupported).code == ErrorCode::not_implemented);
+        {
+            fail_next_new = true;
+            auto failed_world = engine.create_isolate();
+            CHECK(std::holds_alternative<Error>(failed_world) && std::get<Error>(failed_world).code == ErrorCode::limit);
+            auto created = engine.create_isolate(); CHECK(std::holds_alternative<Isolate>(created));
+            auto& world = std::get<Isolate>(created);
+            auto busy = engine.shutdown(deadline()); CHECK(busy && busy->code == ErrorCode::busy);
+            auto stop = world.stop(); CHECK(std::holds_alternative<Reclamation>(stop));
+            CHECK(!std::get<Reclamation>(stop).wait_until(deadline()));
+            busy = engine.shutdown(deadline()); CHECK(busy && busy->code == ErrorCode::busy);
+        }
         auto expired = engine.shutdown(Deadline::min());
         CHECK(expired && expired->code == ErrorCode::timeout);
         CHECK(!engine.shutdown(deadline()));
@@ -71,6 +79,6 @@ int main() {
         CHECK(!survivor.shutdown(deadline()));
     }
     CHECK(allocations == before);
-    std::puts("API_ENGINE_OK create_shutdown_create=true allocation_failure_retry=true moved_handles=true deadlines=true isolates=false");
+    std::puts("API_ENGINE_OK create_shutdown_create=true allocation_failure_retry=true moved_handles=true deadlines=true empty_isolate_lifetime=true execution=false");
     return 0;
 }

@@ -59,8 +59,10 @@ def main():
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
                             root / 'libbeam/tests/fixtures/first_slice.erl',
-                            root / 'libbeam/tests/api_engine_test.cpp', root / 'libbeam/tests/core_engine_test.c',
-                            root / 'libbeam/tests/core_executor_test.c', root / 'libbeam/tests/fixtures/async_slice.erl',
+                            root / 'libbeam/tests/api_engine_test.cpp', root / 'libbeam/tests/api_world_test.cpp',
+                            root / 'libbeam/tests/core_engine_test.c',
+                            root / 'libbeam/tests/core_executor_test.c', root / 'libbeam/tests/core_world_test.c',
+                            root / 'libbeam/tests/fixtures/async_slice.erl',
                             root / 'libbeam/include/libbeam/engine.hpp',
                             root / 'libbeam/examples/engine_lifecycle.cpp',
                             root / 'libbeam/examples/two_isolates.cpp', Path(__file__).resolve()})
@@ -129,6 +131,13 @@ def main():
             run('async-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/async_slice.erl'])
             async_fixture = fixture_dir / 'async_slice.beam'
             run('executor-execution', [out / 'build/core_executor_test', async_fixture])
+            run('world-execution', [out / 'build/core_world_test', async_fixture])
+            large_source = fixture_dir / 'code_large.erl'
+            large_source.write_text('-module(code_large).\n-export([value/1]).\nvalue(_) -> <<"'+'q'*65537+'">>.\n')
+            summary['large_fixture_source_sha256'] = hashlib.sha256(large_source.read_bytes()).hexdigest()
+            run('large-erlc', [args.erlc, '-o', fixture_dir, large_source])
+            large_fixture = fixture_dir / 'code_large.beam'
+            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture])
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
             run('peer-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/code_peer.erl'])
@@ -187,6 +196,7 @@ def main():
                 lists:foreach(fun({M,F,A}) -> io:format("IMPORT_NAME ~s ~s ~B~n",[Hex(M),Hex(F),A]) end,proplists:get_value(imports,Chunks)),
                 lists:foreach(fun({F,A}) -> io:format("EXPORT_NAME ~s ~B~n",[Hex(F),A]) end,proplists:get_value(exports,Chunks)),
                 42 = first_slice:value(), ok = first_slice:identity(ok), {ok,42} = first_slice:pair(ok),
+                65537 = byte_size(code_large:value(<<>>)),
                 Digits = binary:copy(<<"0123456789">>,8),
                 {Digits} = binary_slice:literal(), {Bits} = binary_slice:bits(),
                 Bits = <<Digits/binary,5:3>>,
@@ -248,7 +258,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','md5','process','heap','bif_info']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -267,10 +277,12 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags, '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'api_engine_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
+            run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture])
+            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
@@ -281,6 +293,8 @@ def main():
             run('release-code-growth', [out / 'release/core_code_test', '--many', many_fixture])
             run('release-binary', [out / 'release/core_binary_test', binary_fixture, fixture, peer_fixture])
             run('release-executor', [out / 'release/core_executor_test', async_fixture])
+            run('release-world', [out / 'release/core_world_test', async_fixture])
+            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture])
             for filename in ('lb_atoms_generated.h', 'lb_atoms_generated.inc', 'lb_bif_ids_generated.h'):
                 first = (out / 'build/generated/atoms' / filename).read_bytes()
                 second = (out / 'release/generated/atoms' / filename).read_bytes()
@@ -300,10 +314,12 @@ def main():
             summary['selected_core_execution_passed'] = True
             summary['binary_execution_retirement_passed'] = True
             summary['worker_execution_retirement_passed'] = True
+            summary['world_execution_retirement_passed'] = True
+            summary['public_selected_profile_execution_passed'] = True
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, many_fixture, *probes]}
+                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, many_fixture, *probes]}
             # G1 now requires the unchanged acceptance target and real C/adapter
             # failure recovery. Stateful G3 remains separately observed, not green.
             lifecycle = run('engine-lifecycle', [out / 'build/engine_lifecycle'])

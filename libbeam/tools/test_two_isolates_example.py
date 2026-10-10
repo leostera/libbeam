@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Leandro Ostera <leandro@ostera.io>
 
-"""Real Engine linkage; the unchanged stateful Isolate target must still refuse."""
+"""Real runtime linkage; malformed host input must be rejected before execution."""
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,7 +10,7 @@ import unittest
 
 
 class IsolateExampleBoundaryTests(unittest.TestCase):
-    def test_example_links_and_stops_at_missing_isolate(self):
+    def test_example_links_and_rejects_invalid_beam(self):
         if not shutil.which('cmake'):
             self.skipTest('CMake unavailable; no runtime acceptance implied')
         root = Path(__file__).resolve().parents[2]
@@ -32,14 +32,14 @@ class IsolateExampleBoundaryTests(unittest.TestCase):
             ):
                 result = subprocess.run(command, capture_output=True, text=True, timeout=180)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            # Opaque nonempty input only: Isolate creation must fail before load.
+            # Opaque malformed input: actual Isolate loading must refuse it.
             # Not a BEAM fixture or a stateful Isolate acceptance test.
             fixture = out / 'opaque-input'
             fixture.write_bytes(b'not BEAM bytecode')
             run = subprocess.run([str(out / 'build/two_isolates'), str(fixture), str(fixture)],
                                  capture_output=True, text=True, timeout=10)
             self.assertEqual(run.returncode, 1)
-            self.assertIn('not implemented: Engine::create_isolate', run.stderr)
+            self.assertIn('invalid BEAM image', run.stderr)
             self.assertNotIn(': OK', run.stdout)
 
 

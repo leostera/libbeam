@@ -25,7 +25,7 @@ jobs:
           flock 9
           git rev-parse HEAD
           python3 -B -m unittest discover -s libbeam/tools -p 'test_*.py' -v
-      - name: Check additive C components and Engine lifetime (not Isolate acceptance)
+      - name: Check additive C components and Engine lifetime (not stateful acceptance)
         shell: bash
         run: |
           set -euo pipefail
@@ -43,6 +43,7 @@ jobs:
               libbeam/tools/check_binary_representation.py libbeam/tools/project_transform.py \
               libbeam/tools/project_dispatch.py libbeam/src/engine.cpp \
               libbeam/include/libbeam/engine.hpp libbeam/tests/api_engine_test.cpp \
+              libbeam/tests/api_world_test.cpp \
               libbeam/examples/engine_lifecycle.cpp libbeam/CMakeLists.txt \
               > "$build/source-hashes.txt"
             find libbeam/core/otp/opcodes -type f -print0 | sort -z | \
@@ -57,7 +58,7 @@ jobs:
       - uses: erlef/setup-beam@v1
         with:
           otp-version: '28.3'
-      - name: Execute Engine lifetime and the selected additive profile (not stateful Isolates)
+      - name: Execute Engine lifetime and selected-profile public Isolates (not stateful acceptance)
         shell: bash
         run: |
           set -euo pipefail

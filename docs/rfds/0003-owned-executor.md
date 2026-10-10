@@ -3,7 +3,12 @@
 
 # Engine-owned asynchronous execution
 
-Status: **Internal worker/execution slice; public Isolate/Call APIs still refused.**
+Status: **Implemented historical internal-worker checkpoint.**
+
+The later [public-Isolate integration](0003-public-isolates.md) implements selected-
+profile Isolate/Call/Reclamation and adds worker-side completion/retirement.
+The refusals and remaining-work statements below describe this earlier checkpoint;
+its raw task semantics remain distinct from the public copied-call protocol.
 
 This follows [G1 Engine ownership](0003-engine-lifecycle.md), baseline `dffd1206`,
 under [RFD 0003](0003-additive-runtime-construction.md). It supplies an execution-led

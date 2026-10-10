@@ -6,9 +6,9 @@
 [`two_isolates.cpp`](two_isolates.cpp) is the executable specification we will work
 toward. The [experimental API](../include/libbeam/engine.hpp) now owns the
 [real additive C Engine](../../docs/rfds/0003-engine-lifecycle.md). **This example
-links and runs, then exits 1 at `not implemented: Engine::create_isolate`.**
-Every unfinished API reports an explicit error; no successful world/result is
-simulated. The separate unchanged `engine_lifecycle.cpp` passes create/shutdown/
+links and creates private worlds, then exits 1 at unsupported stateful module
+admission.** [Selected-profile public execution](../../docs/rfds/0003-public-isolates.md)
+is implemented; the required persistent Erlang processes are not simulated. The separate unchanged `engine_lifecycle.cpp` passes create/shutdown/
 recreate. Historical [native package](../../docs/rfds/0002-native-api-link.md) and
 [preparation](../../docs/rfds/0002-unbooted-preparation.md) diagnostics are not a
 production backend. See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md)
@@ -67,12 +67,12 @@ or swapping one global namespace between calls count as the implementation.
   Timeout means pending work, never permission to force-free reachable state.
 - Explicit `shutdown` requires reclaimed worlds and released handles and must
   return without terminating the host. Destructors must remain safe during error
-  unwinding; their eventual cleanup coordination is not implemented or certified
-  by this successful-path example.
+  unwinding. Selected-profile cleanup is separately tested, but future spawned
+  processes/deferred-work cleanup is not certified by this successful-path example.
 
 The header is under `include/libbeam/`, in namespace `libbeam`, but remains an
-experimental, unstable API. The comments specify target semantics, not implemented
-behavior. There is no mode option that restores a full OTP node.
+experimental, unstable API. The comments specify target semantics; the admitted
+execution profile is narrower than the stateful example's requirements. There is no mode option that restores a full OTP node.
 
 ## Implementation order driven by this program
 
@@ -86,8 +86,8 @@ behavior. There is no mode option that restores a full OTP node.
 | `shutdown` | Join engine threads and release engine-owned state without process exit. |
 
 Remove legacy machinery when it blocks one of these operations. Broad cleanup is
-not a prerequisite. Explicit `not_implemented` stubs now mark the frontier for the
-new API; they must never manufacture success. This supersedes the earlier
+not a prerequisite. Explicit unsupported-profile errors mark the current execution
+frontier; no missing process or native operation may manufacture success. This supersedes the earlier
 no-link proposal and does not restore deleted OTP compatibility functions.
 
 This is the first behavioral slice, not the entire RFD acceptance suite. Private

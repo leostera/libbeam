@@ -5,6 +5,11 @@
 
 Status: **Implemented G1 slice; stateful Isolate acceptance remains red.**
 
+The later [public-Isolate integration](0003-public-isolates.md) supersedes the
+Isolate/call refusals described at this original G1 checkpoint and synchronizes
+ownership checks with worker-side retirement. Its selected-profile public execution
+is real; full stateful Erlang-process acceptance is still outstanding.
+
 This is a snapshot of the C ownership/adapter integration required by
 [RFD 0003](0003-additive-runtime-construction.md), following
 [first execution](0003-first-execution.md) and [ordinary binaries](0003-owned-binaries.md).

@@ -9,6 +9,7 @@
 #include "term.h"
 #include <pthread.h>
 typedef struct LbTask LbTask;
+typedef struct LbWorld LbWorld;
 
 typedef Uint BeamInstr;
 typedef struct LbProcess LbProcess;
@@ -27,10 +28,14 @@ struct LbEngine {
     pthread_t worker;
     int sync_ready, worker_started, worker_stop, control_borrow;
     LbTask *tasks, *cursor;
+    LbWorld *worlds;
 };
 LbEngineStatus lb_executor_init(LbEngine *);
 void lb_executor_shutdown(LbEngine *); /* no tasks; caller does not hold mutex */
-void lb_engine_release_if_detached(LbEngine *);
+/* Inspect under the mutex (or before a worker exists). Dispose only on host
+ * control after unlock, once no remaining child can mutate the ownership graph. */
+int lb_engine_is_detached(const LbEngine *);
+void lb_engine_release_detached(LbEngine *);
 /* Publication follows complete construction. Release follows physical child
  * destruction, never logical stop. Caller obeys serialized/no-reentry contract. */
 void lb_engine_space_published(LbEngine *);
