@@ -16,10 +16,13 @@ typedef enum {
 
 /* Serialized C ownership root for the actual execution catalog and allocation
  * substrate. Creates no world, worker, OTP service or process-wide claim.
- * Allocator callbacks/context outlive all retained children and this handle. */
+ * Allocator callbacks/context outlive all retained children and this handle.
+ * Internal allocator hooks may run on the worker under Engine serialization;
+ * they must not reenter the Engine/domain. Public C++ uses the default allocator. */
 LbEngineStatus lb_engine_create(const LbSystemAllocator *,LbEngine **);
 /* Busy refusal is nonmutating. Success releases execution resources; a finite
- * closed control handle remains until release. No threads exist in this profile. */
+ * closed control handle remains until release. Any lazily admitted executor
+ * worker is stopped and joined before its synchronization storage is destroyed. */
 LbEngineStatus lb_engine_shutdown(LbEngine *);
 int lb_engine_is_open(const LbEngine *);
 /* Consume the single host-owner reference. Existing children keep the substrate

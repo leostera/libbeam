@@ -14,7 +14,9 @@ typedef enum { LB_CODE_OK, LB_CODE_INVALID, LB_CODE_FORMAT, LB_CODE_UNSUPPORTED,
 /* Serialized C ownership boundary. No implicit OTP services or lazy module load.
  * All functions/imports must pass the single admitted interpreter profile.
  * Load is atomic, including atom identities and namespace backing. No hot reload.
- * Native effects are the explicit builtin catalog, never a name-based fallback. */
+ * Native effects are the explicit builtin catalog, never a name-based fallback.
+ * With an asynchronous Engine worker, host raw C accesses require the Engine
+ * control borrow (executor.h); this includes final space destruction. */
 /* A space retains its Engine through physical destruction. */
 LbCodeStatus lb_code_space_create(LbEngine *, LbCodeSpace **);
 LbCodeStatus lb_code_space_destroy(LbCodeSpace *);

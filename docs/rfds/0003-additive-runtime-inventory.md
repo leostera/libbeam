@@ -8,7 +8,8 @@ Initial inventory baseline: **`8d7a4a67`**; updated with the
 [A03–A07 loader checkpoint](0003-loader-program.md) and
 [first selected-profile execution](0003-first-execution.md) and
 [owned ordinary binaries](0003-owned-binaries.md) and
-[C Engine lifetime](0003-engine-lifecycle.md). Direction: [RFD 0003](0003-additive-runtime-construction.md).
+[C Engine lifetime](0003-engine-lifecycle.md) and
+[owned worker execution](0003-owned-executor.md). Direction: [RFD 0003](0003-additive-runtime-construction.md).
 First transplant: [owned BEAM images](0003-first-loader-slice.md).
 
 This is a source-grounded dependency and acceptance inventory, not a declaration-
@@ -29,7 +30,7 @@ parallel objective.
 | Literal / type / lambda preparation | Admitted literals have runtime/GC consumers; attributes/compile metadata decoded for execution; ordinary immutable offheap binaries now loaded/copied/collected; maps/funs and runtime lambda registration pending |
 | Transformation / executable code | Selected profile transforms, emits, eagerly links, publishes and physically retires real BEAM words; full helper/fixup/consumer breadth pending |
 | Process context / heap / GC / interpreter execution | Explicit C context, bounded generated interpreter, selected full-copy GC and two real module-info BIFs; no scheduler/process identities or broad exception handling |
-| C Engine / Isolate construction and retirement | Engine owns actual allocation/native-dispatch substrate; code spaces retain it through physical release; public world lifecycle pending |
+| C Engine / Isolate construction and retirement | Engine owns actual allocation/native-dispatch substrate and lazy joinable worker; spaces/tasks retain it through physical release; public world lifecycle pending |
 | Public C++ API | Engine creation/shutdown/move/destruction implemented through C; Isolate/call/reclamation still refuse |
 | Engine lifetime / two-Isolate acceptance | Unchanged G1 passes with failure recovery; G3 still refuses Isolate creation |
 
@@ -134,7 +135,7 @@ this cluster instead of copying the old Makefile wholesale.
 
 | ID / cluster | Source anchors and dependencies | Owner / lifetime obligation | Gate and evidence |
 |---|---|---|---|
-| B01 Execution scheduling and wakeup | Relevant `erl_process.c` queues/reductions, interpreter yield boundary; narrow host thread/wait primitives if needed | Engine driver/workers, Isolate process queues; queued work retains users until drained | G3: both admitted calls progress regardless of wait order; peer progresses during stop; stop/join without ethread global startup |
+| B01 Execution scheduling and wakeup — **lazy shared worker executes retained contexts; full process scheduling pending** | Relevant `erl_process.c` queues/reductions, interpreter yield boundary; narrow host thread/wait primitives if needed | Engine driver/workers, Isolate process queues; queued work retains users until drained | G3: both admitted calls progress regardless of wait order; peer progresses during stop; stop/join without ethread global startup |
 | B02 Process identity and spawn/exit | `erl_process.*`, `erl_ptab.*`, spawn BIF paths | Isolate process directory and generations; explicit destination/owner checks | G3: ordinary child process outlives boot call; no cross-world PID resolution or recycled-handle alias |
 | B03 Funs and environments | `erl_fun.*`, lambda parser, `make_fun3`/call paths | Closure process/heap owner plus retained defining module/code | G3: captured Parent in spawned fun; free closure/code only after last physical reference |
 | B04 References, links, monitors and signals | `erl_bif_unique.*`, `erl_monitor_link.*`, `erl_proc_sig_queue.*` | Identity generation can be shared; resolution/relationships/payloads are isolate-private | G3: `spawn_monitor`, DOWN, `demonitor(...,[flush])`, exit/error cleanup; no foreign-world resolution |
@@ -144,7 +145,7 @@ this cluster instead of copying the old Makefile wholesale.
 | B08 Binary/numeric/BIF slice — **ordinary binary storage and copied-byte invocation integrated; bit-syntax/numeric/BIF breadth pending** | `erl_binary.*`, `erl_bits.*`, binary instruction tables; integer arithmetic/formatting helpers | Process/module/message binary refs, heap terms and scratch storage; shared pure implementation | G3: input comparisons, binary construction, count increment and integer conversion; expand numeric semantics deliberately, never silently wrap |
 | B09 Host invocation/completion | Existing `Call`/`Reclamation` API; new C admission/completion state | Copied input/MFA, ordinary invocation process, reserved terminal capacity, host-owned result | G3: 64 KiB payload/result, 64 outstanding, 1 MiB queued payload; once-only completion; timeout is NOT cancellation |
 | B10 World retirement | Admission, scheduler, processes/signals, timers, registry, messages, code, literals and allocator domains above | Quiesce/drain each retaining user, then destroy children; preserve closed generation-stable tombstones | G3: A reclaimed while B continues; replacement fresh; late work cannot reach freed state |
-| B11 Engine shutdown and exceptional paths — **G1 substrate/parent-retention slice implemented; world/worker retirement pending** | C lifecycle coordinator plus C++ move/destructor/error paths | Join/drain shared users before final release; handles/children enforce busy; no force-free or host termination | G1/G3: repeated lifetime, busy refusal, dropping handles, errors/timeouts, partial start and failed publication recovery |
+| B11 Engine shutdown and exceptional paths — **G1 parent retention plus actual worker stop/join implemented; world retirement pending** | C lifecycle coordinator plus C++ move/destructor/error paths | Join/drain shared users before final release; handles/children enforce busy; no force-free or host termination | G1/G3: repeated lifetime, busy refusal, dropping handles, errors/timeouts, partial start and failed publication recovery |
 
 The image parser's 64 MiB cap and the example host's 8 MiB fixture-read limit are
 not the invocation limits above and are not a VM memory quota. Preserve those

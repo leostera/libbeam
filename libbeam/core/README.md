@@ -3,7 +3,8 @@
 See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md) and the
 [first-execution record](../../docs/rfds/0003-first-execution.md) and
 [ordinary-binary extension](../../docs/rfds/0003-owned-binaries.md) and
-[C Engine lifecycle](../../docs/rfds/0003-engine-lifecycle.md).
+[C Engine lifecycle](../../docs/rfds/0003-engine-lifecycle.md) and
+[owned asynchronous executor](../../docs/rfds/0003-owned-executor.md).
 
 This is the C runtime construction boundary, not a whole-ERTS link. It now loads
 and executes ordinary `first_slice.erl` through generated BEAM transformations,
@@ -17,8 +18,11 @@ lifecycle target passes over this substrate; stateful Isolate creation still ref
 
 - `engine.c`: fallible C parent for the actual allocation/native catalog substrate.
   Spaces retain it through physical release; shutdown refuses live children;
-  out-of-order owner drop defers cleanup to the last physical child. No singleton,
-  implicit world or workers. The C++ factory owns this C handle.
+  out-of-order owner drop defers cleanup to the last physical child. No singleton
+  or implicit world. The C++ factory owns this C handle.
+- `executor.c`: one lazy joinable POSIX worker shared by real retained task/process
+  contexts. Bounded generated execution, cancellation at safepoints and physical
+  join/cleanup. Tasks still are not the public binary Call/Isolate protocol.
 - `alloc.c`: serialized fallible allocation domains, exact-base release and busy
   destruction. Not a guest quota or a performant carrier allocator.
 - `term.h`, `atoms.c`: selected flat 64-bit BEAM terms and private atom namespaces.
@@ -41,14 +45,16 @@ lifecycle target passes over this substrate; stateful Isolate creation still ref
   No lazy loading, hot reload, NIF loading or root swapping.
 - `process.c`, `heap.c`: explicit X/Y/continuation/reduction/exception state,
   bounded generated interpreter dispatch and selected copying-GC algorithms.
-  No workers, scheduler-data TLS, global process table or implicit OTP services.
+  No per-process workers, scheduler-data TLS, global process table or implicit OTP services.
 - `binary.c`: real immutable refcounted payloads, native BinRef/SubBits layouts,
   owner-local offheap chains, GC sweep and physical release. Literal/metadata
   decoding and copied byte-input invocation share this constructor.
 - `bif_info.c`, `md5.c`: the two positive-listed `get_module_info` BIFs and actual
   metadata/checksum behavior, not placeholders for compiler-generated imports.
 
-All control APIs are serialized. Entry/process handles retain actual code and its
+All control APIs are serialized. With a worker, raw code/heap/domain access must
+hold the Engine control borrow; internal task APIs acquire it themselves.
+Entry/process handles retain actual code and its
 literal storage. Returned term views borrow the process until its next mutating
 call or destruction. Runtime collection preserves outstanding heap reservations;
 new stack slots are valid roots even at host instruction-budget safepoints.

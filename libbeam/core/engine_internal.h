@@ -7,6 +7,8 @@
 #define LIBBEAM_CORE_ENGINE_INTERNAL_H
 #include "engine.h"
 #include "term.h"
+#include <pthread.h>
+typedef struct LbTask LbTask;
 
 typedef Uint BeamInstr;
 typedef struct LbProcess LbProcess;
@@ -20,7 +22,15 @@ struct LbEngine {
     unsigned native_ids[LB_NATIVE_COUNT];
     size_t spaces;
     int owner_live, closed;
+    pthread_mutex_t mutex;
+    pthread_cond_t wake;
+    pthread_t worker;
+    int sync_ready, worker_started, worker_stop, control_borrow;
+    LbTask *tasks, *cursor;
 };
+LbEngineStatus lb_executor_init(LbEngine *);
+void lb_executor_shutdown(LbEngine *); /* no tasks; caller does not hold mutex */
+void lb_engine_release_if_detached(LbEngine *);
 /* Publication follows complete construction. Release follows physical child
  * destruction, never logical stop. Caller obeys serialized/no-reentry contract. */
 void lb_engine_space_published(LbEngine *);

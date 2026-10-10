@@ -9,6 +9,8 @@ This is a snapshot of the C ownership/adapter integration required by
 [RFD 0003](0003-additive-runtime-construction.md), following
 [first execution](0003-first-execution.md) and [ordinary binaries](0003-owned-binaries.md).
 It does not expand the admitted instruction/native profile or declare the RFD done.
+The subsequent [owned executor](0003-owned-executor.md) adds a lazy shared worker;
+the no-worker statements below describe this original G1 checkpoint.
 The unchanged `libbeam/examples/engine_lifecycle.cpp` now creates, shuts down,
 destroys and recreates the Engine in one host. The unchanged `two_isolates.cpp`
 gets past Engine creation and explicitly refuses `Engine::create_isolate`.

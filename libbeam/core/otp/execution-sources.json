@@ -18,7 +18,7 @@
     "code_generation": "single; no hot reload",
     "native_imports": ["erlang:get_module_info/1", "erlang:get_module_info/2"],
     "native_kind": "heavy; these owned implementations may collect",
-    "threading": "serialized explicit-context bounded executor; no workers or TLS",
+    "threading": "explicit-context bounded executor; one lazy joinable POSIX worker per Engine; Engine mutex serializes raw loader/heap/domain access; no tenant TLS",
     "literals": "bounded ETF subset plus ordinary immutable offheap binaries (binary-sources.json); no fun/map admission",
     "engine": "Owned shared native catalog and allocation substrate; spaces retain the C Engine through physical destruction; C++ factory uses this lifecycle",
     "remaining": "Full A05/A06/A07 breadth, A12 Isolate/call/reclamation API and B-cluster stateful execution remain outstanding"

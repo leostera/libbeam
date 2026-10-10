@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import struct
@@ -59,6 +60,7 @@ def main():
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
                             root / 'libbeam/tests/fixtures/first_slice.erl',
                             root / 'libbeam/tests/api_engine_test.cpp', root / 'libbeam/tests/core_engine_test.c',
+                            root / 'libbeam/tests/core_executor_test.c', root / 'libbeam/tests/fixtures/async_slice.erl',
                             root / 'libbeam/include/libbeam/engine.hpp',
                             root / 'libbeam/examples/engine_lifecycle.cpp',
                             root / 'libbeam/examples/two_isolates.cpp', Path(__file__).resolve()})
@@ -113,10 +115,20 @@ def main():
             run('build', ['cmake', '--build', out / 'build'])
             run('ctest', ['ctest', '--test-dir', out / 'build', '--output-on-failure'])
             symbols = run('core-symbols', ['nm', '-u', out / 'build/liblibbeam_core.a'])
-            if any(name in symbols for name in ('erts_', 'ethr_', 'pthread_')):
-                raise RuntimeError('Unexpected legacy runtime/thread dependency in C core')
+            if any(name in symbols for name in ('erts_', 'ethr_')):
+                raise RuntimeError('Unexpected legacy runtime dependency in C core')
+            admitted_threads = {'pthread_mutex_init', 'pthread_mutex_destroy', 'pthread_mutex_lock',
+                                'pthread_mutex_unlock', 'pthread_cond_init', 'pthread_cond_destroy',
+                                'pthread_cond_signal', 'pthread_cond_wait', 'pthread_create', 'pthread_join'}
+            thread_symbols = set(re.findall(r'\b_?(pthread_[A-Za-z0-9_]+)\b', symbols))
+            if thread_symbols != admitted_threads:
+                raise RuntimeError(f'Unexpected POSIX executor surface: {thread_symbols ^ admitted_threads}')
+            summary['admitted_thread_symbols'] = sorted(thread_symbols)
             fixture_dir = out / 'fixture'
             fixture_dir.mkdir()
+            run('async-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/async_slice.erl'])
+            async_fixture = fixture_dir / 'async_slice.beam'
+            run('executor-execution', [out / 'build/core_executor_test', async_fixture])
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
             run('peer-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/code_peer.erl'])
@@ -236,28 +248,29 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','md5','process','heap','bif_info']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','md5','process','heap','bif_info']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
                 *[f'libbeam/core/{s}.c' for s in execution_sources_c], 'libbeam/tests/core_code_test.c',
-                '-lz', '-o', out / 'execution-ubsan'])
+                '-pthread', '-lz', '-o', out / 'execution-ubsan'])
             run('execution-ubsan', [out / 'execution-ubsan', fixture, peer_fixture])
             run('execution-growth-ubsan', [out / 'execution-ubsan', '--many', many_fixture])
             run('binary-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
                 *[f'libbeam/core/{s}.c' for s in execution_sources_c], 'libbeam/tests/core_binary_test.c',
-                '-lz', '-o', out / 'binary-ubsan'])
+                '-pthread', '-lz', '-o', out / 'binary-ubsan'])
             run('binary-ubsan', [out / 'binary-ubsan', binary_fixture, fixture, peer_fixture])
             sanitizer_flags = '-Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all'
             run('engine-ubsan-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'engine-ubsan',
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags, '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'api_engine_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'api_engine_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+            run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
@@ -267,6 +280,7 @@ def main():
             run('release-execution', [out / 'release/core_code_test', fixture, peer_fixture])
             run('release-code-growth', [out / 'release/core_code_test', '--many', many_fixture])
             run('release-binary', [out / 'release/core_binary_test', binary_fixture, fixture, peer_fixture])
+            run('release-executor', [out / 'release/core_executor_test', async_fixture])
             for filename in ('lb_atoms_generated.h', 'lb_atoms_generated.inc', 'lb_bif_ids_generated.h'):
                 first = (out / 'build/generated/atoms' / filename).read_bytes()
                 second = (out / 'release/generated/atoms' / filename).read_bytes()
@@ -285,10 +299,11 @@ def main():
             summary['execution_projections_reproducible'] = True
             summary['selected_core_execution_passed'] = True
             summary['binary_execution_retirement_passed'] = True
+            summary['worker_execution_retirement_passed'] = True
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                                for p in [fixture, peer_fixture, binary_fixture, many_fixture, *probes]}
+                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, many_fixture, *probes]}
             # G1 now requires the unchanged acceptance target and real C/adapter
             # failure recovery. Stateful G3 remains separately observed, not green.
             lifecycle = run('engine-lifecycle', [out / 'build/engine_lifecycle'])

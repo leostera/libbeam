@@ -13,7 +13,10 @@ outstanding. The subsequent [C Engine lifecycle integration](0003-engine-lifecyc
 passes the unchanged create/shutdown/recreate target over this actual substrate;
 the unchanged stateful two-Isolate target still refuses Isolate creation. The subsequent
 [ordinary-binary slice](0003-owned-binaries.md) connects native payload lifetime to
-literal loading, metadata copies, collection and copied-byte invocation.
+literal loading, metadata copies, collection and copied-byte invocation. The
+[owned executor](0003-owned-executor.md) now runs that actual machinery on one lazy
+shared worker, with construction rollback, cancellation and physical join; public
+world/call completion remains outstanding.
 
 See the [A01/A02 term-and-atom admission record](0003-terms-and-atoms.md) for the
 selected BEAM representation, namespace identities, transactional image bindings

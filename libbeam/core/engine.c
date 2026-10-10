@@ -1,19 +1,21 @@
 /* SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  * Reversible C ownership for the actual interpreter/native-dispatch substrate.
- * No OTP startup, process table, thread library, TLS or singleton initialization.
+ * No OTP startup, process table, ethread library, tenant TLS or singleton.
+ * A joinable worker is started lazily by actual asynchronous task admission.
  */
 #include "code_internal.h"
 
 static void release_catalog(LbEngine *engine)
 {
+    lb_executor_shutdown(engine);
     lb_release(engine->domain,(void *)engine->bifs);
     engine->bifs=NULL; engine->closed=1;
 }
 static void release_control(LbEngine *engine)
 {
     LbAllocDomain *domain=engine->domain;
-    assert(!engine->owner_live && !engine->spaces);
+    assert(!engine->owner_live && !engine->spaces && !engine->tasks);
     release_catalog(engine);
     lb_release(domain,engine);
     if(lb_alloc_domain_destroy(domain)!=LB_ALLOC_OK) abort();
@@ -50,6 +52,9 @@ LbEngineStatus lb_engine_create(const LbSystemAllocator *allocator,LbEngine **ou
         engine->native_ids[i]=ids[i];
         catalog[ids[i]]=(BifEntry){am_erlang,am_get_module_info,(int)i+1,functions[i],BIF_KIND_HEAVY};
     }
+    if(lb_executor_init(engine)!=LB_ENGINE_OK) {
+        release_control(engine); return LB_ENGINE_NO_MEMORY;
+    }
     engine->owner_live=1; *out=engine; return LB_ENGINE_OK;
 }
 int lb_engine_is_open(const LbEngine *engine)
@@ -60,7 +65,7 @@ LbEngineStatus lb_engine_shutdown(LbEngine *engine)
 {
     if(!engine) return LB_ENGINE_INVALID;
     if(!lb_engine_is_open(engine)) return LB_ENGINE_CLOSED;
-    if(engine->spaces) return LB_ENGINE_BUSY;
+    if(engine->spaces || engine->tasks || engine->control_borrow) return LB_ENGINE_BUSY;
     release_catalog(engine); return LB_ENGINE_OK;
 }
 void lb_engine_release(LbEngine *engine)
@@ -68,7 +73,11 @@ void lb_engine_release(LbEngine *engine)
     if(!engine) return;
     if(!engine->owner_live) abort(); /* duplicate consumption of an internal handle */
     engine->owner_live=0;
-    if(!engine->spaces) release_control(engine);
+    lb_engine_release_if_detached(engine);
+}
+void lb_engine_release_if_detached(LbEngine *engine)
+{
+    if(!engine->owner_live && !engine->spaces && !engine->tasks && !engine->control_borrow) release_control(engine);
 }
 void lb_engine_space_published(LbEngine *engine)
 {
@@ -79,5 +88,5 @@ void lb_engine_space_released(LbEngine *engine)
 {
     if(!engine->spaces) abort();
     --engine->spaces;
-    if(!engine->spaces && !engine->owner_live) release_control(engine);
+    lb_engine_release_if_detached(engine);
 }
