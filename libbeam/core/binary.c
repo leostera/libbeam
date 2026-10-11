@@ -77,8 +77,10 @@ static void link_ref(LbOffHeap *offheap,LbBinRef *ref)
     assert(overhead_fits(offheap,(size_t)ref->val->orig_size));
     ref->next=offheap->first; offheap->first=ref; offheap->overhead+=words;
 }
-static Eterm wrap_binary(LbOffHeap *offheap,Eterm **heap,LbBinary *binary,size_t bits,Uint flags)
+Eterm lb_binary_wrap(LbOffHeap *offheap,Eterm **heap,LbBinary *binary,size_t bits,Uint flags)
 {
+    assert(!binary->intern.flags && atomic_load(&binary->intern.refc)==1);
+    assert(bits<=(Uint)binary->orig_size*8 && (flags==0 || flags==TAG_LITERAL_PTR));
     LbBinRef *ref=(LbBinRef *)*heap;
     LbSubBits *sub=(LbSubBits *)(*heap+LB_BIN_REF_WORDS);
     ref->thing_word=LB_HEADER_BIN_REF; ref->val=binary;
@@ -110,7 +112,7 @@ LbAllocStatus lb_bitstring_build(LbAllocDomain *domain,LbOffHeap *offheap,Eterm 
         memcpy(data,bytes,size);
         if(bits&7) data[size-1]&=(unsigned char)(0xffu<<(8-(bits&7)));
     }
-    if(binary) result=wrap_binary(offheap,heap,binary,bits,flags);
+    if(binary) result=lb_binary_wrap(offheap,heap,binary,bits,flags);
     else { result=make_boxed(*heap)|flags; *heap+=words; }
     *out=result; return LB_ALLOC_OK;
 }

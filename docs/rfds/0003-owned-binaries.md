@@ -488,3 +488,49 @@ stock-OTP payload vectors, UBSan, unchanged source hashes) and
 `/tmp/libbeam-flatmap-tooling-final/summary.json` (29 tooling tests). Earlier
 passing integration remains at `/tmp/libbeam-flatmap-integrated-first/summary.json`.
 Both acceptance sources are unchanged; the stateful example remains refused.
+
+## Follow-on: fresh construction storage
+
+Baseline: `5b9c4508`. `lb_binary_begin` in `core/writable.c` adds the fresh-storage
+counterpart of append: native heap bits through 512 bits, otherwise an ordinary
+Binary/BinRef/SubBits pair on the normal offheap chain. It allocates exact byte
+capacity rather than applying append growth or writable flags. The existing
+native wrapper is shared with immutable input/literal construction, not copied
+into a second implementation. Provenance remains in `otp/writable-sources.json`,
+now also pinning the fresh-storage branch in native `emu/bs_instrs.tab`.
+
+Offheap payload allocation and initialization precede the final fallible heap
+reservation. A detached backing contains no heap pointers and can be released
+if reservation fails. After successful collection, publication is infallible.
+The result reserves `max(extra_words, pending heap credit)` free words without
+changing the pending credit counter. Arithmetic overflow is rejected before
+allocation; old roots, heap, chains and outputs survive allocation failures.
+
+All bytes, including heap-word slack, start initialized. The writer borrows an
+exclusive construction span: finish exactly the requested bit count before
+sharing or publishing to guest code, and never write afterward. Collection ends
+the borrow. Successful reservation can move X/Y operands, so callers must reload
+them; a future instruction must also defer destination-register publication until
+all segment operands have been read and construction has succeeded. An abandoned
+partial result remains a valid collectible object, not an untracked allocation.
+
+Tests cover eleven real allocation-failure prefixes with exact balance and
+same-process retry, allocation-free heap construction, the 512/513-bit transition,
+zero/non-byte-sized results, initialized slack and untouched padding, pending
+credit/extra reservation, X/Y operand relocation and alias preservation, native
+identity execution with moving GC, copied results surviving process destruction,
+and the actual 64-MiB boundary. A real writer failure followed by error-payload
+OOM/retry proves retirement of an unpublished partial backing during collection.
+
+This helper does **not** implement aggregate segment sizing, native descriptor
+fixups, reduction accounting, virtual-binary-heap collection policy, private-source
+consumption proof, overlapping-source handling or exception/dispatch integration.
+Those remain whole-instruction admission requirements; there is still no new
+opcode/BIF or stateful acceptance claim.
+
+Final evidence: `/tmp/libbeam-begin-commit-reviewed/summary.json` (19 passing
+Debug/Release CTests, actual selected-profile execution, UBSan and stable source
+hashes) and `/tmp/libbeam-begin-tooling-final/summary.json` (29 tooling tests).
+Earlier passing integration is retained at
+`/tmp/libbeam-begin-integrated-first/summary.json`. The unchanged stateful example
+still reports unsupported BEAM profile/import; neither acceptance source changes.

@@ -66,7 +66,8 @@ lifecycle target passes; the stateful example still refuses unsupported module i
 - `binary.c`: real immutable refcounted payloads, native BinRef/SubBits layouts,
   owner-local offheap chains, GC sweep and physical release. Literal/metadata
   decoding and copied byte-input invocation share this constructor.
-- `writable.c`: process-owned native writable backing and non-private append,
+- `writable.c`: fresh heap/refcounted construction spans, process-owned native
+  writable backing and non-private append,
   fallible preparation before revocation/publication, volatile-prefix reads,
   explicit pin before sharing, and copying-GC chain transfer/dead release.
   Pin/GC retain capacity rather than performing fallible shrink operations.

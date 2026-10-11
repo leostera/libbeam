@@ -5,6 +5,7 @@
 #include "bit_copy.h"
 #include "bit_writer.h"
 #include "writable.h"
+#include "binary_error.h"
 #include "term_compare.h"
 #include <stdio.h>
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"CHECK %s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while(0)
@@ -463,9 +464,143 @@ static void private_lifetime(Memory *m,LbCodeEntry *identity)
     CHECK(refcount(copy)==1 && m->live==live+1 && lb_bitstring_view(copy,&view) && view.data[0]==0xb8);
     lb_offheap_clear(&shared); CHECK(m->live==live && m->bytes==bytes);
 }
+static void fresh_binary_failures(Memory *m,LbCodeEntry *identity)
+{
+    const size_t sizes[]={0,1,512,513,520,65536*8}; size_t i,fail,prefixes=0;
+    for(i=0;i<sizeof(sizes)/sizeof(sizes[0]);++i) {
+        size_t allocations=sizes[i]>512?2:1;
+        for(fail=1;fail<=allocations;++fail) {
+            Eterm nil=NIL,result=make_small(17); LbProcess *p; LbBitWriter writer={NULL,77,88};
+            Eterm *heap,*top,*stop; size_t live,bytes; unsigned char *data;
+            CHECK(lb_process_create(identity,&nil,1,5,&p)==LB_PROCESS_READY);
+            heap=p->heap; top=p->htop; stop=p->stop; live=m->live; bytes=m->bytes;
+            m->fail=m->calls+fail;
+            CHECK(lb_binary_begin(p,sizes[i],0,&writer,&result)==LB_WRITABLE_NO_MEMORY);
+            CHECK(m->live==live && m->bytes==bytes && result==make_small(17));
+            CHECK(!writer.data && writer.capacity==77 && writer.offset==88);
+            CHECK(p->heap==heap && p->htop==top && p->stop==stop && !p->heap_reserved);
+            CHECK(!p->off_heap.first && !p->off_heap.overhead && !p->writable.first && p->reg[0]==NIL);
+            m->fail=0; ++prefixes;
+            CHECK(lb_binary_begin(p,sizes[i],0,&writer,&p->reg[0])==LB_WRITABLE_OK);
+            CHECK(!writer.offset && writer.capacity==(sizes[i]+7)/8);
+            data=writer.data;
+            for(size_t j=0;j<writer.capacity;++j) CHECK(!data[j]);
+            CHECK(lb_bits_put_integer(&writer,make_small(-1),sizes[i],LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+            CHECK(writer.offset==sizes[i]); run(p,1); lb_process_destroy(p);
+        }
+    }
+    CHECK(prefixes==9);
+}
+static void fresh_binary_sizes(Memory *m,LbCodeEntry *identity)
+{
+    const size_t sizes[]={0,1,7,8,63,64,511,512,513,519,520,4099,65536*8};
+    size_t i,j;
+    for(i=0;i<sizeof(sizes)/sizeof(sizes[0]);++i) {
+        Eterm nil=NIL,storage[16],*top=storage,copy; LbOffHeap shared={0}; LbProcess *p;
+        LbBitWriter writer; LbBitstringView view; size_t calls;
+        CHECK(lb_process_create(identity,&nil,1,100,&p)==LB_PROCESS_READY);
+        p->heap_reserved=9; calls=m->calls;
+        if(sizes[i]<=512) m->fail=calls+1;
+        CHECK(lb_binary_begin(p,sizes[i],3,&writer,&p->reg[0])==LB_WRITABLE_OK);
+        CHECK(m->calls==calls+(sizes[i]>512) && p->heap_reserved==9 && !p->writable.first);
+        CHECK((size_t)(p->stop-p->htop)>=9+S_RESERVED); m->fail=0;
+        if(sizes[i]<=512) {
+            CHECK(!p->off_heap.first && (*boxed_val(p->reg[0])&_HEADER_SUBTAG_MASK)==HEAP_BITS_SUBTAG);
+            for(j=0;j<(lb_bitstring_heap_words(sizes[i])-2)*sizeof(Eterm);++j) CHECK(!writer.data[j]);
+        } else {
+            CHECK(refcount(p->reg[0])==1 && !binary_ref(p->reg[0])->val->intern.flags);
+            CHECK((size_t)binary_ref(p->reg[0])->val->orig_size==writer.capacity);
+        }
+        CHECK(lb_bits_put_integer(&writer,make_small(-1),sizes[i],LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+        CHECK(writer.offset==sizes[i]);
+        copy=lb_copy_flat(p->reg[0],&top,&shared); CHECK(!is_non_value(copy));
+        run(p,1); CHECK(lb_bitstring_view(p->reg[0],&view) && view.bit_size==sizes[i]);
+        lb_process_destroy(p);
+        CHECK(lb_bitstring_view(copy,&view) && view.bit_size==sizes[i] && !view.bit_offset);
+        for(j=0;j<sizes[i];++j) CHECK(bit_at(view.data,j));
+        for(j=sizes[i];j<(sizes[i]+7)/8*8;++j) CHECK(!bit_at(view.data,j));
+        lb_offheap_clear(&shared);
+    }
+}
+static void fresh_binary_roots(Memory *m,LbCodeEntry *identity)
+{
+    unsigned char input[65]; LbProcess *p; LbBitWriter writer={NULL,77,88}; LbBitstringView view; Eterm source;
+    memset(input,0x57,sizeof(input));
+    CHECK(lb_process_create_binary(identity,input,sizeof(input),5,&p)==LB_PROCESS_READY);
+    CHECK(lb_heap_reserve(p,4,MAX_REG));
+    p->reg[1]=TUPLE2(p->htop,p->reg[0],make_small(2)); p->htop+=3;
+    *--p->stop=p->reg[0]; p->reg[0]=NIL; p->heap_reserved=5;
+    size_t collections=p->collections;
+    for(size_t fail=1;fail<=2;++fail) {
+        Eterm *heap=p->heap,*top=p->htop,*stop=p->stop,tuple=p->reg[1],saved=*stop;
+        LbBinRef *first=p->off_heap.first; size_t live=m->live,bytes=m->bytes; Uint overhead=p->off_heap.overhead;
+        m->fail=m->calls+fail;
+        CHECK(lb_binary_begin(p,525,4096,&writer,&p->reg[0])==LB_WRITABLE_NO_MEMORY);
+        CHECK(p->heap==heap && p->htop==top && p->stop==stop && p->reg[1]==tuple && *stop==saved && p->reg[0]==NIL);
+        CHECK(!writer.data && writer.capacity==77 && writer.offset==88 && p->heap_reserved==5);
+        CHECK(p->off_heap.first==first && p->off_heap.overhead==overhead && refcount(saved)==1);
+        CHECK(m->live==live && m->bytes==bytes && p->collections==collections); m->fail=0;
+    }
+    CHECK(lb_binary_begin(p,525,4096,&writer,&p->reg[0])==LB_WRITABLE_OK);
+    CHECK(p->collections==collections+1 && p->heap_reserved==5 && (size_t)(p->stop-p->htop)>=4096+S_RESERVED);
+    source=tuple_val(p->reg[1])[1]; CHECK(*p->stop++==source);
+    CHECK(lb_bits_put_integer(&writer,make_small(31),5,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+    CHECK(lb_bits_put_binary_all(&writer,source,1)==LB_BITS_OK && writer.offset==525);
+    run(p,1); CHECK(lb_bitstring_view(p->reg[0],&view) && view.bit_size==525);
+    for(size_t i=0;i<5;++i) CHECK(bit_at(view.data,i));
+    for(size_t i=0;i<520;++i) CHECK(bit_at(view.data,i+5)==bit_at(input,i));
+    lb_process_destroy(p);
+}
+static void fresh_binary_abandon(Memory *m,LbCodeEntry *identity)
+{
+    Eterm nil=NIL,unpublished; LbProcess *p; LbBitWriter writer;
+    CHECK(lb_process_create(identity,&nil,1,5,&p)==LB_PROCESS_READY);
+    CHECK(lb_binary_begin(p,525,0,&writer,&unpublished)==LB_WRITABLE_OK);
+    CHECK(lb_bits_put_integer(&writer,make_small(31),5,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+    CHECK(lb_bits_put_integer(&writer,am_badarg,520,LB_BITS_BIG_ENDIAN)==LB_BITS_BADARG && writer.offset==5);
+    /* Abandon the unrooted result after a real writer failure. Creating the
+     * error payload may itself fail, but must not leak this partial backing. */
+    while((size_t)(p->stop-p->htop)>=2+S_RESERVED) {
+        (void)CONS(p->htop,NIL,NIL); p->htop+=2;
+    }
+    size_t live=m->live,bytes=m->bytes; LbBinRef *partial=p->off_heap.first;
+    CHECK(partial && !p->writable.first); m->fail=m->calls+1;
+    CHECK(lb_binary_error_payload(p,LB_BSC_INTEGER,2,am_type,am_badarg,&p->reg[0])==LB_ALLOC_NO_MEMORY);
+    CHECK(p->reg[0]==NIL && p->off_heap.first==partial && m->live==live && m->bytes==bytes); m->fail=0;
+    CHECK(lb_binary_error_payload(p,LB_BSC_INTEGER,2,am_type,am_badarg,&p->reg[0])==LB_ALLOC_OK);
+    CHECK(!p->off_heap.first && !p->off_heap.overhead); /* writer span now expired */
+    run(p,1); lb_process_destroy(p);
+}
+static void fresh_binary_limits(Memory *m,LbCodeEntry *identity)
+{
+    Eterm nil=NIL,result=make_small(17); LbProcess *p; LbBitWriter writer={NULL,77,88}; size_t calls,live,bytes;
+    CHECK(lb_process_create(identity,&nil,1,100,&p)==LB_PROCESS_READY);
+    calls=m->calls; live=m->live; bytes=m->bytes;
+    CHECK(lb_binary_begin(p,SIZE_MAX,0,&writer,&result)==LB_WRITABLE_LIMIT);
+    CHECK(lb_binary_begin(p,LB_MAX_BINARY_BYTES*8+1,0,&writer,&result)==LB_WRITABLE_LIMIT);
+    CHECK(lb_binary_begin(NULL,0,0,&writer,&result)==LB_WRITABLE_INVALID);
+    CHECK(lb_binary_begin(p,0,0,NULL,&result)==LB_WRITABLE_INVALID);
+    CHECK(lb_binary_begin(p,0,0,&writer,NULL)==LB_WRITABLE_INVALID);
+    CHECK(m->calls==calls && !writer.data && writer.capacity==77 && writer.offset==88 && result==make_small(17));
+    CHECK(lb_binary_begin(p,513,SIZE_MAX,&writer,&result)==LB_WRITABLE_NO_MEMORY);
+    CHECK(m->calls==calls && m->live==live && m->bytes==bytes && !p->off_heap.first && !writer.data && result==make_small(17));
+    p->off_heap.overhead=UINT64_MAX;
+    CHECK(lb_binary_begin(p,513,0,&writer,&result)==LB_WRITABLE_NO_MEMORY && m->calls==calls);
+    p->off_heap.overhead=0;
+    CHECK(lb_binary_begin(p,LB_MAX_BINARY_BYTES*8,0,&writer,&p->reg[0])==LB_WRITABLE_OK);
+    CHECK(writer.capacity==LB_MAX_BINARY_BYTES && !writer.data[0] && !writer.data[writer.capacity-1]);
+    CHECK(lb_bits_put_integer(&writer,make_small(0),LB_MAX_BINARY_BYTES*8,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+    run(p,1); lb_process_destroy(p);
+}
 static void writable_binaries(Memory *m,LbCodeSpace *space,LbCodeModule *module)
 {
     LbCodeEntry *identity=entry(space,module,"identity",1); size_t live=m->live,bytes=m->bytes;
+    fresh_binary_failures(m,identity); CHECK(m->live==live && m->bytes==bytes);
+    fresh_binary_sizes(m,identity); CHECK(m->live==live && m->bytes==bytes);
+    fresh_binary_roots(m,identity); CHECK(m->live==live && m->bytes==bytes);
+    fresh_binary_limits(m,identity); CHECK(m->live==live && m->bytes==bytes);
+    fresh_binary_abandon(m,identity); CHECK(m->live==live && m->bytes==bytes);
+    puts("CORE_BINARY_BEGIN_OK native_heap_refc=true initialized_slack=true failure_prefixes=11 retry=true pending_credit=true extra_reservation=true x_y_operand_relocation=true identity_execution=true copied_lifetime=true exact_retirement=true maximum_capacity=true partial_failure_retirement=true error_payload_oom_retry=true guest_construction=false");
     writable_failures(m,identity); CHECK(m->live==live && m->bytes==bytes);
     writable_windows(identity); CHECK(m->live==live && m->bytes==bytes);
     writable_lifetimes(m,identity); CHECK(m->live==live && m->bytes==bytes);

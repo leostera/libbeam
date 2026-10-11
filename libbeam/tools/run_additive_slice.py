@@ -241,6 +241,9 @@ def main():
             if 'CORE_WRITABLE_OK' not in binary_execution:
                 raise RuntimeError('Missing writable binary ownership/execution evidence')
             summary['writable_binary_dependencies_passed'] = True
+            if 'CORE_BINARY_BEGIN_OK' not in binary_execution:
+                raise RuntimeError('Missing fresh binary construction ownership/execution evidence')
+            summary['fresh_binary_construction_dependencies_passed'] = True
             if 'CORE_PRIVATE_APPEND_OK' not in binary_execution:
                 raise RuntimeError('Missing checked private-append ownership/execution evidence')
             summary['private_append_dependencies_passed'] = True

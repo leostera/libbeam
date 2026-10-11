@@ -1,8 +1,10 @@
 {
   "baseline": "877207fd",
   "follow_on_baseline": "dab688df",
-  "scope": "Process-owned native writable Binary/BinRef/SubBits initialization, normal append and checked private append dependencies, volatile reads, explicit pinning, and full-copy GC/retirement. No binary-construction opcode admission.",
+  "fresh_construction_baseline": "5b9c4508",
+  "scope": "Process-owned fresh heap/refcounted construction spans, native writable Binary/BinRef/SubBits initialization, normal append and checked private append dependencies, volatile reads, explicit pinning, and full-copy GC/retirement. No binary-construction opcode admission.",
   "sources": {
+    "beam/erts/emulator/beam/emu/bs_instrs.tab": "49f203f8c900e9da964e3c483f186c7562fdb4ddb9bb2fa8a0f9af574c2d3279",
     "beam/erts/emulator/beam/erl_binary.h": "68a59f8e4567236b8bbc38621aac15a61ed486658cb0a754fcdc378da7d6c0db",
     "beam/erts/emulator/beam/erl_bits.h": "5a72bb9b9c14690d55ff94912faf3e8f0e9914e155593d2c6aa7474c3ff5bfec",
     "beam/erts/emulator/beam/erl_bits.c": "2b803014c329c7c2c30e60c0bffda90911985b9ce1703952e7315e28694ccdb6",
@@ -22,6 +24,8 @@
     "erts_bs_private_append_checked retains both branches: a unique writable header changes length in place (growing backing only when necessary), while frozen backing allocates a new Binary/BinRef/SubBits, including zero extension. Its copy length remains min(old capacity,new capacity); no 256-byte minimum is added to this native path. Heap fragments become a final fallible heap reservation before publication.",
     "A typed X/Y source location survives moving GC. Before mutation, the C ownership boundary checks other registers, stack/exception/temporary roots and stored heap terms. It skips opaque numeric/binary payloads, refuses aliases (even dead allocated objects), and consumes the selected root before assigning the result. This conservative check is not a compiler uniqueness proof; unrooted C aliases are outside the contract. Future admission must prove consumption and no reuse in subsequent segment operands or instructions.",
     "The alias scanner positively lists current root-bearing/opaque representations. Unknown families abort rather than hide roots. It allocates nothing; future instruction accounting must include its linear work. NOT_UNIQUE is an ownership refusal, not a guest badarg or false arithmetic guard.",
+    "lb_binary_begin adds the fresh construction storage dependency: native heap bits through 512 bits, otherwise an immutable Binary/BinRef/SubBits pair. It uses exact byte capacity (no append growth), the existing native wrapper, and the normal offheap chain. Heap-word slack and all payload bytes are initialized before writing. Detached backing allocation precedes the final fallible heap reservation; failure releases it without altering roots/chains/outputs, and successful reservation keeps pending heap credit while covering requested extra words.",
+    "The initial writer borrows exclusively until collection/destruction. Finish exactly the requested bit count before guest publication/sharing; never write afterward. Inputs in X/Y must be reloaded after reservation. Abandoned partial values remain valid collectible objects, and a later error-payload collection or process destruction releases their backing. This is not bs_create_bin's aggregate sizing, virtual-binary-heap policy, work accounting or dispatch admission.",
     "Future dispatch must account allocation/copy/GC work and implement complete sizing, fixup and error-context semantics before bs_create_bin admission. Component/helper success grants no instruction authority. C-created writable arguments execute real identity and exact-comparison BEAM functions across moving collection and exact retirement."
   ],
   "other_inputs": ["binary-sources.json", "bit-copy-sources.json", "bit-writer-sources.json"]

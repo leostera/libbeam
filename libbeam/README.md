@@ -37,8 +37,9 @@ executes small/bignum/float semantics with fallible scratch and collection-safe 
 destinations. [Decimal formatting](../docs/rfds/0003-decimal-continuations.md)
 uses owned worker continuations with peer progress and cancellation cleanup.
 [Binary construction dependencies](../docs/rfds/0003-owned-binaries.md) now include
-checked segment writers, C-owned writable append/GC lifetimes and native MAP3
-error payloads; guest binary construction is still unadmitted.
+checked segment writers, fresh heap/refcounted construction spans, C-owned
+writable append/GC lifetimes and native MAP3 error payloads; guest binary
+construction is still unadmitted.
 Full A03–A07 breadth and stateful process machinery remain unfinished. Native archive work below is diagnostic/reference evidence,
 not a fallback runtime for the new core.
 

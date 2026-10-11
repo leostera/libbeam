@@ -12,12 +12,23 @@ typedef enum {
 /* Internal serialized construction boundaries, not guest opcode admission.
  * Sources belong to this process's heap or its retained literals; valid owned
  * representations are required, not arbitrary/foreign words. Output slots must
- * survive moving GC (not pointers into the process heap).
+ * be non-overlapping and survive moving GC (not pointers into the process heap).
  * Fallible work precedes publication/revocation; failure leaves outputs and
  * source ownership unchanged. Successful collection can move all heap roots.
  * The returned term must be rooted before another allocation/collection.
  * Capacity is in bytes; init creates an empty writable bitstring. */
 LbWritableStatus lb_writable_init(LbProcess *,size_t capacity,Eterm *out);
+/* Fresh native heap/refcounted bitstring, not an append-writable term. Storage
+ * (including heap-word slack) is initialized. The returned span is exclusively
+ * borrowed for construction: finish exactly bits before guest publication or
+ * sharing, and never write after that. It expires on collection/destruction.
+ * Reload any heap operands after this call: successful reservation may collect.
+ * Free heap covers max(pending heap credit, extra_words); credit is unchanged.
+ * Failure preserves outputs, old heap/roots and offheap chains. The byte span
+ * includes at most seven padding bits; caller must not write beyond bits.
+ * No instruction reduction or virtual-binary-heap policy is implemented here. */
+LbWritableStatus lb_binary_begin(LbProcess *,size_t bits,size_t extra_words,
+                                 LbBitWriter *,Eterm *out);
 /* Native non-private append, including immutable-source copying. No uniqueness
  * assumption about the source header. After construction, free space covers
  * max(pending heap credit, extra_words); the credit counter itself is unchanged.

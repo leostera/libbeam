@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: Apache-2.0
  * Copyright Ericsson AB 1999-2025. All Rights Reserved.
+ * Copyright Ericsson AB 2017-2026. All Rights Reserved.
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
- * Adapted erl_bits.c build_writable_bitstring / erts_bs_append_checked.
+ * Adapted erl_bits.c build_writable_bitstring / erts_bs_append_checked and
+ * bs_instrs.tab's fresh heap/refcounted storage setup.
  * Allocation and collection are fallible preparation; publication is infallible.
  * No implicit scheduler bit state, allocator reallocation, or heap fragments.
  */
@@ -56,6 +58,38 @@ LbWritableStatus lb_writable_init(LbProcess *p,size_t capacity,Eterm *out)
         lb_binary_release(binary); return LB_WRITABLE_NO_MEMORY;
     }
     *out=wrap(p,binary,0,capacity);
+    return LB_WRITABLE_OK;
+}
+LbWritableStatus lb_binary_begin(LbProcess *p,size_t bits,size_t extra,LbBitWriter *writer,Eterm *out)
+{
+    size_t words,bytes; LbBinary *binary=NULL; unsigned char *data; Eterm result;
+    if(!p || !writer || !out) return LB_WRITABLE_INVALID;
+    words=lb_bitstring_heap_words(bits);
+    if(!words) return LB_WRITABLE_LIMIT;
+    if(extra>SIZE_MAX-words || p->heap_reserved>SIZE_MAX-words) return LB_WRITABLE_NO_MEMORY;
+    bytes=(bits+7)/8;
+    if(bytes>LB_ONHEAP_BINARY_LIMIT) {
+        if(!overhead_fits(p,bytes)) return LB_WRITABLE_NO_MEMORY;
+        binary=lb_binary_allocate(p->entry_module->space->domain,bytes);
+        if(!binary) return LB_WRITABLE_NO_MEMORY;
+        memset(binary->orig_bytes,0,bytes);
+    }
+    /* Allocation precedes the final fallible reservation. A detached backing
+     * has no heap pointers; no input term is borrowed across collection. */
+    if(!reserve(p,words,extra)) {
+        if(binary) lb_binary_release(binary);
+        return LB_WRITABLE_NO_MEMORY;
+    }
+    if(binary) {
+        data=binary->orig_bytes;
+        result=lb_binary_wrap(&p->off_heap,&p->htop,binary,bits,0);
+    } else {
+        Eterm *hp=p->htop;
+        hp[0]=_make_header(words-1,HEAP_BITS_SUBTAG); hp[1]=bits;
+        data=(unsigned char *)(hp+2); memset(data,0,(words-2)*sizeof(Eterm));
+        result=make_boxed(hp); p->htop+=words;
+    }
+    *writer=(LbBitWriter){data,bytes,0}; *out=result;
     return LB_WRITABLE_OK;
 }
 static LbBinary *writable_backing(Eterm source)
