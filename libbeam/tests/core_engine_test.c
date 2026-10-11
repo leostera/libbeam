@@ -32,7 +32,8 @@ static void repeat_lifetime(void)
     CHECK(engine->bifs[BIF_get_module_info_2].f==lb_bif_module_info_2);
     CHECK(engine->bifs[BIF_splus_2].f==lb_bif_plus_2 && engine->bifs[BIF_splus_2].kind==BIF_KIND_HEAVY);
     CHECK(engine->bifs[BIF_integer_to_binary_1].f==lb_bif_integer_to_binary_1);
-    CHECK(!engine->bifs[BIF_error_1].f); /* identity metadata grants no native capability */
+    CHECK(engine->bifs[BIF_error_1].f && engine->bifs[BIF_register_2].f);
+    CHECK(!engine->bifs[BIF_erts_internal_open_port_2].f); /* identity metadata grants no native capability */
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK && !engine->bifs && !lb_engine_is_open(engine));
     CHECK(m.live==2); /* finite control plus its bookkeeping domain, not execution resources */
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_CLOSED);

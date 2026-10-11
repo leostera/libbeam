@@ -266,6 +266,33 @@ static void spawned_children(LbBytesView code)
         CHECK(status==LB_WORLD_NO_MEMORY || status==LB_WORLD_OK); expect(call,status);
         if(status==LB_WORLD_OK) break;
     }
+    for(size_t prefix=1;;++prefix) {
+        CHECK(prefix<100);
+        lb_engine_enter(engine); m.fail_worker=m.worker_calls+prefix; lb_engine_leave(engine);
+        CHECK(lb_world_call(world,text("fun_slice"),text("named_self"),text("registered reply"),&call)==LB_WORLD_OK);
+        LbBytesView result; LbWorldStatus status=await_call(call,&result);
+        if(status==LB_WORLD_OK) CHECK(result.size==16 && !memcmp(result.data,"registered reply",16));
+        lb_engine_enter(engine); m.fail_worker=0;
+        CHECK(!world->space->registry && !world->space->messages && !lb_pid_count(world->space->pids)); lb_engine_leave(engine);
+        CHECK(status==LB_WORLD_NO_MEMORY || status==LB_WORLD_OK); expect(call,status);
+        if(status==LB_WORLD_OK) break;
+    }
+    const char *errors[]={"named_duplicate","missing_name","guest_error"};
+    for(size_t i=0;i<sizeof(errors)/sizeof(errors[0]);++i) {
+        CHECK(lb_world_call(world,text("fun_slice"),text(errors[i]),text("reason"),&call)==LB_WORLD_OK);
+        expect(call,LB_WORLD_EXCEPTION);
+        lb_engine_enter(engine); CHECK(!world->space->registry && !world->space->messages && !lb_pid_count(world->space->pids)); lb_engine_leave(engine);
+    }
+    for(size_t prefix=1;;++prefix) {
+        CHECK(prefix<100);
+        lb_engine_enter(engine); m.fail_worker=m.worker_calls+prefix; lb_engine_leave(engine);
+        CHECK(lb_world_call(world,text("fun_slice"),text("guest_error_info"),text("native error metadata"),&call)==LB_WORLD_OK);
+        LbBytesView result; LbWorldStatus status=await_call(call,&result);
+        lb_engine_enter(engine); m.fail_worker=0;
+        CHECK(!world->space->registry && !world->space->messages && !lb_pid_count(world->space->pids)); lb_engine_leave(engine);
+        CHECK(status==LB_WORLD_NO_MEMORY || status==LB_WORLD_EXCEPTION); expect(call,status);
+        if(status==LB_WORLD_EXCEPTION) break;
+    }
     /* The private task seam below still tests preparation from a retained
      * worker-produced result. Actual guest spawn above uses the owning world. */
     const char *factories[]={"process_factory","process_nested","process_loop"};

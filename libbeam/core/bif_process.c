@@ -4,6 +4,7 @@
  */
 #include "process_internal.h"
 #include "reference.h"
+#include "flatmap.h"
 #include "world_internal.h"
 /* Identity is allocated on first observation, with no moving-heap allocation.
  * The directory is owned by the world/code namespace and keeps its generations
@@ -66,6 +67,54 @@ badarg:
     p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
 refused:
     p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
+}
+Eterm lb_bif_register_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=3;
+    LbProcessStatus status=lb_registry_register(p,args[0],args[1]);
+    if(status==LB_PROCESS_READY) return am_true;
+    if(status==LB_PROCESS_EXCEPTION) p->freason=LB_EXC_BADARG;
+    else p->status=status;
+    return THE_NON_VALUE;
+}
+/* Native bif.c error_1: retain the supplied reason, with error class and
+ * logging/trace flags. This does not admit stacktrace construction or unwind. */
+Eterm lb_bif_error_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction;
+    p->last_native_cost=1; p->fvalue=args[0]; p->freason=LB_EXC_ERROR;
+    return THE_NON_VALUE;
+}
+/* Complete native error_3 option scan and error_2 fallback. Reserve before
+ * borrowing moving list/map operands; args points to registered X slots. */
+Eterm lb_bif_error_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    size_t need,before=p->collections;
+    if(!lb_size_add(4,p->heap_reserved,&need) || !lb_heap_reserve(p,need,3)) {
+        p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE;
+    }
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    Eterm info=THE_NON_VALUE,list=args[2];
+    while(is_list(list)) {
+        if(++p->last_native_cost>LB_MAX_BINARY_BYTES/sizeof(Eterm)) {
+            p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE;
+        }
+        Eterm term=list_val(list)[0];
+        if(!is_tuple(term)) break;
+        Eterm *tuple=tuple_val(term);
+        if(arityval(tuple[0])!=2 || tuple[1]!=am_error_info) break;
+        info=tuple[2];
+        if(!is_boxed(info) || boxed_val(info)[0]!=LB_FLATMAP_HEADER) break;
+        list=list_val(list)[1];
+    }
+    if(!is_nil(list)) info=THE_NON_VALUE;
+    if(!is_non_value(info)) {
+        p->fvalue=TUPLE3(p->htop,args[0],args[1],info); p->htop+=4; p->freason=LB_EXC_ERROR_3;
+    } else {
+        p->fvalue=TUPLE2(p->htop,args[0],args[1]); p->htop+=3; p->freason=LB_EXC_ERROR_2;
+    }
+    return THE_NON_VALUE;
 }
 Eterm lb_bif_make_ref_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {

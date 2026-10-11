@@ -52,8 +52,17 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   after send publication. Compiler-produced persistent request/reply and timeout
   fixtures execute on the shared worker; copied-closure failure prefixes drain
   queues and identities. Monotonic deadlines use bounded idle polling, not native
-  timer wheels or a hard latency guarantee. Receive-marker optimization, registered
-  destinations, monitors and broader signals remain unadmitted.
+  timer wheels or a hard latency guarantee. Registered destinations now resolve
+  in the owning namespace; receive markers, monitors and broader signals remain
+  unadmitted.
+- `registry.c`: native atom-index hash/equality and Fibonacci/chained buckets;
+  fallible name association before publication, logical-exit removal before PID
+  retirement, empty-table reclamation and registered-name message delivery.
+  Actual worker receive and failure-prefix tests verify cleanup. Ports are absent.
+- `bif_process.c`: native error/1 and complete error/3 option scanning/error/2
+  fallback; retain raw arglist/error-info payload and expanded reason separately.
+  Empty/single-entry MAP_EXT literal flatmaps supply wrapper metadata; larger maps,
+  stacktrace capture and catch/unwind remain unadmitted.
 - `alloc.c`: serialized fallible allocation domains, exact-base release and busy
   destruction. Not a guest quota or a performant carrier allocator.
 - `term.h`, `atoms.c`: selected flat 64-bit BEAM terms and private atom namespaces.
@@ -192,7 +201,8 @@ finite binary64 floats, heap bitstrings up to 64 bytes and ordinary immutable
 refcounted binaries above that threshold. C-created process-owned writable
 binaries also survive copying GC, read-only consumers, pinning and retirement;
 literal admission remains immutable-only. C-created small flatmaps support error
-payload dependencies and representation consumers, not MAP_EXT or map operations.
+payload dependencies and representation consumers. Empty/single-entry MAP_EXT
+literals are admitted for wrapper metadata; larger MAP_EXT and map operations are not.
 HAMT, magic/resource binaries, fun objects, PIDs, ports and refs remain unsupported. Lambda declarations
 are not closure objects. Attributes/compile ETF is decoded for executable
 admission; ordinary line/debug/feature metadata is passive, while executable

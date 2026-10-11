@@ -12,6 +12,7 @@
 #include "pid_table.h"
 #include "fun.h"
 #include "message.h"
+#include "registry.h"
 #define F_INSLPQUEUE (1u<<1)
 #define F_TIMO (1u<<2)
 #define F_DELAY_GC (1u<<13) /* pinned native matching/schedule-out flag */
@@ -19,6 +20,7 @@ struct LbProcess {
     LbCodeModule *entry_module;
     LbWorld *world; /* borrowed C task owner; task retirement precedes world destruction */
     LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
+    LbRegisteredProcess *registered; /* borrowed association owned by code space */
     LbFunLease *fun_leases; /* one lease per defining module, represented by a stable entry */
     LbMessageQueue messages; /* native inner queue; immutable fragments own their code/offheap roots */
     int waiting; /* serialized scheduler state, not a terminal result */

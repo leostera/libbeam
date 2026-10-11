@@ -51,11 +51,13 @@ typedef struct LbPatch { size_t pos,pc; struct LbPatch *next; } LbPatch;
 typedef struct LbLiteralFunUse { size_t pc; const struct LbFunEntry *entry; struct LbLiteralFunUse *next; } LbLiteralFunUse;
 typedef struct LbStringPatch { size_t pos,bytes; struct LbStringPatch *next; } LbStringPatch;
 typedef struct LbPidTable LbPidTable;
+typedef struct LbRegistry LbRegistry;
 struct LbCodeSpace {
     LbEngine *engine;
     LbAllocDomain *domain; /* borrowed Engine allocation substrate */
     LbAtomTable *atoms;
     LbPidTable *pids; /* lazy identity directory; retained empty to prevent ID reuse */
+    LbRegistry *registry; /* removed on logical process exit, never a moving root */
     LbCodeModule *modules;
     Export *exports;
     Export natives[LB_NATIVE_COUNT];
@@ -120,4 +122,7 @@ Eterm lb_bif_integer_to_binary_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_self_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_make_ref_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_spawn_3(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_error_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_error_3(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_register_2(LbProcess *,Eterm *,const BeamInstr *);
 #endif

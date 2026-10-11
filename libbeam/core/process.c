@@ -141,6 +141,7 @@ void lb_process_destroy(LbProcess *p)
     if(!p) return;
     if(p->running) abort(); /* internal serialized API misuse, not a guest path */
     module=p->entry_module; d=module->space->domain;
+    lb_registry_remove(p);
     if(p->identity.owner && lb_pid_remove(p->identity.owner,&p->identity)!=LB_PID_OK) abort();
     lb_message_queue_clear(&p->messages);
     lb_fun_leases_clear(p);
@@ -302,14 +303,22 @@ context_switch3:
 find_func_info: {
     /* Materialize the native error value, not handle_error/stacktrace/catch.
      * Keep the original code/flags and extended payload for future handling.
-     * No producer of other exception classes or arglist wrappers is admitted. */
+     * Native error/3 arglist wrappers retain their raw payload separately;
+     * this still grants no stacktrace construction or catch/unwind. */
     LbAllocStatus expanded;
     if(LB_GET_EXC_CLASS(c_p->freason)!=LB_EXTAG_ERROR ||
-       (c_p->freason&(LB_EXF_ARGLIST|LB_EXF_RESTORE_NFUNC|LB_EXF_PANIC|LB_EXF_THROWN|LB_EXF_NATIVE))) goto malformed_code;
-    SWAPOUT; expanded=lb_exception_expand(c_p,c_p->freason,c_p->fvalue,&c_p->exception_value); SWAPIN;
+       (c_p->freason&(LB_EXF_RESTORE_NFUNC|LB_EXF_PANIC|LB_EXF_THROWN|LB_EXF_NATIVE))) goto malformed_code;
+    Eterm reason=c_p->fvalue;
+    if(c_p->freason&LB_EXF_ARGLIST) {
+        if(!is_tuple(reason)) goto malformed_code;
+        Eterm *tuple=tuple_val(reason);
+        if(arityval(tuple[0])!=((c_p->freason&LB_EXF_HAS_EXT_INFO)?3u:2u)) goto malformed_code;
+        reason=tuple[1];
+    }
+    SWAPOUT; expanded=lb_exception_expand(c_p,c_p->freason,reason,&c_p->exception_value); SWAPIN;
     if(expanded==LB_ALLOC_NO_MEMORY) goto memory_failure;
     if(expanded!=LB_ALLOC_OK) goto malformed_code;
-    if(!(c_p->freason&LB_EXF_HAS_EXT_INFO)) c_p->fvalue=NIL;
+    if(!(c_p->freason&(LB_EXF_HAS_EXT_INFO|LB_EXF_ARGLIST))) c_p->fvalue=NIL;
     c_p->status=LB_PROCESS_EXCEPTION; goto stop;
 }
 execution_refused:
@@ -327,6 +336,7 @@ stop:
     /* Guest exit removes identity before publishing completion. The retained
      * process/result allocation may outlive that logical death. */
     if(c_p->status!=LB_PROCESS_YIELDED) {
+        lb_registry_remove(c_p);
         c_p->receive_message=NULL; c_p->receive_root=NIL;
         lb_message_queue_clear(&c_p->messages);
     }

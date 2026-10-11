@@ -8,19 +8,23 @@
 
 /* Selected native do_send local-PID branch: dead PIDs drop the message and
  * return it; live receivers own a self-contained copy before queue mutation.
- * Names/ports/external destinations have no execution admission in this slice. */
+ * Registered names resolve in the same namespace; missing names are badarg.
+ * Ports/external destinations have no execution admission in this slice. */
 Eterm lb_erl_send(LbProcess *sender,Eterm destination,Eterm term)
 {
     sender->last_native_cost=1;
-    if(!is_internal_pid(destination)) {
-        if(is_atom(destination) || is_pid(destination)) sender->status=LB_PROCESS_REFUSED;
+    if(!is_internal_pid(destination) && !is_atom(destination)) {
+        if(is_pid(destination)) sender->status=LB_PROCESS_REFUSED;
         else sender->freason=LB_EXC_BADARG;
         return THE_NON_VALUE;
     }
     LbCodeSpace *space=sender->entry_module->space;
     if(!sender->world || !sender->running) { sender->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
-    LbProcess *receiver=lb_pid_lookup(space->pids,destination);
-    if(!receiver) return term;
+    LbProcess *receiver=is_atom(destination)?lb_registry_lookup(space,destination,&sender->last_native_cost):lb_pid_lookup(space->pids,destination);
+    if(!receiver) {
+        if(is_atom(destination)) { sender->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+        return term;
+    }
     if(receiver->messages.mq_len==INTPTR_MAX) { sender->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
     Eterm from; LbProcessStatus status=lb_process_identity(sender,&from);
     if(status!=LB_PROCESS_READY) { sender->status=status; return THE_NON_VALUE; }

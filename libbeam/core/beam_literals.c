@@ -10,6 +10,7 @@
  */
 #include "beam_program_internal.h"
 #include "utf8.h"
+#include "flatmap.h"
 #include <math.h>
 #include <float.h>
 #include <stdlib.h>
@@ -119,6 +120,23 @@ static int decode_term(LbBeamProgram *p, LbBeamReader *r, Eterm *root)
             if(!n) hp[1]=THE_NON_VALUE;
             for(i=n;i;i--) { hp[i]=(Eterm)(uintptr_t)next; next=&hp[i]; }
             break;
+        case 116: { /* MAP_EXT: empty/single-entry native flatmaps only */
+            REQUIRE(lb_reader_u32(r,&n));
+            if(n>1) return lb_pfail(p,LB_BEAM_UNSUPPORTED);
+            REQUIRE((size_t)n*2<=r->size-r->pos);
+            hp=lb_palloc(p,LB_FLATMAP_WORDS+n+2,sizeof(Eterm)); if(!hp) return 0;
+            Eterm *keys=hp+LB_FLATMAP_WORDS+n;
+            hp[0]=LB_FLATMAP_HEADER; hp[1]=n;
+            keys[0]=make_arityval(n); hp[2]=make_boxed(keys)|TAG_LITERAL_PTR;
+            *objp=make_boxed(hp)|TAG_LITERAL_PTR;
+            if(n) {
+                hp[3]=(Eterm)(uintptr_t)next; next=&hp[3];
+                keys[1]=(Eterm)(uintptr_t)next; next=&keys[1];
+            } else keys[1]=THE_NON_VALUE;
+            /* Zero/one key needs neither a sorter nor duplicate collapse;
+             * every larger MAP_EXT remains fail-closed, not a HAMT fallback. */
+            break;
+        }
         case 106: *objp=NIL; break;
         case 108: /* lists, including improper tails */
             REQUIRE(lb_reader_u32(r,&n) && n<r->size-r->pos);
