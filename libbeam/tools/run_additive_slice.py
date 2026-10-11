@@ -64,6 +64,8 @@ def main():
                             root / 'libbeam/tests/core_decimal_test.c', root / 'libbeam/tests/fixtures/decimal_slice.erl',
                             root / 'libbeam/core/otp/decimal-sources.json',
                             root / 'libbeam/tests/core_bit_copy_test.c', root / 'libbeam/core/otp/bit-copy-sources.json',
+                            root / 'libbeam/tests/core_bit_writer_test.c', root / 'libbeam/core/otp/bit-writer-sources.json',
+                            root / 'libbeam/tests/fixtures/bit_writer_reference.erl',
                             root / 'libbeam/tests/core_binary_test.c', root / 'libbeam/tests/fixtures/binary_slice.erl',
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
@@ -118,6 +120,11 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError(f'Bit-copy reference changed: {filename}')
             summary['bit_copy_sources'] = bit_copy_sources
+            bit_writer_sources = json.loads((root / 'libbeam/core/otp/bit-writer-sources.json').read_text())
+            for filename, expected in bit_writer_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Bit-writer reference changed: {filename}')
+            summary['bit_writer_sources'] = bit_writer_sources
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
@@ -158,6 +165,14 @@ def main():
             summary['admitted_thread_symbols'] = sorted(thread_symbols)
             fixture_dir = out / 'fixture'
             fixture_dir.mkdir()
+            run('bit-writer-reference-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/bit_writer_reference.erl'])
+            writer_reference = run('bit-writer-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-eval', 'bit_writer_reference:run(),halt().'])
+            writer_actual = run('bit-writer-vectors', [out / 'build/core_bit_writer_test', '--reference'])
+            if writer_reference != writer_actual or len(writer_reference.splitlines()) != 1070:
+                raise RuntimeError('Native bit writers differ from stock-OTP vectors')
+            summary['bit_writer_reference_vectors'] = 1070
+            summary['bit_writer_reference_sha256'] = hashlib.sha256((fixture_dir / 'bit_writer_reference.beam').read_bytes()).hexdigest()
             run('async-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/async_slice.erl'])
             async_fixture = fixture_dir / 'async_slice.beam'
             run('executor-execution', [out / 'build/core_executor_test', async_fixture])
@@ -340,7 +355,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -359,9 +374,16 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+            run('bit-writer-fallback-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-DDEBUG',
+                '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
+                'libbeam/core/bit_writer.c', 'libbeam/core/bit_copy.c', 'libbeam/tests/core_bit_writer_test.c',
+                '-o', out / 'bit-writer-fallback'])
+            run('bit-writer-fallback', [out / 'bit-writer-fallback'])
+            if run('bit-writer-fallback-vectors', [out / 'bit-writer-fallback', '--reference']) != writer_reference:
+                raise RuntimeError('Native fallback bit writers differ from stock-OTP vectors')
             run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
             run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture])
             run('local-ubsan', [out / 'engine-ubsan/core_local_test', local_fixture])
@@ -414,6 +436,7 @@ def main():
             summary['numeric_addition_execution_passed'] = True
             summary['decimal_continuation_execution_passed'] = True
             summary['native_bit_copy_passed'] = True
+            summary['native_bit_writer_dependencies_passed'] = True
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()

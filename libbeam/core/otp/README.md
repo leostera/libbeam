@@ -17,3 +17,6 @@ addition; `decimal-sources.json` records resumable native schoolbook decimal
 formatting. Their real catalog entries are distinct from generated BIF identities.
 `bit-copy-sources.json` records native forward copying used by result transport;
 this does not admit `bs_create_bin` or any additional BIF.
+`bit-writer-sources.json` records the native integer/Unicode segment writers and
+their checked caller-owned buffer boundary. They remain dependencies, not an
+admitted construction instruction.

@@ -42,7 +42,7 @@ jobs:
               libbeam/core/otp/execution-sources.json libbeam/core/otp/binary-sources.json \
               libbeam/core/otp/term-compare-sources.json libbeam/core/otp/numeric-sources.json \
               libbeam/core/otp/decimal-sources.json \
-              libbeam/core/otp/bit-copy-sources.json \
+              libbeam/core/otp/bit-copy-sources.json libbeam/core/otp/bit-writer-sources.json \
               libbeam/tools/check_binary_representation.py libbeam/tools/project_transform.py \
               libbeam/tools/project_dispatch.py libbeam/src/engine.cpp \
               libbeam/include/libbeam/engine.hpp libbeam/tests/api_engine_test.cpp \

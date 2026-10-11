@@ -199,3 +199,60 @@ The copier supplies one real dependency; it does not justify dropping branches,
 substituting successful helpers, or admitting that case before its other consumers
 exist. Reverse copying, overlapping copies, writable binaries, matching contexts,
 and those construction instructions remain outside this slice.
+
+## Follow-on: integer and Unicode segment writer dependencies
+
+Baseline `29645963`. `bit_writer.c` transplants the native small/bignum BE/LE
+formatters, byte-borrow negation, restore-and-shift path, integer writers and
+UTF-8/16 encoders. UTF-32 retains the native instruction's scalar validation and
+fixed-size integer delegation. Provenance is pinned in
+`libbeam/core/otp/bit-writer-sources.json`. This is another construction dependency,
+not admission of a partial `bs_create_bin` case.
+
+The caller owns an initialized writable span and explicit next-bit cursor. The
+helpers allocate nothing, collect nothing and retain no input terms. The
+caller-owned cursor borrows the output span; input terms must remain valid and
+owned throughout. Checked state, capacity, endianness and type refusals precede
+mutation. Writer-control/output overlap is refused, as is bignum-input/output
+overlap for nonempty integer writes. Declared pointer spans and valid term representations remain caller
+obligations. Successful writes preserve both the existing prefix and unused tail
+bits; the tail-preservation wrapper strengthens the native append-only contract.
+
+Native integer truncation, arbitrary sign extension and partial little-endian
+byte grouping remain intact. Backward stores use bounded indices rather than
+forming a pointer before the buffer. Small-value left shifts use unsigned bits,
+and the byte-store unrolling becomes the same bounded arithmetic-shift loop.
+Native bignum borrow uses either the compiler primitive or its original fallback.
+UTF only copies its temporary when the **intra-byte** offset is nonzero: at a
+nonzero aligned offset, the native routine already wrote directly to the right
+address, so its redundant same-address `memcpy` is removed.
+
+Tests cover 16 integer offsets and lengths 0–257, signed boundaries and bignums,
+10,000 independent unsigned-128 oracle cases, 3/257/65,535-limb values, both byte
+orders, unchanged inputs, preserved outside bits and pre-write refusals. Every
+Unicode scalar candidate through `0x10ffff` is decoded independently, rotating
+five encoding/endian modes and 16 offsets; surrogates refuse without mutation.
+Exact-end guard pages exercise integer and Unicode destinations. Compiler borrow
+and `DEBUG` fallback paths run separately under UBSan.
+
+A separate **stock-OTP-only** `bit_writer_reference.erl` emits 1,070 integer and
+Unicode vectors, including invalid scalars, partial widths and nonzero aligned
+starts. Both C borrow implementations must match exactly. That module is never
+loaded into libbeam and is not evidence of guest construction support.
+
+The execution bridge is explicit: C writers produce bytes, the real owned
+constructor copies them into heap/offheap bitstrings, and ordinary compiled
+`binary_slice:identity/1` returns those arguments across collection at every
+dispatch. Poisoning the source span does not affect the process result; destruction
+balances all resources. This demonstrates consumption and lifetime of the native
+helper output, **not execution of a guest bit-construction instruction**.
+
+Final evidence: `/tmp/libbeam-bit-writer-commit-clean/summary.json` records 17 passing
+Debug/Release CTests, reference agreement, fixture/public execution and UBSan.
+All 29 tooling tests pass at `/tmp/libbeam-bit-writer-tooling-clean/summary.json`.
+Earlier passing evidence remains at `/tmp/libbeam-bit-writer-integrated-first/`;
+`/tmp/libbeam-bit-writer-first/` retains the initial strict-compiler signed-counter
+warnings corrected before execution validation.
+Float segments, binary/string assembly, append/writable ownership, size analysis,
+fixups and error-context dependencies still precede whole-case admission. The
+unchanged stateful acceptance remains red; M3/M4 are not completed by these helpers.

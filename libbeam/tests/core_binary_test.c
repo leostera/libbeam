@@ -3,6 +3,7 @@
  */
 #include "process_internal.h"
 #include "bit_copy.h"
+#include "bit_writer.h"
 #include <stdio.h>
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"CHECK %s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while(0)
 typedef struct { size_t calls,fail,live,bytes; } Memory;
@@ -207,6 +208,36 @@ static void unaligned_results(Memory *memory,LbCodeSpace *space,LbCodeModule *mo
     lb_code_entry_release(identity);
     puts("CORE_BINARY_BIT_COPY_OK native_argument_views=true identity_execution=true moving_gc=true offsets=16 lengths=513 exact_retirement=true guest_slicing=false");
 }
+static void constructed_arguments(Memory *memory,LbCodeSpace *space,LbCodeModule *module)
+{
+    const size_t widths[]={169,4099}; unsigned char data[600],copied[600];
+    Eterm number[3]={_make_header(2,NEG_BIG_SUBTAG),1,1},argument=NIL;
+    LbCodeEntry *identity=entry(space,module,"identity",1); size_t i;
+    size_t live=memory->live,bytes=memory->bytes;
+    for(i=0;i<sizeof(widths)/sizeof(*widths);++i) {
+        LbBitWriter w; LbProcess *p; LbBitstringView view; size_t words,bit_size;
+        memset(data,0,sizeof(data)); CHECK(lb_bit_writer_init(&w,data,sizeof(data))==LB_BITS_OK);
+        CHECK(lb_bits_put_integer(&w,make_small(17),5,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+        CHECK(lb_bits_put_integer(&w,make_boxed(number),widths[i],LB_BITS_LITTLE_ENDIAN)==LB_BITS_OK);
+        CHECK(lb_bits_put_utf8(&w,make_small(0x2603))==LB_BITS_OK);
+        CHECK(lb_bits_put_utf16(&w,make_small(0x1d11e),LB_BITS_LITTLE_ENDIAN)==LB_BITS_OK);
+        CHECK(lb_bits_put_utf32(&w,make_small(0x10ffff),LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+        CHECK(lb_bits_put_integer(&w,make_small(-7),15,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+        bit_size=w.offset; words=lb_bitstring_heap_words(bit_size);
+        CHECK(lb_process_create(identity,&argument,1,5,&p)==LB_PROCESS_READY);
+        CHECK(lb_heap_reserve(p,words,1));
+        CHECK(lb_bitstring_build(space->domain,&p->off_heap,&p->htop,data,bit_size,0,&p->reg[0])==LB_ALLOC_OK);
+        memcpy(copied,data,sizeof(data)); memset(data,0xa5,sizeof(data)); run(p,1);
+        CHECK(lb_bitstring_view(lb_process_result(p),&view) && view.bit_size==bit_size);
+        memset(data,0,sizeof(data));
+        CHECK(lb_bits_copy(view.data,(view.bit_offset+bit_size+7)/8,view.bit_offset,data,sizeof(data),0,bit_size));
+        CHECK(!memcmp(data,copied,sizeof(data)));
+        CHECK((bit_size>512)==(p->off_heap.first!=NULL));
+        lb_process_destroy(p); CHECK(memory->live==live && memory->bytes==bytes);
+    }
+    lb_code_entry_release(identity);
+    puts("CORE_BINARY_WRITER_OK c_constructed_arguments=true heap_offheap=true identity_execution=true moving_gc=true copied_lifetime=true exact_retirement=true guest_construction=false");
+}
 static void metadata_copy_failure(Memory *memory,LbCodeSpace *space,LbCodeModule *module)
 {
     Eterm literal=payload(space,module->attributes);
@@ -253,6 +284,7 @@ static void executable_test(const char *path)
     }
     copied_inputs(engine->domain,&m,space,module);
     unaligned_results(&m,space,module);
+    constructed_arguments(&m,space,module);
     metadata_copy_failure(&m,space,module);
     { Eterm what=atom(space,"attributes"),value; LbProcess *p=invoke(space,module,"module_info",&what,1);
       run(p,1); value=payload(space,lb_process_result(p)); zero_binary(value,2056,0x7f);

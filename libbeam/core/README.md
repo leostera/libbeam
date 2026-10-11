@@ -69,6 +69,10 @@ lifecycle target passes; the stateful example still refuses unsupported module i
 - `bit_copy.c`: native forward bit copying behind checked span/overlap bounds.
   Copied public results use it; arbitrary offsets retain outside bits and need
   no terminal padding. No bit-syntax instruction is admitted by this helper.
+- `bit_writer.c`: native integer and UTF segment writer dependencies, with an
+  explicit initialized span/cursor, pre-write refusals, and no allocation or GC.
+  C-built heap/offheap arguments survive actual identity execution and collection;
+  guest construction remains refused until the whole instruction is supported.
 - `term_compare.c`: native-derived nonrecursive exact equality for admitted terms
   and aligned/unaligned bitstrings. Explicit scratch OOM is checked before a
   generated comparison branch; failure is never an equality/inequality answer.

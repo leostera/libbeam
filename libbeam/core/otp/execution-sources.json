@@ -12,7 +12,7 @@
     "beam/erts/emulator/beam/beam_transform_helpers.c": "5997b24ba2cd4c143753fb0a8617489573ba27fcfc7ecf36a5aa020e1f0c281c",
     "beam/erts/emulator/beam/export.h": "dcfa68db96b336560487c6ca6d99c12b4e19fb29fa097b1aefbbf607783e4169"
   },
-  "other_inputs": ["loader-sources.json", "binary-sources.json", "term-compare-sources.json", "numeric-sources.json", "decimal-sources.json", "bit-copy-sources.json", "opcodes/manifest.json"],
+  "other_inputs": ["loader-sources.json", "binary-sources.json", "term-compare-sources.json", "numeric-sources.json", "decimal-sources.json", "bit-copy-sources.json", "bit-writer-sources.json", "opcodes/manifest.json"],
   "profile": {
     "wordsize": 64,
     "dispatch": "OTP NO_JUMP_TABLE numeric specific-instruction words",
