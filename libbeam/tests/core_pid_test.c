@@ -379,7 +379,20 @@ static void message_fragments(LbCodeSpace *space,LbCodeModule *module,Memory *m)
     CHECK(lb_process_create_binary(e,bytes,65,32,&receiver)==LB_PROCESS_READY);
     CHECK(lb_message_create(space,receiver->reg[0],&message,&cost)==LB_PROCESS_READY);
     CHECK(lb_message_queue_append(&receiver->messages,message)==LB_PROCESS_READY);
-    CHECK(lb_process_collect(receiver,1024)==LB_PROCESS_READY);
+    Eterm marker,reference_words[LB_REF_WORDS];
+    Eterm reference=lb_reference_write(reference_words,1234);
+    CHECK(lb_receive_marker_reserve(receiver,&marker)==LB_PROCESS_READY && is_small(marker));
+    lb_receive_marker_bind(receiver,marker,reference);
+    Eterm retained=receiver->messages.markers->ref[0];
+    CHECK(retained!=reference && !memcmp(boxed_val(retained),reference_words,sizeof(reference_words)));
+    for(size_t i=0;i<9;++i) CHECK(lb_receive_marker_reserve(receiver,&marker)==LB_PROCESS_READY);
+    /* The oldest bound marker was reused; stale references leave save unchanged. */
+    LbMessage **saved=receiver->messages.save;
+    lb_receive_marker_use(receiver,reference); CHECK(receiver->messages.save==saved);
+    lb_receive_marker_bind(receiver,marker,reference);
+    lb_receive_marker_use(receiver,reference); CHECK(receiver->messages.save==receiver->messages.last);
+    receiver->messages.save=&receiver->messages.first;
+    CHECK(lb_process_collect_live(receiver,1024,0));
     CHECK(lb_message_peek_owned(receiver,&cached)==LB_PROCESS_READY && !is_non_value(cached));
     lb_message_skip_owned(receiver);
     CHECK(lb_message_peek_owned(receiver,&cached)==LB_PROCESS_READY && is_non_value(cached));
@@ -387,7 +400,15 @@ static void message_fragments(LbCodeSpace *space,LbCodeModule *module,Memory *m)
     CHECK(lb_message_queue_append(&receiver->messages,message)==LB_PROCESS_READY);
     CHECK(lb_message_peek_owned(receiver,&cached)==LB_PROCESS_READY && cached==make_small(42));
     lb_message_consume_owned(receiver); CHECK(receiver->messages.mq_len==1);
+    lb_receive_marker_use(receiver,reference); CHECK(!*receiver->messages.save);
+    receiver->messages.save=&receiver->messages.first;
     CHECK(lb_message_peek_owned(receiver,&cached)==LB_PROCESS_READY && !is_non_value(cached));
+    lb_message_consume_owned(receiver); CHECK(!receiver->messages.mq_len);
+    CHECK(lb_message_create(space,make_small(43),&message,&cost)==LB_PROCESS_READY);
+    CHECK(lb_message_queue_append(&receiver->messages,message)==LB_PROCESS_READY);
+    lb_receive_marker_use(receiver,reference); CHECK(*receiver->messages.save==message);
+    CHECK(lb_message_peek_owned(receiver,&cached)==LB_PROCESS_READY && cached==make_small(43));
+    lb_receive_marker_clear(receiver,reference);
     lb_process_destroy(receiver); lb_code_entry_release(e); CHECK(!space->messages);
     puts("CORE_MESSAGE_FRAGMENT_OK native_layout=true source_gc_destroy=true independent_fun_code=true allocation_prefix_rollback=true native_queue_cursor=true process_drains_queue=true");
 }

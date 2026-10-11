@@ -13,6 +13,7 @@
 #include "fun.h"
 #include "message.h"
 #include "registry.h"
+#include "receive_marker.h"
 #define F_INSLPQUEUE (1u<<1)
 #define F_TIMO (1u<<2)
 #define F_DELAY_GC (1u<<13) /* pinned native matching/schedule-out flag */

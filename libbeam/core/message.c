@@ -4,6 +4,7 @@
  * Owned adaptation of native self-contained message heap fragments/copying.
  */
 #include "message.h"
+#include "receive_marker.h"
 #include "process_internal.h"
 
 /* Selected native do_send local-PID branch: dead PIDs drop the message and
@@ -111,7 +112,7 @@ void lb_message_consume_owned(LbProcess *receiver)
 }
 void lb_message_queue_init(LbMessageQueue *queue)
 {
-    queue->first=NULL; queue->last=queue->save=&queue->first; queue->mq_len=0;
+    queue->first=NULL; queue->last=queue->save=&queue->first; queue->mq_len=0; queue->markers=NULL;
 }
 LbProcessStatus lb_message_queue_append(LbMessageQueue *queue,LbMessage *message)
 {
@@ -126,6 +127,7 @@ LbMessage *lb_message_queue_take(LbMessageQueue *queue)
     LbMessage *message=*queue->save;
     if(!message) return NULL;
     if(queue->mq_len<=0 || message->queue!=queue) abort();
+    lb_receive_marker_unlink(queue,message,queue->save);
     *queue->save=message->next;
     if(queue->last==&message->next) queue->last=queue->save;
     message->next=NULL; message->queue=NULL; --queue->mq_len; return message;
@@ -135,7 +137,8 @@ void lb_message_queue_clear(LbMessageQueue *queue)
     queue->save=&queue->first;
     LbMessage *message;
     while((message=lb_message_queue_take(queue))) lb_message_destroy(message);
-    lb_message_queue_init(queue);
+    LbRecvMarkerBlock *markers=queue->markers;
+    lb_message_queue_init(queue); queue->markers=markers;
 }
 
 void lb_message_destroy(LbMessage *message)

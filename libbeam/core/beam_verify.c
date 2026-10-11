@@ -204,6 +204,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:case genop_send_0:
         case genop_loop_rec_2:case genop_loop_rec_end_1:case genop_remove_message_0:
         case genop_wait_1:case genop_wait_timeout_2:case genop_timeout_0:
+        case genop_recv_marker_reserve_1:case genop_recv_marker_bind_2:
+        case genop_recv_marker_clear_1:case genop_recv_marker_use_1:
         case genop_call_2:case genop_call_only_2:case genop_call_last_3:
         case genop_call_fun_1:case genop_call_fun2_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
@@ -419,6 +421,14 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 alternate=labels[a[0].val];
             }
             break;
+        case genop_recv_marker_reserve_1:
+            REQUIRE(!f.matching && destination(&f,a[0],0)); break;
+        case genop_recv_marker_bind_2:
+            REQUIRE(!f.matching && source(st,&f,a[0]) && source(st,&f,a[1])); break;
+        case genop_recv_marker_clear_1:
+            REQUIRE(source(st,&f,a[0])); break;
+        case genop_recv_marker_use_1:
+            REQUIRE(!f.matching && source(st,&f,a[0])); break;
         case genop_timeout_0:REQUIRE(!f.matching); break;
         case genop_remove_message_0:
             REQUIRE(f.matching); f.matching=0; break;

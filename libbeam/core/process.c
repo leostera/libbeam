@@ -143,6 +143,7 @@ void lb_process_destroy(LbProcess *p)
     module=p->entry_module; d=module->space->domain;
     lb_registry_remove(p);
     if(p->identity.owner && lb_pid_remove(p->identity.owner,&p->identity)!=LB_PID_OK) abort();
+    lb_receive_marker_destroy(p);
     lb_message_queue_clear(&p->messages);
     lb_fun_leases_clear(p);
     lb_decimal_destroy(p->decimal);

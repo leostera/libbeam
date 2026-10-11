@@ -53,8 +53,13 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   fixtures execute on the shared worker; copied-closure failure prefixes drain
   queues and identities. Monotonic deadlines use bounded idle polling, not native
   timer wheels or a hard latency guarantee. Registered destinations now resolve
-  in the owning namespace; receive markers, monitors and broader signals remain
-  unadmitted.
+  in the owning namespace; monitors and broader signals remain unadmitted.
+- `receive_marker.c`: all four native receive-marker dispatch cases execute.
+  Eight-slot reuse/reference binding owns stable ordinary-reference storage.
+  Serialized tail anchors replace non-message queue insertion; message unlink
+  repairs borrowed anchors before freeing nodes. Unknown/stale references leave
+  the scan unchanged. Worker requests use compiler-emitted plain-reference markers;
+  allocation-prefix, slot-reuse, GC and predecessor-removal tests cover ownership.
 - `registry.c`: native atom-index hash/equality and Fibonacci/chained buckets;
   fallible name association before publication, logical-exit removal before PID
   retirement, empty-table reclamation and registered-name message delivery.

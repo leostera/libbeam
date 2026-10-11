@@ -3,13 +3,18 @@
 -module(fun_slice).
 -export([echo/1, factory/1, closed/1, closed_factory/1, nested/1, badarity/1, reply/1, process_factory/1, process_nested/1, is_fun/1, is_zero/1, is_arity/2, process_loop/1,
          spawn_finite/1, spawn_loop/1, spawn_badarg/1, spawn_refused/1,
-         send_self/1, send_child/1, send_badarg/1, receive_roundtrip/1, receive_timeout/1, receive_self/1, named_self/1, named_duplicate/1, missing_name/1, guest_error/1, guest_error_info/1]).
+         send_self/1, send_child/1, send_badarg/1, receive_roundtrip/1, receive_timeout/1, receive_self/1, named_self/1, named_duplicate/1, missing_name/1, guest_error/1, guest_error_info/1, marked_request/1]).
 is_fun(F) when is_function(F) -> true;
 is_fun(_) -> false.
 is_zero(F) when is_function(F,0) -> true;
 is_zero(_) -> false.
 is_arity(F,N) when is_function(F,N) -> true;
 is_arity(_,_) -> false.
+marked_request(B) ->
+    self() ! noise,
+    Ref = make_ref(),
+    self() ! {Ref,B},
+    receive {Ref,Value} -> Value end.
 named_self(B) ->
     true = register(probe_state,self()),
     probe_state ! {reply,B},

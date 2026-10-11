@@ -40,10 +40,12 @@ void lb_message_skip_owned(LbProcess *);
 void lb_message_consume_owned(LbProcess *);
 /* Native inner-queue pointer-to-pointer cursor: unmatched messages stay in
  * arrival order; removal fixes the tail before freeing the selected node. */
+typedef struct LbRecvMarkerBlock LbRecvMarkerBlock;
 typedef struct LbMessageQueue {
     LbMessage *first;
     LbMessage **last,**save;
     Sint mq_len;
+    LbRecvMarkerBlock *markers; /* actor-owned block; borrowed tail anchors */
 } LbMessageQueue;
 void lb_message_queue_init(LbMessageQueue *);
 LbProcessStatus lb_message_queue_append(LbMessageQueue *,LbMessage *);

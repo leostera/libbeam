@@ -43,7 +43,7 @@ if(NOT UNIX)
 endif()
 add_library(libbeam_core STATIC core/alloc.c core/utf8.c core/beam_image.c core/atoms.c
     core/opcodes.c core/beam_reader.c core/beam_program.c core/beam_decode.c
-    core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c core/writable.c core/binary_error.c core/binary_size.c core/binary_vheap.c core/binary_build.c core/exception.c core/pid_table.c core/bif_process.c core/fun.c core/message.c core/receive.c core/registry.c core/bit_copy.c core/bit_writer.c core/bit_float.c core/term_compare.c
+    core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c core/writable.c core/binary_error.c core/binary_size.c core/binary_vheap.c core/binary_build.c core/exception.c core/pid_table.c core/bif_process.c core/fun.c core/message.c core/receive.c core/registry.c core/receive_marker.c core/bit_copy.c core/bit_writer.c core/bit_float.c core/term_compare.c
     core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/engine.c core/executor.c core/world.c core/md5.c core/process.c core/heap.c core/bif_info.c core/big.c core/bif_numeric.c core/decimal.c core/bif_decimal.c)
 add_dependencies(libbeam_core libbeam_atom_definitions libbeam_opcode_definitions)
 target_link_libraries(libbeam_core PUBLIC ZLIB::ZLIB Threads::Threads m)
