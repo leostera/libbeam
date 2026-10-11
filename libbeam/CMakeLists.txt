@@ -43,7 +43,7 @@ if(NOT UNIX)
 endif()
 add_library(libbeam_core STATIC core/alloc.c core/utf8.c core/beam_image.c core/atoms.c
     core/opcodes.c core/beam_reader.c core/beam_program.c core/beam_decode.c
-    core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c
+    core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c core/term_compare.c
     core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/engine.c core/executor.c core/world.c core/md5.c core/process.c core/heap.c core/bif_info.c)
 add_dependencies(libbeam_core libbeam_atom_definitions libbeam_opcode_definitions)
 target_link_libraries(libbeam_core PUBLIC ZLIB::ZLIB Threads::Threads)
@@ -83,6 +83,10 @@ include(CTest)
 if(BUILD_TESTING)
     add_test(NAME engine_lifecycle_acceptance COMMAND engine_lifecycle)
     set_tests_properties(engine_lifecycle_acceptance PROPERTIES TIMEOUT 20)
+    add_executable(core_compare_test tests/core_compare_test.c)
+    target_link_libraries(core_compare_test PRIVATE libbeam_core)
+    add_test(NAME core_exact_comparison COMMAND core_compare_test)
+    set_tests_properties(core_exact_comparison PROPERTIES TIMEOUT 90)
     add_executable(core_local_test tests/core_local_test.c)
     target_link_libraries(core_local_test PRIVATE libbeam_core)
     add_executable(core_world_test tests/core_world_test.c)

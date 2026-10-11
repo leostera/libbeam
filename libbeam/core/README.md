@@ -6,7 +6,8 @@ See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md) and the
 [C Engine lifecycle](../../docs/rfds/0003-engine-lifecycle.md) and
 [owned asynchronous executor](../../docs/rfds/0003-owned-executor.md) and
 [public Isolates/calls](../../docs/rfds/0003-public-isolates.md) and
-[local calls/Y roots](../../docs/rfds/0003-local-calls.md).
+[local calls/Y roots](../../docs/rfds/0003-local-calls.md) and
+[exact comparisons](../../docs/rfds/0003-exact-comparison.md).
 
 This is the C runtime construction boundary, not a whole-ERTS link. It now loads
 and executes ordinary `first_slice.erl` through generated BEAM transformations,
@@ -59,6 +60,9 @@ lifecycle target passes; the stateful example still refuses unsupported module i
 - `binary.c`: real immutable refcounted payloads, native BinRef/SubBits layouts,
   owner-local offheap chains, GC sweep and physical release. Literal/metadata
   decoding and copied byte-input invocation share this constructor.
+- `term_compare.c`: native-derived nonrecursive exact equality for admitted terms
+  and aligned/unaligned bitstrings. Explicit scratch OOM is checked before a
+  generated comparison branch; failure is never an equality/inequality answer.
 - `bif_info.c`, `md5.c`: the two positive-listed `get_module_info` BIFs and actual
   metadata/checksum behavior, not placeholders for compiler-generated imports.
 

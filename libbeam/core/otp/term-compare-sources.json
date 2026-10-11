@@ -1,0 +1,20 @@
+{
+  "baseline": "446ada50",
+  "scope": "Selected utils.c:eq term cases and word-stack traversal; erl_bits.c/h exact bit comparison. Not whole-file admission.",
+  "sources": {
+    "beam/erts/emulator/beam/utils.c": "d899860f79adae3cf1c52a9e644aad3c58bfe5a2242ee9fd61163ae0bed9800f",
+    "beam/erts/emulator/beam/global.h": "7c4adc8ca6e697d1884fa562265bb01f93193ca1c962caf5ed6eba2690300183",
+    "beam/erts/emulator/beam/erl_utils.h": "dad589935f12dacf7004f68588417df30e041b34499a8dc1e6336a0a292e78c4",
+    "beam/erts/emulator/beam/erl_bits.h": "5a72bb9b9c14690d55ff94912faf3e8f0e9914e155593d2c6aa7474c3ff5bfec",
+    "beam/erts/emulator/beam/erl_bits.c": "2b803014c329c7c2c30e60c0bffda90911985b9ce1703952e7315e28694ccdb6"
+  },
+  "adaptations": [
+    "Native identity/list/tuple/bignum/float/bitstring cases; omitted unadmitted fun/map/reference/record/external identity types.",
+    "Native nonrecursive tagged-word work stack starts with 16 local words; explicit domain, bounded fallible growth and exact scratch cleanup replace fatal ERTS allocation.",
+    "Float exactness compares the native binary64 word, including distinct signed zero.",
+    "Native bit comparison omits semantically unused lookahead beyond an exact-sized payload on the final zero-shift full byte.",
+    "Generated equality branches check allocation failure before deciding equality or inequality; no fake optimization miss on refusal.",
+    "Verifier treats same-function func_info failure branches as terminal function_clause edges, distinct from ordinary function entry."
+  ],
+  "other_inputs": ["binary-sources.json", "execution-sources.json", "opcodes/manifest.json"]
+}

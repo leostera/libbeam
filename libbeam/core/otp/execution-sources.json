@@ -10,11 +10,12 @@
     "beam/erts/emulator/beam/code_ix.h": "58fa70f6931feb5c9248cddb65abbe5d6800f3e3c0f0d914d9fe55ec0b2fd821",
     "beam/erts/emulator/beam/export.h": "dcfa68db96b336560487c6ca6d99c12b4e19fb29fa097b1aefbbf607783e4169"
   },
-  "other_inputs": ["loader-sources.json", "binary-sources.json", "opcodes/manifest.json"],
+  "other_inputs": ["loader-sources.json", "binary-sources.json", "term-compare-sources.json", "opcodes/manifest.json"],
   "profile": {
     "wordsize": 64,
     "dispatch": "OTP NO_JUMP_TABLE numeric specific-instruction words",
     "continuation_words": 1,
+    "equality": "Native exact term/bitstring comparison for admitted representations; explicit scratch OOM precedes generated eq/ne branches; no loose comparison or ordering admission",
     "local_calls": "Verified function-entry labels/arity and continuation frames; generated local/move/tail calls, Y moves/swaps/initialization; private-entry reduction yields use the native function directory and owned MFA copy",
     "code_generation": "single; no hot reload",
     "native_imports": ["erlang:get_module_info/1", "erlang:get_module_info/2"],

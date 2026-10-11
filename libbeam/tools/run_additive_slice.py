@@ -55,6 +55,8 @@ def main():
                             root / 'libbeam/tests/core_code_test.c', root / 'libbeam/tests/fixtures/code_peer.erl',
                             root / 'libbeam/tools/project_transform.py', root / 'libbeam/tools/project_dispatch.py',
                             root / 'libbeam/core/otp/execution-sources.json', root / 'libbeam/core/otp/binary-sources.json',
+                            root / 'libbeam/core/otp/term-compare-sources.json',
+                            root / 'libbeam/tests/core_compare_test.c', root / 'libbeam/tests/fixtures/compare_slice.erl',
                             root / 'libbeam/tests/core_binary_test.c', root / 'libbeam/tests/fixtures/binary_slice.erl',
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
@@ -89,6 +91,11 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError(f'Binary provenance changed: {filename}')
             summary['binary_sources'] = binary_sources
+            comparison_sources = json.loads((root / 'libbeam/core/otp/term-compare-sources.json').read_text())
+            for filename, expected in comparison_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Comparison reference changed: {filename}')
+            summary['comparison_sources'] = comparison_sources
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
@@ -141,7 +148,10 @@ def main():
             run('local-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/local_slice.erl'])
             local_fixture = fixture_dir / 'local_slice.beam'
             run('local-execution', [out / 'build/core_local_test', local_fixture])
-            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture])
+            run('compare-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/compare_slice.erl'])
+            compare_fixture = fixture_dir / 'compare_slice.beam'
+            run('compare-execution', [out / 'build/core_compare_test', compare_fixture])
+            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture])
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
             run('peer-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/code_peer.erl'])
@@ -205,6 +215,15 @@ def main():
                 <<1,2,3>> = local_slice:gc(<<1,2,3>>),
                 <<1,2,3>> = local_slice:tail(<<1,2,3>>),
                 {<<1,2,3>>,<<1,2,3>>} = local_slice:pair(<<1,2,3>>),
+                <<"equal">> = compare_slice:same({[1|tail],1 bsl 80}, {[1|tail],1 bsl 80}),
+                <<"different">> = compare_slice:same(0.0,-0.0),
+                <<"different">> = compare_slice:same(0,0.0),
+                <<"equal">> = compare_slice:different(<<5:3>>,<<5:3>>),
+                <<"empty">> = compare_slice:empty(<<>>),
+                try compare_slice:empty(<<1>>) of _ -> error(missing_function_clause)
+                catch error:function_clause -> ok end,
+                <<"next-ok">> = compare_slice:command(<<"next">>),
+                <<"other">> = compare_slice:not_command(<<"read">>),
                 Digits = binary:copy(<<"0123456789">>,8),
                 {Digits} = binary_slice:literal(), {Bits} = binary_slice:bits(),
                 Bits = <<Digits/binary,5:3>>,
@@ -266,7 +285,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -285,13 +304,14 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags, '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
             run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture])
             run('local-ubsan', [out / 'engine-ubsan/core_local_test', local_fixture])
-            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture])
+            run('compare-ubsan', [out / 'engine-ubsan/core_compare_test', compare_fixture])
+            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
@@ -304,7 +324,8 @@ def main():
             run('release-executor', [out / 'release/core_executor_test', async_fixture])
             run('release-world', [out / 'release/core_world_test', async_fixture])
             run('local-release', [out / 'release/core_local_test', local_fixture])
-            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture, local_fixture])
+            run('compare-release', [out / 'release/core_compare_test', compare_fixture])
+            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture])
             for filename in ('lb_atoms_generated.h', 'lb_atoms_generated.inc', 'lb_bif_ids_generated.h'):
                 first = (out / 'build/generated/atoms' / filename).read_bytes()
                 second = (out / 'release/generated/atoms' / filename).read_bytes()
@@ -327,10 +348,11 @@ def main():
             summary['world_execution_retirement_passed'] = True
             summary['public_selected_profile_execution_passed'] = True
             summary['local_calls_y_roots_execution_passed'] = True
+            summary['exact_comparison_execution_passed'] = True
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, local_fixture, many_fixture, *probes]}
+                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, local_fixture, compare_fixture, many_fixture, *probes]}
             # G1 now requires the unchanged acceptance target and real C/adapter
             # failure recovery. Stateful G3 remains separately observed, not green.
             lifecycle = run('engine-lifecycle', [out / 'build/engine_lifecycle'])

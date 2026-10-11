@@ -6,6 +6,7 @@
  * continuation return, and native BIF call/epilogue. No scheduler/TLS singleton.
  */
 #include "process_internal.h"
+#include "term_compare.h"
 const BeamInstr lb_host_return[1]={op_normal_exit};
 int lb_instruction_supported(unsigned op)
 {
@@ -108,6 +109,8 @@ static const LbMFA *entry_mfa(LbProcess *p,const BeamInstr *pc)
 #define xb(offset) reg[(offset)/sizeof(Eterm)]
 #define yb(offset) E[(offset)/sizeof(Eterm)]
 #define Qb(word) (word)
+#define Sb(offset) (((offset)&1)?yb((offset)-1):xb(offset))
+#define is_not_nil(term) (!is_nil(term))
 #define y(i) E[(i)]
 #define Ib(word) (word)
 #define tb(word) (word)

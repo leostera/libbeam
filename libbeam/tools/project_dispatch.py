@@ -19,7 +19,10 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'move_call_only_cf move_call_only_xf '
          'move_deallocate_return_cQ move_deallocate_return_nQ move_deallocate_return_xQ move_deallocate_return_yQ '
          'i_call_ext_last_eQ i_move_call_ext_last_eQc '
-         'i_init_y i_init2_yy i_init3_yyy i_init_seq3_y i_init_seq4_y i_init_seq5_y').split()
+         'i_init_y i_init2_yy i_init3_yyy i_init_seq3_y i_init_seq4_y i_init_seq5_y '
+         'i_is_eq_exact_immed_fyc i_is_eq_exact_literal_fxc i_is_eq_exact_literal_fyc '
+         'i_is_ne_exact_immed_fxc i_is_ne_exact_immed_fyc i_is_ne_exact_literal_fxc i_is_ne_exact_literal_fyc '
+         'is_eq_exact_fxx is_eq_exact_fxy is_eq_exact_fyy is_ne_exact_fSS is_nil_fx is_nil_fy').split()
 
 
 def case(source, name):
@@ -44,12 +47,38 @@ def group(source, name):
     return source[start:end]
 
 
+def fallible_equality(body):
+    """Preserve the generated branch, but test scratch failure before taking it."""
+    calls=list(re.finditer(r'\b(eq|EQ)\(',body))
+    if not calls: return body
+    if len(calls)!=1: raise RuntimeError('Unreviewed multiple equality calls')
+    call=calls[0]
+    depth=1
+    end=call.end()
+    while depth and end<len(body):
+        if body[end]=='(': depth+=1
+        elif body[end]==')': depth-=1
+        end+=1
+    if depth: raise RuntimeError('Unbalanced equality call')
+    branch=body.rfind('  if (',0,call.start())
+    if branch<0: raise RuntimeError('Equality outside reviewed condition')
+    args=body[call.end():end-1]
+    # Literal cases skip compound equality for immediate sources. EQ cases
+    # retain native identity/immediate fast paths inside the owned helper.
+    guard='!is_immed(src) && ' if call[1]=='eq' else ''
+    prefix=('  int lb_equal=0;\n  if ('+guard+
+            'lb_term_equal(c_p->entry_module->space->domain, '+args+
+            ', &lb_equal)!=LB_ALLOC_OK) goto memory_failure;\n')
+    return body[:branch]+prefix+body[branch:call.start()]+'lb_equal'+body[end:]
+
+
 def project(source):
     bodies=[]
     shared=group(source, 'deallocate_return0')
     names=NAMES+re.findall(r'OpCase\((\w+)\)',shared)
     selected=[(name,case(source,name)) for name in NAMES]+[('deallocation group',shared)]
     for name, body in selected:
+        body=fallible_equality(body)
         # No tracing/saved-call/lock instrumentation capability exists in this
         # serialized interpreter. Remove those paths, not their semantic peers.
         body=re.sub(r'^\s*DTRACE_\w+\([^;]+;', '', body, flags=re.M)

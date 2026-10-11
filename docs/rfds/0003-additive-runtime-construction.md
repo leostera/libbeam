@@ -21,6 +21,8 @@ capacity, once-only results and physical selected-world reclamation. M3/M4 remai
 outstanding; real persistent Erlang processes are not implemented by call handles.
 [Local calls and saved Y roots](0003-local-calls.md) now extend that same generated
 execution path with private-entry yields and live continuations across collection.
+[Exact term/bitstring comparisons](0003-exact-comparison.md) add native value
+semantics and fallible scratch handling to its generated branch cases.
 
 See the [A01/A02 term-and-atom admission record](0003-terms-and-atoms.md) for the
 selected BEAM representation, namespace identities, transactional image bindings

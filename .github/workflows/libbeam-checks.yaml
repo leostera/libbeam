@@ -40,6 +40,7 @@ jobs:
               libbeam/tools/check_term_representation.py libbeam/tools/generate_opcodes.py \
               libbeam/tools/otp/beam_makeops libbeam/core/otp/loader-sources.json \
               libbeam/core/otp/execution-sources.json libbeam/core/otp/binary-sources.json \
+              libbeam/core/otp/term-compare-sources.json \
               libbeam/tools/check_binary_representation.py libbeam/tools/project_transform.py \
               libbeam/tools/project_dispatch.py libbeam/src/engine.cpp \
               libbeam/include/libbeam/engine.hpp libbeam/tests/api_engine_test.cpp \

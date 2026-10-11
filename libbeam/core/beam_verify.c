@@ -64,7 +64,8 @@ LbCodeStatus lb_verify_program(LoaderState *st)
         case genop_call_2:case genop_call_only_2:case genop_call_last_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
         case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:
-        case genop_jump_1:case genop_is_eq_exact_3:case genop_badmatch_1:case genop_case_end_1:break;
+        case genop_jump_1:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:
+        case genop_badmatch_1:case genop_case_end_1:break;
         default:p->error.stage=gen_opc[op->op].name; p->error.offset=op->offset; return LB_CODE_UNSUPPORTED;
         }
         if(op->op!=genop_put_tuple2_2 && op->op!=genop_init_yregs_1)
@@ -73,6 +74,7 @@ LbCodeStatus lb_verify_program(LoaderState *st)
         if(op->op==genop_int_func_start_5) {
             size_t r,arity=(Uint)op->a[4].val;
             ++function; nodes[i].reached=nodes[i].queued=1; nodes[i].in.frame=NO_FRAME;
+            labels[op->a[0].val]=i; /* func_info label: terminal function_clause edge */
             for(r=0;r<arity;++r) define(nodes[i].in.x,r);
             queue[tail++]=i; ++pending;
         }
@@ -140,13 +142,20 @@ LbCodeStatus lb_verify_program(LoaderState *st)
                 terminal=1;
             }
             break;
-        case genop_is_eq_exact_3:
+        case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:
             REQUIRE(a[0].type==TAG_f && a[0].val>0 && (Uint)a[0].val<st->label_count);
-            REQUIRE(source(st,&f,a[1]) && source(st,&f,a[2]));
-            alternate=labels[a[0].val]; REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function); break;
+            REQUIRE(source(st,&f,a[1]));
+            if(op->op!=genop_is_nil_2) REQUIRE(source(st,&f,a[2]));
+            alternate=labels[a[0].val]; REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+            /* A failed head test may enter this function's native func_info
+             * exception boundary. It cannot reenter the normal argument flow. */
+            if(nodes[alternate].op->op==genop_int_func_start_5) alternate=SIZE_MAX;
+            break;
         case genop_jump_1:
             REQUIRE(a[0].type==TAG_f && a[0].val>0 && (Uint)a[0].val<st->label_count);
-            next=labels[a[0].val]; REQUIRE(next<n && nodes[next].function==nodes[index].function); break;
+            next=labels[a[0].val]; REQUIRE(next<n && nodes[next].function==nodes[index].function);
+            if(nodes[next].op->op==genop_int_func_start_5) terminal=1;
+            break;
         case genop_badmatch_1:case genop_case_end_1:REQUIRE(source(st,&f,a[0])); terminal=1;break;
         default:return LB_CODE_FORMAT; /* reachable fallthrough past function end */
         }
