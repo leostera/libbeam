@@ -113,6 +113,7 @@ static inline Eterm *list_val(Eterm x) { assert(is_list(x)); return ptr_val(x); 
 #define CONS(hp,car,cdr) (CAR(hp)=(car), CDR(hp)=(cdr), make_list(hp))
 #define MAX_ARITYVAL ((((Uint)1) << 24) - 1)
 #define make_arityval_zero() _make_header(0,_TAG_HEADER_ARITYVAL)
+#define make_arityval_unchecked(sz) (assert((Uint)(sz)<=MAX_ARITYVAL), _make_header((sz),_TAG_HEADER_ARITYVAL))
 #define make_arityval(sz) (assert((sz) > 0 && (sz) <= MAX_ARITYVAL), _make_header((sz),_TAG_HEADER_ARITYVAL))
 #define is_arity_value(x) (((x) & _TAG_HEADER_MASK) == _TAG_HEADER_ARITYVAL)
 static inline Uint arityval(Eterm x) { assert(is_arity_value(x)); return x >> _HEADER_ARITY_OFFS; }

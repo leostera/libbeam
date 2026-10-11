@@ -57,6 +57,8 @@ def main():
                             root / 'libbeam/core/otp/execution-sources.json', root / 'libbeam/core/otp/binary-sources.json',
                             root / 'libbeam/core/otp/term-compare-sources.json',
                             root / 'libbeam/tests/core_compare_test.c', root / 'libbeam/tests/fixtures/compare_slice.erl',
+                            root / 'libbeam/tests/core_shape_test.c', root / 'libbeam/tests/core_shape_verify_test.c',
+                            root / 'libbeam/tests/fixtures/shape_slice.erl',
                             root / 'libbeam/tests/core_binary_test.c', root / 'libbeam/tests/fixtures/binary_slice.erl',
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
@@ -151,7 +153,10 @@ def main():
             run('compare-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/compare_slice.erl'])
             compare_fixture = fixture_dir / 'compare_slice.beam'
             run('compare-execution', [out / 'build/core_compare_test', compare_fixture])
-            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture])
+            run('shape-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/shape_slice.erl'])
+            shape_fixture = fixture_dir / 'shape_slice.beam'
+            run('shape-execution', [out / 'build/core_shape_test', shape_fixture])
+            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture])
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
             run('peer-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/code_peer.erl'])
@@ -219,6 +224,18 @@ def main():
                 <<"different">> = compare_slice:same(0.0,-0.0),
                 <<"different">> = compare_slice:same(0,0.0),
                 <<"equal">> = compare_slice:different(<<5:3>>,<<5:3>>),
+                <<"test">> = shape_slice:tuple_binary(<<"test">>),
+                <<"test">> = shape_slice:list_binary(<<"test">>),
+                42 = shape_slice:tagged_saved({tag,42}),
+                9 = shape_slice:head_saved([9]),
+                {2,1} = shape_slice:tuple({1,2}),
+                {7,8} = shape_slice:list([7|8]),
+                [7,7] = shape_slice:build(7),
+                <<"0">> = shape_slice:arities({}),
+                <<"1">> = shape_slice:arities({one}),
+                <<"2">> = shape_slice:arities({one,two}),
+                <<"other">> = shape_slice:arities({one,two,three}),
+                <<"2">> = shape_slice:two_arities({one,two}),
                 <<"empty">> = compare_slice:empty(<<>>),
                 try compare_slice:empty(<<1>>) of _ -> error(missing_function_clause)
                 catch error:function_clause -> ok end,
@@ -304,14 +321,15 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags, '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
             run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture])
             run('local-ubsan', [out / 'engine-ubsan/core_local_test', local_fixture])
             run('compare-ubsan', [out / 'engine-ubsan/core_compare_test', compare_fixture])
-            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture])
+            run('shape-ubsan', [out / 'engine-ubsan/core_shape_test', shape_fixture])
+            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
@@ -325,7 +343,8 @@ def main():
             run('release-world', [out / 'release/core_world_test', async_fixture])
             run('local-release', [out / 'release/core_local_test', local_fixture])
             run('compare-release', [out / 'release/core_compare_test', compare_fixture])
-            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture])
+            run('shape-release', [out / 'release/core_shape_test', shape_fixture])
+            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture])
             for filename in ('lb_atoms_generated.h', 'lb_atoms_generated.inc', 'lb_bif_ids_generated.h'):
                 first = (out / 'build/generated/atoms' / filename).read_bytes()
                 second = (out / 'release/generated/atoms' / filename).read_bytes()
@@ -349,10 +368,11 @@ def main():
             summary['public_selected_profile_execution_passed'] = True
             summary['local_calls_y_roots_execution_passed'] = True
             summary['exact_comparison_execution_passed'] = True
+            summary['tuple_list_shape_execution_passed'] = True
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, local_fixture, compare_fixture, many_fixture, *probes]}
+                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, many_fixture, *probes]}
             # G1 now requires the unchanged acceptance target and real C/adapter
             # failure recovery. Stateful G3 remains separately observed, not green.
             lifecycle = run('engine-lifecycle', [out / 'build/engine_lifecycle'])

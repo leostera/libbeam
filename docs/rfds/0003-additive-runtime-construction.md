@@ -23,6 +23,8 @@ outstanding; real persistent Erlang processes are not implemented by call handle
 execution path with private-entry yields and live continuations across collection.
 [Exact term/bitstring comparisons](0003-exact-comparison.md) add native value
 semantics and fallible scratch handling to its generated branch cases.
+[Tuple/list consumers](0003-tuple-list-shapes.md) add shape-verified extraction,
+cons construction and native tuple-arity dispatch without trusting compiler hints.
 
 See the [A01/A02 term-and-atom admission record](0003-terms-and-atoms.md) for the
 selected BEAM representation, namespace identities, transactional image bindings

@@ -52,6 +52,19 @@ static int smp_mark_target_label(LoaderState *st,BeamOpArg arg)
     }
     st->labels[arg.val].looprec_targeted=1; return 1;
 }
+/* beam_transform_helpers.c: sort operand/label pairs by the native word value.
+ * Only arity headers are admitted by this generator's verifier. */
+static int oparg_compare(const void *left,const void *right)
+{
+    const BeamOpArg *a=left,*b=right;
+    if(a->val<b->val) return -1;
+    if(a->val==b->val) return 0;
+    return 1;
+}
+static void beam_load_sort_select_vals(BeamOpArg *base,size_t n)
+{
+    qsort(base,n,2*sizeof(BeamOpArg),oparg_compare);
+}
 #define bif_table (st->space->engine->bifs)
 #define TR_REQUIRE(test) do { if(!(test)) return TE_BAD_FORMAT; } while(0)
 /* Upstream generated helper parameters are intentionally uniform. */

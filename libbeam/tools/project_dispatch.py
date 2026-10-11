@@ -22,7 +22,21 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'i_init_y i_init2_yy i_init3_yyy i_init_seq3_y i_init_seq4_y i_init_seq5_y '
          'i_is_eq_exact_immed_fyc i_is_eq_exact_literal_fxc i_is_eq_exact_literal_fyc '
          'i_is_ne_exact_immed_fxc i_is_ne_exact_immed_fyc i_is_ne_exact_literal_fxc i_is_ne_exact_literal_fyc '
-         'is_eq_exact_fxx is_eq_exact_fxy is_eq_exact_fyy is_ne_exact_fSS is_nil_fx is_nil_fy').split()
+         'is_eq_exact_fxx is_eq_exact_fxy is_eq_exact_fyy is_ne_exact_fSS is_nil_fx is_nil_fy '
+         'is_tuple_fr is_tuple_fx is_tuple_fy is_tuple_of_arity_frA is_tuple_of_arity_fxA is_tuple_of_arity_fyA '
+         'is_tagged_tuple_frAa is_tagged_tuple_fxAa is_tagged_tuple_fyAa is_tagged_tuple_ff_ffrAa is_tagged_tuple_ff_ffxAa '
+         'test_arity_fxA test_arity_fyA test_arity_get_tuple_element_fxAPx '
+         'i_get_tuple_element_xPx i_get_tuple_element_xPy i_get_tuple_element_yPx i_get_tuple_element_yPy '
+         'i_get_tuple_element2_xPx i_get_tuple_element3_xPx i_get_tuple_element2_dst_xPxx i_get_tuple_element2_dst_xPyy '
+         'is_nonempty_list_fx is_nonempty_list_fy is_nonempty_list_allocate_frtt is_nonempty_list_allocate_fxtt '
+         'is_nonempty_list_get_hd_fxx is_nonempty_list_get_tl_fxx is_nonempty_list_get_list_frxx is_nonempty_list_get_list_fxxx '
+         'get_hd_xx get_hd_xy get_hd_yx get_hd_yy get_tl_xx get_tl_xy get_tl_yx get_tl_yy '
+         'get_list_rry get_list_rxr get_list_rxx get_list_rxy get_list_ryr get_list_xrx '
+         'get_list_xxx get_list_xxy get_list_xyx get_list_xyy get_list_yxx get_list_yxy get_list_yyx get_list_yyy '
+         'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
+         'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
+         'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
+         'update_list_cx update_list_xx update_list_yx').split()
 
 
 def case(source, name):
@@ -74,9 +88,9 @@ def fallible_equality(body):
 
 def project(source):
     bodies=[]
-    shared=group(source, 'deallocate_return0')
-    names=NAMES+re.findall(r'OpCase\((\w+)\)',shared)
-    selected=[(name,case(source,name)) for name in NAMES]+[('deallocation group',shared)]
+    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI')]
+    names=NAMES+[name for shared in groups for name in re.findall(r'OpCase\((\w+)\)',shared)]
+    selected=[(name,case(source,name)) for name in NAMES]+[('shared group',shared) for shared in groups]
     for name, body in selected:
         body=fallible_equality(body)
         # No tracing/saved-call/lock instrumentation capability exists in this
@@ -88,6 +102,14 @@ def project(source):
         # Recover the signed value before C pointer arithmetic (also in asserts).
         body=body.replace('(I + (I[1]) + 0)', '(I + (Sint)I[1])')
         body=body.replace('I += I[1] + 0', 'I += (Sint)I[1]')
+        body=body.replace('(I + (I[2]) + 0)', '(I + (Sint)I[2])')
+        body=body.replace('I += I[2] + 0', 'I += (Sint)I[2]')
+        body=body.replace('(I + (offset) + 0)', '(I + (Sint)offset)')
+        body=body.replace('I += offset + 0', 'I += (Sint)offset')
+        # Native packed label tables are two signed 32-bit displacements per
+        # word. memcpy reads preserve the layout without aliasing BeamInstr[].
+        body=re.sub(r'Sint32\* jump_tab = \(Sint32 \*\) (.*);', r'const BeamInstr* jump_tab = \1;',body)
+        body=re.sub(r'jump_tab\[([^]]+)\]',r'lb_packed_label(jump_tab, \1)',body)
         body=body.replace('(I + (lbl) + 0)', '(I + (Sint)lbl)')
         body=body.replace('I += lbl + 0', 'I += (Sint)lbl')
         body=body.replace('(I + (call_dest) + 0)', '(I + (Sint)call_dest)')
@@ -98,11 +120,13 @@ def project(source):
         body=re.sub(r'FCALLS -= erts_garbage_collect_nobump\(c_p, need, reg, (.*), FCALLS\);',
             r'if (!lb_process_collect_live(c_p, need, \1)) goto memory_failure;\n      FCALLS -= (Sint)c_p->last_gc_cost;', body)
         body=re.sub(r'if \(ERTS_PSFLG_EXITING & erts_atomic32_read_nob\(&c_p->state\)\) \{\s*goto context_switch3;\s*\};', '', body)
-        if name in {'allocate_tt', 'allocate_heap_tIt'}:
+        if name in {'allocate_tt', 'allocate_heap_tIt'} or name.startswith('is_nonempty_list_allocate_'):
             # Host instruction-budget yields introduce safepoints between
             # allocate and init_yregs. Keep all physical stack slots valid roots;
             # the verifier still rejects logical reads before initialization.
             body=body.replace('*E = NIL;', '*E = NIL;\n    for (unsigned lb_y=1; lb_y<needed; ++lb_y) E[lb_y]=NIL;')
+        if name.startswith(('put_list_','update_list_')):
+            body=body.replace('{','{\n  if ((Uint)(E-HTOP)<2+S_RESERVED || c_p->heap_reserved<2) goto malformed_code;\n  c_p->heap_reserved-=2;',1)
         if name=='put_tuple2_xI':
             body=body.replace('ASSERT(arity != 0);',
                 'if (!arity || (Uint)(E-HTOP) < arity+1+S_RESERVED || c_p->heap_reserved < arity+1) goto malformed_code;\n  c_p->heap_reserved -= arity+1;')

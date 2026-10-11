@@ -102,9 +102,17 @@ static const LbMFA *entry_mfa(LbProcess *p,const BeamInstr *pc)
         }
     return NULL;
 }
+static int32_t lb_packed_label(const BeamInstr *table,size_t index)
+{
+    int32_t offset; memcpy(&offset,(const unsigned char *)table+index*sizeof(offset),sizeof(offset)); return offset;
+}
 #define OpCase(name) case op_##name
 #define BeamCodeAddr(word) (word)
 #define ERTS_UNLIKELY(test) (test)
+#define ERTS_LIKELY(test) (test)
+#define BEAM_IS_TUPLE(term) is_boxed(term)
+#define is_not_list(term) (!is_list(term))
+#define is_not_tuple(term) (!is_tuple(term))
 #define x(i) reg[(i)]
 #define xb(offset) reg[(offset)/sizeof(Eterm)]
 #define yb(offset) E[(offset)/sizeof(Eterm)]
@@ -112,6 +120,15 @@ static const LbMFA *entry_mfa(LbProcess *p,const BeamInstr *pc)
 #define Sb(offset) (((offset)&1)?yb((offset)-1):xb(offset))
 #define is_not_nil(term) (!is_nil(term))
 #define y(i) E[(i)]
+#define REG_TARGET_PTR(target) (((target)&1)?&yb((target)-1):&xb(target))
+#define GetSource(raw,dst) do { \
+    (dst)=(raw); \
+    switch(loader_tag(dst)) { \
+    case LOADER_X_REG:(dst)=x(loader_x_reg_index(dst));break; \
+    case LOADER_Y_REG:(dst)=y(loader_y_reg_index(dst));break; \
+    } \
+    CHECK_TERM(dst); \
+} while(0)
 #define Ib(word) (word)
 #define tb(word) (word)
 #define fb(word) ((Sint)(int32_t)(word))

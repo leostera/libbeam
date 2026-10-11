@@ -11,7 +11,7 @@ import re
 PURE = {'distinct', 'equal', 'independent_moves', 'is_offset', 'negation_is_small',
         'never', 'succ', 'succ3', 'succ4'}
 OWNED = {'needs_nif_padding', 'is_heavy_bif', 'smp_already_locked', 'smp_mark_target_label'}
-GENERATORS = {'allocate', 'allocate_heap', 'init_yregs'}
+GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity'}
 
 
 def project(text):
@@ -67,6 +67,17 @@ def project(text):
         if not match: raise RuntimeError('Missing generator '+name)
         body = re.sub(r'(\w+) = beamopallocator_new_op\(&\(S\)->op_allocator\);',
             r'\1 = lb_load_new_op(S);\n  if (!\1) return NULL;', match[0])
-        if 'beamopallocator_' in body or 'erts_alloc' in body: raise RuntimeError('Unadapted generator allocation '+name)
+        if name == 'select_tuple_arity':
+            body = body.replace('erts_alloc(ERTS_ALC_T_LOADER_TMP, op->arity * sizeof(BeamOpArg))',
+                                'lb_palloc(S->program, op->arity, sizeof(BeamOpArg))')
+            body = body.replace('op->next = NULL;\n    op->a[0]', 'if (!op->a) return NULL;\n    op->next = NULL;\n    op->a[0]')
+            body = body.replace('op->next = NULL;\n  op->a[0]', 'if (!op->a) return NULL;\n  op->next = NULL;\n  op->a[0]')
+            body = body.replace('erts_alloc(ERTS_ALC_T_LOADER_TMP, sizeof(BeamOpArg)*(arity-2*align))',
+                                'lb_palloc(S->program, arity-2*align, sizeof(BeamOpArg))')
+            body = body.replace('  for (i = 3; i < arity - 2*align; i+=2)',
+                                '  if (!tmp) return NULL;\n  for (i = 3; i < arity - 2*align; i+=2)')
+            body = body.replace('erts_free(ERTS_ALC_T_LOADER_TMP, (void *) tmp);',
+                                '/* Temporary argument arrays belong to the preparation arena. */')
+        if 'beamopallocator_' in body or 'erts_alloc' in body or 'erts_free' in body: raise RuntimeError('Unadapted generator allocation '+name)
         helpers.append(body)
     return '\n'.join(helpers)+'\n'+result, record

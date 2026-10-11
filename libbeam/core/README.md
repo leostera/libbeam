@@ -7,7 +7,8 @@ See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md) and the
 [owned asynchronous executor](../../docs/rfds/0003-owned-executor.md) and
 [public Isolates/calls](../../docs/rfds/0003-public-isolates.md) and
 [local calls/Y roots](../../docs/rfds/0003-local-calls.md) and
-[exact comparisons](../../docs/rfds/0003-exact-comparison.md).
+[exact comparisons](../../docs/rfds/0003-exact-comparison.md) and
+[tuple/list consumers and shape proofs](../../docs/rfds/0003-tuple-list-shapes.md).
 
 This is the C runtime construction boundary, not a whole-ERTS link. It now loads
 and executes ordinary `first_slice.erl` through generated BEAM transformations,
@@ -44,7 +45,10 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   code. The internal loader leaves atom identities provisional until publication.
 - `beam_transform.c`, `beam_emit.c`, `beam_verify.c`: generated whole transform
   cases with fallible operation allocation, native word packing/fixups, and
-  profile-specific register/stack/heap dataflow admission. Missing dependencies
+  profile-specific register/stack/heap/shape dataflow admission. Tuple/list reads
+  need proven shapes and bounds across all incoming edges. Proof scratch is
+  physically released before transformation; untrusted type hints are stripped
+  from executable registers before native adjacency optimizations. Missing dependencies
   reject admission; they are never false/success-shaped helper implementations.
 - `code.c`: private export/module lookup, eager resolution of **all** imports,
   atomic publication, retained entries/frames/import dependencies, and guarded

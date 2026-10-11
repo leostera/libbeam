@@ -8,6 +8,8 @@
     "beam/erts/emulator/beam/erl_md5.h": "0e3f2815eccab3bc037086fa3e222a2aa4f6d33399391d3915236537b5ea2afa",
     "beam/erts/emulator/beam/erl_bif_info.c": "542c01a4e8f65210ff74e2989e3233d30b8098ebae5f58ff296de185202ee7e8",
     "beam/erts/emulator/beam/code_ix.h": "58fa70f6931feb5c9248cddb65abbe5d6800f3e3c0f0d914d9fe55ec0b2fd821",
+    "beam/erts/emulator/beam/beam_common.h": "af89a25f71e3246f492045ba8b01d9a1e0839a9ad091722044ced4af7ac9cf44",
+    "beam/erts/emulator/beam/beam_transform_helpers.c": "5997b24ba2cd4c143753fb0a8617489573ba27fcfc7ecf36a5aa020e1f0c281c",
     "beam/erts/emulator/beam/export.h": "dcfa68db96b336560487c6ca6d99c12b4e19fb29fa097b1aefbbf607783e4169"
   },
   "other_inputs": ["loader-sources.json", "binary-sources.json", "term-compare-sources.json", "opcodes/manifest.json"],
@@ -18,6 +20,9 @@
     "equality": "Native exact term/bitstring comparison for admitted representations; explicit scratch OOM precedes generated eq/ne branches; no loose comparison or ordering admission",
     "local_calls": "Verified function-entry labels/arity and continuation frames; generated local/move/tail calls, Y moves/swaps/initialization; private-entry reduction yields use the native function directory and owned MFA copy",
     "code_generation": "single; no hot reload",
+    "shapes": "Native tuple/list tests, extraction, cons and tuple-arity tables; proof of shape/minimum arity across both branches, joins, moves, calls and Y roots; compiler hints are not trusted and are removed after proof, before native transformations",
+    "arity_tables": "Whole generated select_tuple_arity helper and native operand-pair qsort; fallible arena allocation; signed packed label reads use memcpy without word-array aliasing",
+    "analysis_limits": "64 MiB temporary proof workspace released before load completion; at most 256 distinct tuple arities per selector; no density, quota or latency guarantee",
     "native_imports": ["erlang:get_module_info/1", "erlang:get_module_info/2"],
     "native_kind": "heavy; these owned implementations may collect",
     "threading": "explicit-context bounded executor; one lazy joinable POSIX worker per Engine; Engine mutex serializes raw loader/heap/domain access; no tenant TLS",

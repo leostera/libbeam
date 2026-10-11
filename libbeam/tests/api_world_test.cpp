@@ -38,13 +38,13 @@ static void reclaim(Isolate& isolate) {
     auto again=stopped.wait_until(deadline()); CHECK(again && again->code==ErrorCode::closed);
 }
 int main(int argc,char** argv) {
-    CHECK(argc==5); auto code=image(argv[1]), large_code=image(argv[2]), local_code=image(argv[3]), compare_code=image(argv[4]);
+    CHECK(argc==6); auto code=image(argv[1]), large_code=image(argv[2]), local_code=image(argv[3]), compare_code=image(argv[4]), shape_code=image(argv[5]);
     auto engine=take(Engine::create());
     Bytes kept;
     {
         auto a=take(engine.create_isolate()), b=take(engine.create_isolate());
         CHECK(!a.load_module(view(code)) && !b.load_module(view(code)));
-        CHECK(!b.load_module(view(large_code)) && !b.load_module(view(local_code)) && !b.load_module(view(compare_code)));
+        CHECK(!b.load_module(view(large_code)) && !b.load_module(view(local_code)) && !b.load_module(view(compare_code)) && !b.load_module(view(shape_code)));
         Bytes input(65,0x31);
         fail_next_new=true; error(a.start("async_slice","identity",view(input)),ErrorCode::limit);
         auto first=take(a.start("async_slice","identity",view(input)));
@@ -64,6 +64,10 @@ int main(int argc,char** argv) {
             CHECK(take(empty.wait_until(deadline()))==Bytes({'e','m','p','t','y'}));
             auto nonempty=take(b.call("compare_slice","empty",view(kept)));
             error(nonempty.wait_until(deadline()),ErrorCode::exception);
+        }
+        for(const char* function : {"tuple_binary","list_binary"}) {
+            auto shaped=take(b.call("shape_slice",function,view(kept)));
+            CHECK(take(shaped.wait_until(deadline()))==kept);
         }
         for(const char* function : {"command","not_command"}) {
             Bytes next={'n','e','x','t'}, other={'r','e','a','d'};
@@ -119,6 +123,6 @@ int main(int argc,char** argv) {
         auto call=take(survivor.start("async_slice","identity",view(kept)));
         CHECK(take(call.wait_until(deadline()))==kept); reclaim(survivor);
     }
-    std::puts("API_WORLD_EXECUTION_OK real_worker=true copied_io=true copy_failure_retry=true deadlines=true terminal_once=true exceptions=true reclamation=true local_calls_y_gc=true exact_binary_comparison=true repeat=32 stateful_acceptance=false");
+    std::puts("API_WORLD_EXECUTION_OK real_worker=true copied_io=true copy_failure_retry=true deadlines=true terminal_once=true exceptions=true reclamation=true local_calls_y_gc=true exact_binary_comparison=true tuple_list_calls=true repeat=32 stateful_acceptance=false");
     return 0;
 }
