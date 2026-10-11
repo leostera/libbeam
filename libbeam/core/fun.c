@@ -34,25 +34,30 @@ Eterm lb_bif_is_function_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     (void)pc; return lb_fun_test_arity(p,args[0],args[1]);
 }
-LbAllocStatus lb_fun_retain(LbProcess *p,const LbFunEntry *entry)
+static LbAllocStatus retain(LbCodeSpace *space,LbFunLease **leases,const LbFunEntry *entry)
 {
-    if(!p || !entry || !entry->owner || entry->owner->space!=p->entry_module->space ||
+    if(!space || !leases || !entry || !entry->owner || entry->owner->space!=space ||
        !entry->owner->published || !entry->dispatch.addresses[0] || entry->pend_purge_address) return LB_ALLOC_INVALID;
-    for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next)
+    for(LbFunLease *lease=*leases;lease;lease=lease->next)
         if(lease->entry->owner==entry->owner) return LB_ALLOC_OK;
     if(entry->owner->users==SIZE_MAX) return LB_ALLOC_NO_MEMORY;
     void *memory;
-    if(lb_alloc_domain_allocate(p->entry_module->space->domain,sizeof(LbFunLease),&memory)!=LB_ALLOC_OK) return LB_ALLOC_NO_MEMORY;
-    LbFunLease *lease=memory; *lease=(LbFunLease){p->fun_leases,entry,0};
-    ++entry->owner->users; p->fun_leases=lease; return LB_ALLOC_OK;
+    if(lb_alloc_domain_allocate(space->domain,sizeof(LbFunLease),&memory)!=LB_ALLOC_OK) return LB_ALLOC_NO_MEMORY;
+    LbFunLease *lease=memory; *lease=(LbFunLease){*leases,entry,0};
+    ++entry->owner->users; *leases=lease; return LB_ALLOC_OK;
+}
+LbAllocStatus lb_fun_retain(LbProcess *p,const LbFunEntry *entry)
+{
+    if(!p || !p->entry_module) return LB_ALLOC_INVALID;
+    return retain(p->entry_module->space,&p->fun_leases,entry);
 }
 /* Prepare code ownership before copying a valid owned term into this process.
  * Term storage is not mutated; a failed preparation remains wholly owned by
  * the unpublished destination and is reclaimed by its destructor. */
-LbAllocStatus lb_fun_retain_term(LbProcess *p,Eterm term,Uint *cost)
+LbAllocStatus lb_fun_retain_roots(LbCodeSpace *space,LbFunLease **leases,Eterm term,Uint *cost)
 {
     Eterm local[64],*todo=local; size_t count=1,capacity=64;
-    LbAllocDomain *domain=p->entry_module->space->domain;
+    LbAllocDomain *domain=space->domain;
     LbAllocStatus status=LB_ALLOC_OK; todo[0]=term;
     while(count) {
         Eterm value=todo[--count]; const Eterm *children=NULL; size_t n=0;
@@ -65,7 +70,7 @@ LbAllocStatus lb_fun_retain_term(LbProcess *p,Eterm term,Uint *cost)
                 (void)lb_flatmap_words(pointer); children=pointer+2; n=pointer[1]+1;
             } else if((*pointer&_TAG_HEADER_MASK)==FUN_SUBTAG) {
                 const LbFun *fun=lb_fun(value);
-                status=lb_fun_retain(p,fun->entry.fun); if(status!=LB_ALLOC_OK) break;
+                status=retain(space,leases,fun->entry.fun); if(status!=LB_ALLOC_OK) break;
                 children=fun->env; n=lb_fun_free(fun);
             }
         }
@@ -86,17 +91,25 @@ LbAllocStatus lb_fun_retain_term(LbProcess *p,Eterm term,Uint *cost)
     }
     if(todo!=local) lb_release(domain,todo); return status;
 }
-static void release(LbProcess *p,LbFunLease *lease)
+LbAllocStatus lb_fun_retain_term(LbProcess *p,Eterm term,Uint *cost)
+{
+    return lb_fun_retain_roots(p->entry_module->space,&p->fun_leases,term,cost);
+}
+static void release(LbCodeSpace *space,LbFunLease *lease)
 {
     LbCodeModule *owner=lease->entry->owner;
     if(!owner->users) abort();
-    --owner->users; lb_release(p->entry_module->space->domain,lease);
+    --owner->users; lb_release(space->domain,lease);
+}
+void lb_fun_release_roots(LbCodeSpace *space,LbFunLease **leases)
+{
+    while(*leases) {
+        LbFunLease *lease=*leases; *leases=lease->next; release(space,lease);
+    }
 }
 void lb_fun_leases_clear(LbProcess *p)
 {
-    while(p->fun_leases) {
-        LbFunLease *lease=p->fun_leases; p->fun_leases=lease->next; release(p,lease);
-    }
+    lb_fun_release_roots(p->entry_module->space,&p->fun_leases);
 }
 void lb_fun_marks_clear(LbProcess *p)
 {
@@ -198,6 +211,6 @@ void lb_fun_sweep(LbProcess *p)
     while(*link) {
         LbFunLease *lease=*link;
         if(lease->marked) link=&lease->next;
-        else { *link=lease->next; release(p,lease); }
+        else { *link=lease->next; release(p->entry_module->space,lease); }
     }
 }

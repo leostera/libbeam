@@ -2,6 +2,7 @@
   "baseline": "1c47d6c3",
   "scope": "Selected C copying-GC helpers, interpreter ownership boundary, function/export word layouts, module_info and MD5. This is not whole-file admission.",
   "sources": {
+    "beam/erts/emulator/beam/erl_message.h": "ce7b97ef8dcb560430ee5e2a0f5886b34ac62d51444c0d22a2ecef194329bdfd",
     "beam/erts/emulator/beam/erl_gc.c": "e420c7b61d0f3df557384a13357ba7b4c9e819ba242feae5a72e5141b97994b4",
     "beam/erts/emulator/beam/erl_gc.h": "f1be3b3f40976409563a861e4881a7b2a1c774e6531cc3613f6304953c4fdf2d",
     "beam/erts/emulator/beam/erl_md5.c": "c653a4e51ad97c4dd8371379ef973efc1df3bbb53034deffb3037b5ecbbab80c",
@@ -34,6 +35,7 @@
     "identity": "Namespace-owned native PTAB directory and internal PID terms; self/0 and is_pid/1 execute with stable identities, stale-generation checks, fallible lazy initialization and logical-exit removal. Persistent spawned processes/signals remain pending; process-identity-sources.json.",
     "threading": "explicit-context bounded executor; one lazy joinable POSIX worker per Engine; Engine mutex serializes raw loader/heap/domain access; no tenant TLS",
     "literals": "bounded ETF subset plus ordinary immutable offheap binaries (binary-sources.json); no fun/map admission",
+    "message_storage": "Native message-reference prefix, self-contained heap-fragment/offheap storage and inner-queue pointer cursors; independent embedded-fun module leases and namespace roots; prepare before enqueue, exact allocation-prefix rollback, selective cursor/tail removal and process-destructor draining. No guest send/receive, signals, monitors or timers follow from these storage helpers.",
     "engine": "Owned shared native catalog and allocation substrate; C worlds and tasks retain Engine through physical retirement; worker-side orphan/space retirement and host lifetime checks share the mutex; final join follows host unlock",
     "host_protocol": "C world/call/reclamation ownership and thin C++ adapter; copied binary input/output, reserved capacity, once-only completion and physical selected-world retirement; the host protocol itself adds no opcode or BIF capabilities",
     "remaining": "Full A05/A06/A07 breadth and B-cluster stateful process execution/retirement remain outstanding; selected-profile public Isolates are implemented"

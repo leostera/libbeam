@@ -11,11 +11,13 @@
 #include "binary_vheap.h"
 #include "pid_table.h"
 #include "fun.h"
+#include "message.h"
 struct LbProcess {
     LbCodeModule *entry_module;
     LbWorld *world; /* borrowed C task owner; task retirement precedes world destruction */
     LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
     LbFunLease *fun_leases; /* one lease per defining module, represented by a stable entry */
+    LbMessageQueue messages; /* native inner queue; immutable fragments own their code/offheap roots */
     const LbMFA *current;
     LbMFA local_mfa; /* owned copy of a private function's native word header */
     const BeamInstr *i;

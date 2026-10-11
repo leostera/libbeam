@@ -59,6 +59,7 @@ struct LbCodeSpace {
     LbCodeModule *modules;
     Export *exports;
     Export natives[LB_NATIVE_COUNT];
+    size_t messages; /* owned prepared/queued fragments pin atoms and namespace */
     int loading,has_fun_literals;
 };
 struct LbFunEntry;

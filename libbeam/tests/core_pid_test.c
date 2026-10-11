@@ -2,6 +2,7 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  */
 #include "process_internal.h"
+#include "message.h"
 #include "reference.h"
 #include "term_compare.h"
 #include <stdio.h>
@@ -299,6 +300,66 @@ static void prepared_children(LbCodeSpace *space,LbCodeModule *module,Memory *m)
     CHECK(lb_process_create_fun(parent,NIL,32,&child)==LB_PROCESS_INVALID && !child && m->live==live);
     lb_process_destroy(parent); lb_code_entry_release(e);
 }
+static void message_fragments(LbCodeSpace *space,LbCodeModule *module,Memory *m)
+{
+    unsigned char bytes[65]; memset(bytes,0x7a,sizeof(bytes));
+    for(size_t nested=0;nested<2;++nested) {
+        LbCodeEntry *e=entry(space,module,nested?"process_nested":"process_factory",1); LbProcess *p;
+        CHECK(lb_process_create_binary(e,bytes,65,32,&p)==LB_PROCESS_READY && finish(p)==LB_PROCESS_DONE);
+        Eterm closure=lb_process_result(p); LbMessage *message; Uint cost;
+        size_t live=m->live,users=module->users,owners=space->messages;
+        for(size_t prefix=1;;++prefix) {
+            CHECK(prefix<100); m->fail=m->calls+prefix;
+            LbProcessStatus status=lb_message_create(space,closure,&message,&cost); m->fail=0;
+            if(status==LB_PROCESS_READY) break;
+            CHECK(status==LB_PROCESS_NO_MEMORY && !message);
+            CHECK(m->live==live && module->users==users && space->messages==owners);
+        }
+        CHECK(message->m[0]!=closure && message->m[1]==NIL && message->m[2]==NIL);
+        CHECK(message->data.heap_frag->alloc_size==message->data.heap_frag->used_size);
+        CHECK(module->users==users+1 && space->messages==owners+1);
+        CHECK(lb_process_collect(p,1024)==LB_PROCESS_DONE);
+        lb_process_destroy(p); lb_code_entry_release(e);
+        CHECK(lb_code_unload(module)==LB_CODE_BUSY); // the fragment, not its producer, pins code
+        const LbFun *copied=lb_fun(message->m[0]); CHECK(copied && copied->entry.fun->owner==module);
+        int found=0;
+        for(size_t i=0;i<lb_fun_free(copied);++i) {
+            Eterm payload=copied->env[i]; const LbFun *inner=lb_fun(payload);
+            if(inner) { CHECK(nested && lb_fun_free(inner)==1); payload=inner->env[0]; }
+            LbBitstringView view;
+            if(lb_bitstring_view(payload,&view)) { CHECK(view.bit_size==520 && !memcmp(view.data,bytes,65)); ++found; }
+        }
+        CHECK(found==1);
+        lb_message_destroy(message); CHECK(space->messages==owners);
+    }
+    LbMessage *message; Uint cost;
+    CHECK(lb_message_create(space,am_true,&message,&cost)==LB_PROCESS_READY && !message->data.heap_frag);
+    CHECK(message->m[0]==am_true && space->messages==1); lb_message_destroy(message);
+    LbMessageQueue queue; lb_message_queue_init(&queue);
+    LbMessage *nodes[3];
+    for(size_t i=0;i<3;++i) {
+        CHECK(lb_message_create(space,make_small(i),&nodes[i],&cost)==LB_PROCESS_READY);
+        CHECK(lb_message_queue_append(&queue,nodes[i])==LB_PROCESS_READY);
+        CHECK(lb_message_queue_append(&queue,nodes[i])==LB_PROCESS_INVALID);
+    }
+    CHECK(queue.mq_len==3 && queue.last==&nodes[2]->next);
+    queue.save=&nodes[0]->next; // preserve first unmatched message
+    CHECK(lb_message_queue_take(&queue)==nodes[1]); lb_message_destroy(nodes[1]);
+    CHECK(lb_message_queue_take(&queue)==nodes[2] && queue.last==queue.save); lb_message_destroy(nodes[2]);
+    CHECK(!lb_message_queue_take(&queue));
+    CHECK(lb_message_create(space,make_small(3),&message,&cost)==LB_PROCESS_READY);
+    CHECK(lb_message_queue_append(&queue,message)==LB_PROCESS_READY && *queue.save==message);
+    queue.save=&queue.first; CHECK(lb_message_queue_take(&queue)==nodes[0]); lb_message_destroy(nodes[0]);
+    CHECK(queue.mq_len==1 && queue.first==message);
+    lb_message_queue_clear(&queue); CHECK(!queue.mq_len && !space->messages && queue.last==&queue.first);
+    LbCodeEntry *e=entry(space,module,"echo",1); LbProcess *receiver;
+    CHECK(lb_process_create_binary(e,bytes,65,32,&receiver)==LB_PROCESS_READY);
+    CHECK(lb_message_create(space,receiver->reg[0],&message,&cost)==LB_PROCESS_READY);
+    CHECK(lb_message_queue_append(&receiver->messages,message)==LB_PROCESS_READY);
+    CHECK(lb_process_collect(receiver,1024)==LB_PROCESS_READY);
+    lb_process_destroy(receiver); lb_code_entry_release(e); CHECK(!space->messages);
+    puts("CORE_MESSAGE_FRAGMENT_OK native_layout=true source_gc_destroy=true independent_fun_code=true allocation_prefix_rollback=true native_queue_cursor=true process_drains_queue=true");
+}
 static void guest_funs(LbCodeSpace *space,LbCodeModule *module,Memory *m)
 {
     const char *functions[]={"echo","nested","closed","badarity","factory","closed_factory"};
@@ -373,11 +434,15 @@ int main(int argc,char **argv)
     CHECK(held[1024]->reg[0]==NIL && lb_process_exception(held[1024])==THE_NON_VALUE);
     for(size_t i=0;i<1025;++i) lb_process_destroy(held[i]); free(held); CHECK(!lb_pid_count(a->pids));
     fun_load_failures(a,argv[3],&m);
-    LbCodeModule *fun_module=load(a,argv[3]); guest_funs(a,fun_module,&m); prepared_children(a,fun_module,&m);
+    LbCodeModule *fun_module=load(a,argv[3]); guest_funs(a,fun_module,&m); prepared_children(a,fun_module,&m); message_fragments(a,fun_module,&m);
     fun_guards(a,fun_module);
     CHECK(lb_code_unload(fun_module)==LB_CODE_OK);
     lb_code_entry_release(ea); lb_code_entry_release(eb);
     CHECK(lb_code_unload(ma)==LB_CODE_OK && lb_code_unload(mb)==LB_CODE_OK);
+    LbMessage *namespace_root; Uint cost;
+    CHECK(lb_message_create(a,am_true,&namespace_root,&cost)==LB_PROCESS_READY);
+    CHECK(lb_code_space_destroy(a)==LB_CODE_BUSY); // even immediate atom words need their namespace
+    lb_message_destroy(namespace_root);
     CHECK(lb_code_space_destroy(a)==LB_CODE_OK && lb_code_space_destroy(b)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK);
     lb_engine_release(engine); CHECK(!m.live); puts("CORE_PID_OK self_execution=true real_process_directory=true gc=true stale_pid_rejected=true isolated_directories=true oom_retry=true physical_retirement=true"); return 0;
 }
