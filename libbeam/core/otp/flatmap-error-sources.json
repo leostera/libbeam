@@ -1,0 +1,25 @@
+{
+  "baseline": "9d24bf57",
+  "scope": "Native MAP3 binary-construction error payload and 0..3 flatmap representation consumers. No MAP_EXT decoding, map instructions/BIFs, HAMT, exception flags/stacktraces, or bs_create_bin admission.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_map.h": "30e3e82727d9ce3031972c7d83d4b27e12f0e0997b93e778d5cd47accd9018b9",
+    "beam/erts/emulator/beam/erl_term.h": "8e016126fb7a1bc1db8d31111601c0bea21d72207211bf91e1f3c127e943b5c2",
+    "beam/erts/emulator/beam/utils.c": "d899860f79adae3cf1c52a9e644aad3c58bfe5a2242ee9fd61163ae0bed9800f",
+    "beam/erts/emulator/beam/erl_gc.h": "f1be3b3f40976409563a861e4881a7b2a1c774e6531cc3613f6304953c4fdf2d",
+    "beam/erts/emulator/beam/erl_gc.c": "e420c7b61d0f3df557384a13357ba7b4c9e819ba242feae5a72e5141b97994b4",
+    "beam/erts/emulator/beam/copy.c": "3a545dd7dc73c816a70897d07d4c353d27f7c8589938073c87da414f3d43e860",
+    "beam/erts/emulator/beam/erl_bits.c": "2b803014c329c7c2c30e60c0bffda90911985b9ce1703952e7315e28694ccdb6",
+    "beam/erts/emulator/beam/erl_bits.h": "5a72bb9b9c14690d55ff94912faf3e8f0e9914e155593d2c6aa7474c3ff5bfec",
+    "beam/erts/emulator/beam/emu/beam_emu.c": "af0ce4436a999e91f8479c3c04b8d8bf73df8e0e053235d8d441276da934b56e"
+  },
+  "adaptations": [
+    "Native flatmap_t prefix, MAP_HEADER_FLATMAP, separate keys tuple and contiguous values are preserved. The selected 0..3 size range is valid under both native Debug and Release policies; no HAMT or general map creation is admitted. MAP3 requires preordered unique keys; the error factory uses the native cause/function/module atom order.",
+    "Moving GC sizes map bodies from their size word, not generic header arity. It scans keys and values as roots, preserving sharing and offheap payload lifetimes. Flat sizing/copying and the private-append alias checker traverse those same roots. Unknown map headers/sizes abort rather than silently hiding children.",
+    "Native eq's flatmap branch compares sizes, then the keys tuple and values through the existing fallible term-array stack. OOM leaves equality output unchanged; no ordering, lookup/update or HAMT algorithm is inferred.",
+    "The complete operation-kind switch and MAP3/cause-tuple construction from erts_prepare_bs_construct_fail_info become a payload-only C factory. It does not assign freason/fvalue, encode EXF_HAS_EXT_INFO or implement stacktrace/catch behavior. BSC identities grant no execution permission.",
+    "A temporary owned process root protects the supplied value during the final fallible heap reservation, replacing HeapFragOnlyAlloc. Heap credit and old roots are preserved; output publication is last. Allocation failure is explicit and same-process retry is supported. Output slots cannot be pointers into a moving heap.",
+    "Native map-specific layouts/macros and BSC identities are separately compared using the already-oracled word/tuple primitives. Stock OTP supplies five actual binary-construction exception payload vectors; its fixture is never loaded into libbeam.",
+    "C-created error maps execute real identity and exact-comparison BEAM functions with moving collection; nested maps, scratch OOM, failed-copy reference rollback, writable aliases and copied binary survival across source-process destruction are tested. No new guest opcode, BIF, literal format or stateful acceptance is claimed."
+  ],
+  "other_inputs": ["term-compare-sources.json", "binary-sources.json", "writable-sources.json"]
+}

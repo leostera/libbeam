@@ -83,6 +83,11 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   the IEEE environment; infrastructure failure is distinct from badarg.
   C-built heap/offheap arguments survive actual identity execution and collection;
   guest construction remains refused until the whole instruction is supported.
+- `flatmap.h`, `binary_error.c`: native MAP3 binary-construction error payload,
+  with explicit temporary value rooting and fallible heap reservation. Flatmap
+  keys/values participate in GC, copying, equality and writable alias checking.
+  Only the 0..3 representation profile is consumed; general maps, error flags,
+  stacktrace integration and guest construction remain unadmitted.
 - `term_compare.c`: native-derived nonrecursive exact equality for admitted terms
   and aligned/unaligned bitstrings. Explicit scratch OOM is checked before a
   generated comparison branch; failure is never an equality/inequality answer.
@@ -115,8 +120,9 @@ The current literal/GC profile includes smalls, bignums, atoms, tuples, lists,
 finite binary64 floats, heap bitstrings up to 64 bytes and ordinary immutable
 refcounted binaries above that threshold. C-created process-owned writable
 binaries also survive copying GC, read-only consumers, pinning and retirement;
-literal admission remains immutable-only. Maps, magic/resource binaries,
-fun objects, PIDs, ports and refs remain unsupported. Lambda declarations
+literal admission remains immutable-only. C-created small flatmaps support error
+payload dependencies and representation consumers, not MAP_EXT or map operations.
+HAMT, magic/resource binaries, fun objects, PIDs, ports and refs remain unsupported. Lambda declarations
 are not closure objects. Attributes/compile ETF is decoded for executable
 admission; ordinary line/debug/feature metadata is passive, while executable
 `DbgB` and record `Recs` metadata is refused. Source-line instrumentation is absent.

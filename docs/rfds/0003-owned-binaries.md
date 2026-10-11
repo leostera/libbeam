@@ -440,3 +440,51 @@ hashes) and `/tmp/libbeam-private-tooling-final/summary.json` (29 tooling tests)
 The initial passing integration is retained at
 `/tmp/libbeam-private-integrated-first/summary.json`. No new guest opcode or BIF
 is admitted and neither acceptance example source changes.
+
+## Follow-on: native error-payload flatmaps
+
+Baseline: `9d24bf57`. The native construction-error helper does more than set
+`badarg`: it builds `#{cause => {Segment, Operation, Info, Value}, function =>
+format_bs_fail, module => erl_erts_errors}`. `core/binary_error.c` now constructs
+that exact payload using the native operation-kind switch, cause tuple and MAP3
+layout. It is a **payload factory**, not exception/stacktrace handling or guest
+`bs_create_bin` admission. Provenance is in `core/otp/flatmap-error-sources.json`.
+
+`core/flatmap.h` retains the native three-word flatmap prefix, separate sorted
+keys tuple and contiguous values. The selected representation range is 0..3,
+valid under both native Debug and Release small-map policies. The error factory
+uses native atom-name ordering (`cause`, `function`, `module`), not namespace-local
+atom-ID ordering. This does not introduce general map construction, MAP_EXT
+loading, map operations or HAMT nodes.
+
+Map body sizing now reads the native size word; generic header arity is not a
+map allocation size. GC, flat sizing/copying and the private-append alias check
+visit the keys tuple and every value. The native exact-equality branch compares
+size, then keys/values through the existing fallible term-array stack. Unknown
+map headers/sizes abort rather than conceal roots or become equality misses.
+Copied offheap values remain retained after their source process is destroyed.
+
+The payload factory replaces HeapFragOnlyAlloc with a final fallible heap
+reservation. An explicit temporary root protects even a boxed value held only
+in a C argument during moving collection. Publication follows all failure points;
+OOM preserves old roots, outputs, heap credit and payload ownership, allowing
+same-process retry. It does not set `freason`, `fvalue` or `EXF_HAS_EXT_INFO`.
+Those exception-state transitions remain part of the future complete instruction
+and exception integration; helper availability grants no execution permission.
+
+Tests cover the extracted native layout/MAP3/BSC identity oracle, all 14 native
+operation-switch outcomes including `none`, 128-deep map equality/copying, scratch
+OOM with unchanged outputs, failed-copy refcount rollback, rooted X/Y/exception
+values, source-process retirement, and writable aliases captured directly in map
+values. C-created payloads execute real identity and equal/unequal BEAM functions
+with moving collection. A stock-OTP-only fixture supplies five actual exception
+payload vectors; notably, invalid float width reports `invalid`, not `size`.
+The reference fixture is never loaded into libbeam. No guest map or construction
+instruction, full error handling, stateful acceptance or M3/M4 completion follows.
+
+Final evidence: `/tmp/libbeam-flatmap-commit-reviewed/summary.json` (19 passing
+Debug/Release CTests, actual fixture/public execution, representation and five
+stock-OTP payload vectors, UBSan, unchanged source hashes) and
+`/tmp/libbeam-flatmap-tooling-final/summary.json` (29 tooling tests). Earlier
+passing integration remains at `/tmp/libbeam-flatmap-integrated-first/summary.json`.
+Both acceptance sources are unchanged; the stateful example remains refused.

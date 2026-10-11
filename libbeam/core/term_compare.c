@@ -6,6 +6,7 @@
  * ERTS's fatal temporary allocator. See otp/term-compare-sources.json.
  */
 #include "term_compare.h"
+#include "flatmap.h"
 #include <stdlib.h>
 
 typedef unsigned char byte;
@@ -110,6 +111,14 @@ tailrecur_ne:
             bb=tuple_val(b); sz=(Sint)arityval(*aa);
             if(!sz) goto pop_next;
             ++aa; ++bb; goto term_array;
+        case MAP_SUBTAG:
+            aa=boxed_val(a); (void)lb_flatmap_words(aa);
+            if(!is_boxed(b) || *boxed_val(b)!=*aa) goto not_equal;
+            bb=boxed_val(b); (void)lb_flatmap_words(bb);
+            sz=(Sint)aa[1];
+            if(sz!=(Sint)bb[1]) goto not_equal;
+            if(!sz) goto pop_next;
+            aa+=2; bb+=2; ++sz; goto term_array; /* native keys tuple + values */
         case HEAP_BITS_SUBTAG:case SUB_BITS_SUBTAG: {
             LbBitstringView av,bv;
             if(!lb_bitstring_view(a,&av)) abort();
