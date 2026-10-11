@@ -221,6 +221,9 @@ def main():
             if 'CORE_WRITABLE_OK' not in binary_execution:
                 raise RuntimeError('Missing writable binary ownership/execution evidence')
             summary['writable_binary_dependencies_passed'] = True
+            if 'CORE_PRIVATE_APPEND_OK' not in binary_execution:
+                raise RuntimeError('Missing checked private-append ownership/execution evidence')
+            summary['private_append_dependencies_passed'] = True
             many_source = fixture_dir / 'code_many.erl'
             many_source.write_text('-module(code_many).\n-export(['+','.join(f'f{i}/0' for i in range(128))+']).\n'+
                                    '\n'.join(f'f{i}() -> {i}.' for i in range(128))+'\n')

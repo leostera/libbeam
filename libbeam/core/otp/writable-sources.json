@@ -1,6 +1,7 @@
 {
   "baseline": "877207fd",
-  "scope": "Process-owned native writable Binary/BinRef/SubBits initialization, non-private append, volatile reads, explicit pinning, and full-copy GC/retirement. No binary-construction opcode or private-append admission.",
+  "follow_on_baseline": "dab688df",
+  "scope": "Process-owned native writable Binary/BinRef/SubBits initialization, normal append and checked private append dependencies, volatile reads, explicit pinning, and full-copy GC/retirement. No binary-construction opcode admission.",
   "sources": {
     "beam/erts/emulator/beam/erl_binary.h": "68a59f8e4567236b8bbc38621aac15a61ed486658cb0a754fcdc378da7d6c0db",
     "beam/erts/emulator/beam/erl_bits.h": "5a72bb9b9c14690d55ff94912faf3e8f0e9914e155593d2c6aa7474c3ff5bfec",
@@ -10,7 +11,7 @@
   },
   "adaptations": [
     "Native writable/active-writer and mutable/volatile flag values and Binary/BinRef/SubBits layouts are retained. The process owns a separate writable chain; all references in it are released before its heap.",
-    "build_writable_bitstring and erts_bs_append_checked branches become explicit process/span APIs. The init capacity is an already-decoded byte count, not an implementation of bs_init_writable argument semantics. Private append and its uniqueness proof remain absent.",
+    "build_writable_bitstring and erts_bs_append_checked branches become explicit process/span APIs. The init capacity is an already-decoded byte count, not an implementation of bs_init_writable argument semantics. The initial slice excluded private append; the follow-on adds the complete native private helper branches behind an explicit checked linear source boundary, not compiler/opcode admission.",
     "All backing allocation/copying precedes the final fallible heap reservation. An explicit temporary process root protects even non-register incoming terms across collection. Only then does append revoke the old view and publish a new SubBits. OOM leaves the old allocation, flags, views, roots, heap credit and output slots unchanged; retry uses the same process.",
     "Owned replacement allocation plus copy replaces allocator realloc. Native doubling below 16 MiB and 20-percent growth above it use integer arithmetic, capped at the 64-MiB payload profile. The immutable-source branch retains the native 256-byte minimum. New capacity is zero-initialized to satisfy checked writer requirements.",
     "Older views remain volatile and follow their shared BinRef after backing replacement. Non-private append never mutates an old view's length. Revoked or frozen source views take the native copy branch; no uniqueness assumption is inferred from compiler metadata.",
@@ -18,6 +19,9 @@
     "GC follows SubBits origins, transfers forwarded writable BinRefs without increment, frees dead references, clears active-writer state, and migrates frozen references to the normal offheap chain. Both chains account allocated capacity per reference, not apparent bytes or a memory quota.",
     "No shrinking is performed by pin or GC. This explicit capacity policy preserves an allocation-free GC commit and infallible pin with fallible host allocators; unused capacity remains owned until final release. No optional shrink failure is silently ignored.",
     "Zero-size append returns the real rooted source and an empty checked writer rather than native crash-poison raw pointers. Output slots must not reside in a moving heap. Sources must belong to the process heap or its retained literals; these are valid-owned-term APIs, not arbitrary-word/provenance validators.",
+    "erts_bs_private_append_checked retains both branches: a unique writable header changes length in place (growing backing only when necessary), while frozen backing allocates a new Binary/BinRef/SubBits, including zero extension. Its copy length remains min(old capacity,new capacity); no 256-byte minimum is added to this native path. Heap fragments become a final fallible heap reservation before publication.",
+    "A typed X/Y source location survives moving GC. Before mutation, the C ownership boundary checks other registers, stack/exception/temporary roots and stored heap terms. It skips opaque numeric/binary payloads, refuses aliases (even dead allocated objects), and consumes the selected root before assigning the result. This conservative check is not a compiler uniqueness proof; unrooted C aliases are outside the contract. Future admission must prove consumption and no reuse in subsequent segment operands or instructions.",
+    "The alias scanner positively lists current root-bearing/opaque representations. Unknown families abort rather than hide roots. It allocates nothing; future instruction accounting must include its linear work. NOT_UNIQUE is an ownership refusal, not a guest badarg or false arithmetic guard.",
     "Future dispatch must account allocation/copy/GC work and implement complete sizing, fixup and error-context semantics before bs_create_bin admission. Component/helper success grants no instruction authority. C-created writable arguments execute real identity and exact-comparison BEAM functions across moving collection and exact retirement."
   ],
   "other_inputs": ["binary-sources.json", "bit-copy-sources.json", "bit-writer-sources.json"]

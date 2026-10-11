@@ -89,6 +89,31 @@ int lb_heap_reserve(LbProcess *p,size_t need,size_t live)
     if(need>MAX_HEAP_WORDS) return 0;
     return (size_t)(p->stop-p->htop)>=need+S_RESERVED || lb_process_collect_live(p,need,live);
 }
+int lb_process_has_other_reference(const LbProcess *p,Eterm value,const Eterm *except)
+{
+    const Eterm *scan; size_t i;
+    for(i=0;i<MAX_REG;++i) if(&p->reg[i]!=except && p->reg[i]==value) return 1;
+    for(scan=p->stop;scan<p->hend;++scan) if(scan!=except && *scan==value) return 1;
+    if(p->fvalue==value || p->freason==value || p->construction_root==value) return 1;
+    /* Scan stored terms, not arbitrary payload words: a float/bignum/binary
+     * containing the pointer's bits is not an alias. Keep the object-family
+     * list explicit so adding a new GC representation cannot hide its roots. */
+    scan=p->heap;
+    while(scan<p->htop) {
+        if(!is_header(*scan)) { if(*scan++==value) return 1; continue; }
+        switch(*scan&_HEADER_SUBTAG_MASK) {
+        case ARITYVAL_SUBTAG:scan+=arityval(*scan)?1:2; break;
+        case SUB_BITS_SUBTAG:
+            if(((const LbSubBits *)scan)->orig==value) return 1;
+            scan+=boxed_words(*scan); break;
+        case POS_BIG_SUBTAG:case NEG_BIG_SUBTAG:case FLOAT_SUBTAG:
+        case HEAP_BITS_SUBTAG:case BIN_REF_SUBTAG:
+            scan+=boxed_words(*scan); break;
+        default:abort();
+        }
+    }
+    return 0;
+}
 /* size_object/copy_struct style nonrecursive traversal for passive literal
  * metadata copied into a process. It never installs forwarding words in shared
  * immutable literals. Scratch is fallible and physically freed before return. */

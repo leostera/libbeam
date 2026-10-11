@@ -395,3 +395,48 @@ hashes remain unchanged during each locked run. Earlier passing integration is
 retained at `/tmp/libbeam-writable-integrated-first/summary.json`. The unchanged
 stateful example still reports unsupported BEAM profile/import; no M3/M4 pass is
 inferred from these dependency and selected-profile execution witnesses.
+
+## Follow-on: checked private append
+
+Baseline: `dab688df`. `lb_writable_private_append` now retains both native
+`erts_bs_private_append_checked` paths. With writable backing, it extends the
+existing SubBits header in place, preparing any backing growth before mutation.
+With frozen backing, it allocates a new binary, BinRef and SubBits even for a zero
+extension. That copy is bounded by the smaller capacity; unlike normal append's
+immutable-source path, it does not impose a 256-byte minimum. Heap fragments are
+replaced by a fallible heap reservation before publication.
+
+A reference count of one does **not** establish a unique SubBits header: several
+VM roots can contain the same term. The C boundary therefore takes a typed X/Y
+source location and checks other X/Y, exception and temporary roots plus stored
+heap terms before mutation. It skips opaque numeric/binary payloads rather than
+mistaking encoded pointer bits for references. Unknown object families abort
+instead of concealing roots. Even dead allocated terms count conservatively until
+collection. `LB_WRITABLE_NOT_UNIQUE` is an unchanged ownership refusal, not a guest
+`badarg` or false guard. The scanner allocates nothing and has linear cost.
+
+Success consumes the source slot before assigning the result; a Y location is
+resolved again after moving collection. Unrooted C aliases are forbidden, as are
+output pointers into moving heap storage. Distinct old prefix headers can still
+share the backing BinRef: private growth leaves their lengths unchanged and their
+volatile reads follow the replacement. Frozen payloads copied elsewhere remain
+immutable and independently retained through fallback and process destruction.
+
+Tests cover eight alias locations/shapes, conservative dead aliases and collection,
+opaque payload words equal to the source address, X/Y roots, allocation-free
+in-capacity/zero growth, three allocation-failure prefixes with exact rollback and
+retry, frozen zero/smaller-capacity copies, shared payload retirement, range/type/
+revoked-source refusals, and actual identity execution with moving GC.
+
+This is **not** guest instruction admission or a compiler uniqueness proof. Future
+admission must establish linear source consumption, including no subsequent reuse
+by other segment operands or instructions, and account for the scanner's work.
+The complete sizing/fixup/error-context/dispatch path remains absent. M3/M4 and the
+unchanged stateful acceptance example remain incomplete.
+
+Final locked evidence: `/tmp/libbeam-private-commit-reviewed/summary.json`
+(Debug/Release, 18 CTests, actual selected-profile execution, UBSan and source
+hashes) and `/tmp/libbeam-private-tooling-final/summary.json` (29 tooling tests).
+The initial passing integration is retained at
+`/tmp/libbeam-private-integrated-first/summary.json`. No new guest opcode or BIF
+is admitted and neither acceptance example source changes.

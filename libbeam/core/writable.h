@@ -7,7 +7,7 @@
 #include "bit_writer.h"
 typedef enum {
     LB_WRITABLE_OK, LB_WRITABLE_INVALID, LB_WRITABLE_TYPE, LB_WRITABLE_UNIT,
-    LB_WRITABLE_LIMIT, LB_WRITABLE_NO_MEMORY
+    LB_WRITABLE_LIMIT, LB_WRITABLE_NO_MEMORY, LB_WRITABLE_NOT_UNIQUE
 } LbWritableStatus;
 /* Internal serialized construction boundaries, not guest opcode admission.
  * Sources belong to this process's heap or its retained literals; valid owned
@@ -29,4 +29,17 @@ LbWritableStatus lb_writable_init(LbProcess *,size_t capacity,Eterm *out);
 LbWritableStatus lb_writable_append(LbProcess *,Eterm source,size_t build_bits,
                                    size_t extra_words,unsigned unit,
                                    LbBitWriter *,Eterm *out);
+/* A real VM root location, never a raw pointer that could move during GC. */
+typedef enum { LB_BINARY_SOURCE_X, LB_BINARY_SOURCE_Y } LbBinarySourceKind;
+typedef struct { LbBinarySourceKind kind; size_t index; } LbBinarySource;
+/* Checked linear source boundary for native private append. The source must be
+ * a nonliteral, zero-start SubBits stored only in this slot: other X/Y/exception
+ * roots or stored heap terms cause NOT_UNIQUE before mutation. Dead allocated
+ * terms count conservatively too; this is not a compiler uniqueness proof.
+ * Success consumes the source slot (sets NIL) before assigning *out. The caller
+ * must not retain unrooted C aliases. Output may be an X register or C temporary,
+ * not a moving heap slot. Writer lifetime/end rules match normal append.
+ * No guest private-append instruction is admitted by this interface. */
+LbWritableStatus lb_writable_private_append(LbProcess *,LbBinarySource,size_t build_bits,
+                                           LbBitWriter *,Eterm *out);
 #endif

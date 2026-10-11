@@ -70,8 +70,10 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   fallible preparation before revocation/publication, volatile-prefix reads,
   explicit pin before sharing, and copying-GC chain transfer/dead release.
   Pin/GC retain capacity rather than performing fallible shrink operations.
-  C-created values execute identity/comparison functions; private append and
-  all guest construction instructions remain unadmitted.
+  Checked private append consumes a unique X/Y source slot and preserves native
+  in-place/frozen-copy branches; stored aliases refuse before mutation.
+  C-created values execute identity/comparison functions; compiler consumption
+  proof and all guest construction instructions remain unadmitted.
 - `bit_copy.c`: native forward bit copying behind checked span/overlap bounds.
   Copied public results use it; arbitrary offsets retain outside bits and need
   no terminal padding. No bit-syntax instruction is admitted by this helper.

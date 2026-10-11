@@ -144,3 +144,71 @@ LbWritableStatus lb_writable_append(LbProcess *p,Eterm source,size_t bits,
     *writer=(LbBitWriter){binary->orig_bytes,bytes,view.bit_size}; *out=result;
     return LB_WRITABLE_OK;
 }
+
+static Eterm *source_slot(LbProcess *p,LbBinarySource source)
+{
+    if(source.kind==LB_BINARY_SOURCE_X && source.index<MAX_REG) return &p->reg[source.index];
+    if(source.kind==LB_BINARY_SOURCE_Y && source.index<(size_t)(p->hend-p->stop)) return &p->stop[source.index];
+    return NULL;
+}
+static LbWritableStatus private_replacement(LbProcess *p,LbBinary *old,size_t bytes,LbBinary **out)
+{
+    size_t capacity=grown_capacity(bytes),copy=(size_t)old->orig_size;
+    LbBinary *binary;
+    if(!overhead_fits(p,capacity)) return LB_WRITABLE_NO_MEMORY;
+    binary=lb_binary_allocate(p->entry_module->space->domain,capacity);
+    if(!binary) return LB_WRITABLE_NO_MEMORY;
+    memset(binary->orig_bytes,0,capacity);
+    if(copy>capacity) copy=capacity;
+    memcpy(binary->orig_bytes,old->orig_bytes,copy);
+    *out=binary; return LB_WRITABLE_OK;
+}
+LbWritableStatus lb_writable_private_append(LbProcess *p,LbBinarySource location,size_t bits,
+                                           LbBitWriter *writer,Eterm *out)
+{
+    Eterm *slot,result; LbSubBits *sub; LbBinRef *ref;
+    LbBinary *binary,*replacement=NULL; size_t position,used,bytes;
+    LbWritableStatus status;
+    if(!p || !writer || !out || !(slot=source_slot(p,location))) return LB_WRITABLE_INVALID;
+    if(!is_boxed(*slot) || is_literal_ptr(*slot) || *boxed_val(*slot)!=LB_HEADER_SUB_BITS)
+        return LB_WRITABLE_TYPE;
+    sub=(LbSubBits *)boxed_val(*slot); ref=(LbBinRef *)boxed_val(sub->orig); binary=ref->val;
+    if(sub->start || ref->thing_word!=LB_HEADER_BIN_REF || (sub->base_flags&3)==LB_SUB_MUTABLE)
+        return LB_WRITABLE_INVALID;
+    if(binary->intern.flags && ((sub->base_flags&3)!=LB_SUB_WRITABLE ||
+       !(binary->intern.flags&LB_BINARY_WRITABLE) || atomic_load(&binary->intern.refc)!=1))
+        return LB_WRITABLE_INVALID;
+    if(lb_process_has_other_reference(p,*slot,slot)) return LB_WRITABLE_NOT_UNIQUE;
+    position=sub->end;
+    if(bits>8u*(size_t)LB_MAX_BINARY_BYTES || position>8u*(size_t)LB_MAX_BINARY_BYTES-bits)
+        return LB_WRITABLE_LIMIT;
+    used=position+bits; bytes=(used+7)/8;
+    if(!binary->intern.flags) {
+        /* Native frozen/traced fallback: new backing and a new BinRef, even
+         * for a zero extension. Heap fragments become fallible heap reservation. */
+        status=private_replacement(p,binary,bytes,&replacement);
+        if(status!=LB_WRITABLE_OK) return status;
+        if(!reserve(p,LB_REFC_BITS_WORDS,0)) {
+            lb_binary_release(replacement); return LB_WRITABLE_NO_MEMORY;
+        }
+        result=wrap(p,replacement,used,bytes); binary=replacement;
+    } else {
+        /* Native unique-header path allocates no heap words. Prepare any new
+         * backing before modifying the existing view, chain or reference. */
+        if((size_t)binary->orig_size<bytes) {
+            status=private_replacement(p,binary,bytes,&replacement);
+            if(status!=LB_WRITABLE_OK) return status;
+            p->writable.overhead-=(Uint)binary->orig_size/sizeof(Eterm);
+            p->writable.overhead+=(Uint)replacement->orig_size/sizeof(Eterm);
+            ref->val=replacement; lb_binary_release(binary); binary=replacement;
+        }
+        sub->end=used; binary->intern.apparent_size=bytes;
+        binary->intern.flags=LB_BINARY_WRITABLE|LB_BINARY_ACTIVE_WRITER;
+        result=*slot;
+    }
+    /* A Y slot may have moved in the frozen fallback. Consume the real source
+     * root, not the pre-GC pointer; the caller publishes the replacement root. */
+    *source_slot(p,location)=NIL;
+    *writer=(LbBitWriter){binary->orig_bytes,bytes,position}; *out=result;
+    return LB_WRITABLE_OK;
+}

@@ -338,6 +338,131 @@ static void writable_comparisons(LbCodeSpace *space,LbCodeModule *module)
     }
     lb_code_entry_release(same);
 }
+static void private_aliases(Memory *m,LbCodeEntry *identity)
+{
+    size_t kind;
+    for(kind=0;kind<8;++kind) {
+        LbProcess *p; Eterm nil=NIL,result=make_small(99),source; LbBitWriter writer={0};
+        size_t calls,stack=kind==1?1:0;
+        CHECK(lb_process_create(identity,&nil,1,100,&p)==LB_PROCESS_READY);
+        CHECK(lb_writable_init(p,64,&p->reg[0])==LB_WRITABLE_OK); source=p->reg[0];
+        switch(kind) {
+        case 0:p->reg[1]=source; break;
+        case 1:*--p->stop=source; break;
+        case 2:p->fvalue=source; break;
+        case 3:p->freason=source; break;
+        case 4:p->construction_root=source; break;
+        case 5:case 7:p->reg[1]=TUPLE2(p->htop,source,NIL); p->htop+=3; break;
+        case 6:p->reg[1]=CONS(p->htop,source,NIL); p->htop+=2; break;
+        }
+        if(kind==7) p->reg[1]=NIL; /* unreachable storage is conservative evidence */
+        calls=m->calls;
+        CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},1,&writer,&result)==LB_WRITABLE_NOT_UNIQUE);
+        CHECK(m->calls==calls && result==make_small(99) && p->reg[0]==source && !writer.data);
+        CHECK(((LbSubBits *)boxed_val(source))->end==0 && refcount(source)==1);
+        p->reg[1]=p->fvalue=p->freason=p->construction_root=NIL; p->stop+=stack;
+        if(kind>=5) {
+            CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},1,&writer,&result)==LB_WRITABLE_NOT_UNIQUE);
+            CHECK(lb_process_collect(p,0)==LB_PROCESS_READY);
+        }
+        CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},3,&writer,&result)==LB_WRITABLE_OK && p->reg[0]==NIL);
+        CHECK(lb_bits_put_integer(&writer,make_small(5),3,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+        p->reg[0]=result; run(p,1); lb_process_destroy(p);
+    }
+    {
+        LbProcess *p; Eterm nil=NIL,word; LbBitWriter writer;
+        CHECK(lb_process_create(identity,&nil,1,100,&p)==LB_PROCESS_READY);
+        CHECK(lb_writable_init(p,64,&p->reg[0])==LB_WRITABLE_OK); word=p->reg[0];
+        /* Opaque payload words that equal a term address are not references. */
+        *p->htop++=_make_header(2,POS_BIG_SUBTAG); *p->htop++=word; *p->htop++=1;
+        *p->htop++=_make_header(1,FLOAT_SUBTAG); *p->htop++=word;
+        *p->htop++=_make_header(2,HEAP_BITS_SUBTAG); *p->htop++=64; *p->htop++=word;
+        CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},3,&writer,&p->reg[0])==LB_WRITABLE_OK);
+        CHECK(lb_bits_put_integer(&writer,make_small(5),3,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+        run(p,1); lb_process_destroy(p);
+    }
+}
+static void private_failures(Memory *m,LbCodeEntry *identity)
+{
+    size_t frozen,fail;
+    for(frozen=0;frozen<2;++frozen) for(fail=1;fail<=(frozen?2u:1u);++fail) {
+        LbProcess *p; Eterm nil=NIL,result=make_small(99),source; LbBitWriter writer={0};
+        LbSubBits snapshot; LbBinary *binary; size_t live,bytes; Eterm *heap;
+        CHECK(lb_process_create(identity,&nil,1,5,&p)==LB_PROCESS_READY);
+        CHECK(lb_writable_init(p,1,&p->reg[0])==LB_WRITABLE_OK);
+        CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},3,&writer,&p->reg[0])==LB_WRITABLE_OK);
+        CHECK(lb_bits_put_integer(&writer,make_small(5),3,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+        if(frozen) CHECK(lb_bitstring_pin(p->reg[0]));
+        *--p->stop=p->reg[0]; p->reg[0]=NIL; source=p->stop[0];
+        /* Force fallback heap allocation with valid dead cons cells. */
+        while((size_t)(p->stop-p->htop)>=2+S_RESERVED) {
+            (void)CONS(p->htop,NIL,NIL); p->htop+=2;
+        }
+        snapshot=*(LbSubBits *)boxed_val(source); binary=binary_ref(source)->val;
+        live=m->live; bytes=m->bytes; heap=p->heap; m->fail=m->calls+fail;
+        CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_Y,0},4096,&writer,&result)==LB_WRITABLE_NO_MEMORY);
+        CHECK(p->heap==heap && p->stop[0]==source && result==make_small(99) && m->live==live && m->bytes==bytes);
+        CHECK(!memcmp(&snapshot,boxed_val(source),sizeof(snapshot)) && binary->orig_bytes[0]==0xa0);
+        m->fail=0;
+        CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_Y,0},4096,&writer,&result)==LB_WRITABLE_OK && p->stop[0]==NIL);
+        CHECK(lb_bits_put_integer(&writer,make_small(-1),4096,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+        ++p->stop; p->reg[0]=result; run(p,1); lb_process_destroy(p);
+    }
+}
+static void private_refusals(LbCodeEntry *identity)
+{
+    LbProcess *p; Eterm nil=NIL,result=make_small(99); LbBitWriter writer={0}; size_t i;
+    LbBinarySource invalid[]={{LB_BINARY_SOURCE_X,MAX_REG},{LB_BINARY_SOURCE_Y,SIZE_MAX},{(LbBinarySourceKind)99,0}};
+    CHECK(lb_process_create(identity,&nil,1,100,&p)==LB_PROCESS_READY);
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},0,&writer,&result)==LB_WRITABLE_TYPE);
+    CHECK(lb_writable_init(p,0,&p->reg[0])==LB_WRITABLE_OK);
+    for(i=0;i<sizeof(invalid)/sizeof(invalid[0]);++i)
+        CHECK(lb_writable_private_append(p,invalid[i],0,&writer,&result)==LB_WRITABLE_INVALID);
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},SIZE_MAX,&writer,&result)==LB_WRITABLE_LIMIT);
+    ((LbSubBits *)boxed_val(p->reg[0]))->start=1;
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},0,&writer,&result)==LB_WRITABLE_INVALID);
+    ((LbSubBits *)boxed_val(p->reg[0]))->start=0;
+    CHECK(result==make_small(99) && !writer.data);
+    CHECK(lb_bitstring_pin(p->reg[0]));
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},0,&writer,&p->reg[0])==LB_WRITABLE_OK);
+    CHECK(binary_ref(p->reg[0])->val->orig_size==0 && writer.capacity==0 && writer.offset==0);
+    CHECK(lb_writable_append(p,p->reg[0],1,0,1,&writer,&p->reg[1])==LB_WRITABLE_OK);
+    CHECK(lb_bits_put_integer(&writer,make_small(1),1,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},1,&writer,&result)==LB_WRITABLE_INVALID);
+    p->reg[0]=p->reg[1]; p->reg[1]=NIL; run(p,1); lb_process_destroy(p);
+    CHECK(lb_process_create(identity,&nil,1,100,&p)==LB_PROCESS_READY);
+    CHECK(lb_writable_init(p,1024,&p->reg[0])==LB_WRITABLE_OK);
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},3,&writer,&p->reg[0])==LB_WRITABLE_OK);
+    CHECK(lb_bits_put_integer(&writer,make_small(5),3,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+    CHECK(lb_bitstring_pin(p->reg[0]));
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},0,&writer,&p->reg[0])==LB_WRITABLE_OK);
+    CHECK(binary_ref(p->reg[0])->val->orig_size==2 && writer.data[0]==0xa0);
+    run(p,1); lb_process_destroy(p);
+}
+static void private_lifetime(Memory *m,LbCodeEntry *identity)
+{
+    LbProcess *p; Eterm nil=NIL,result,copy,storage[LB_REFC_BITS_WORDS],*top=storage;
+    LbOffHeap shared={0}; LbBitWriter writer; LbBitstringView view; size_t calls,live=m->live,bytes=m->bytes;
+    CHECK(lb_process_create(identity,&nil,1,100,&p)==LB_PROCESS_READY);
+    CHECK(lb_writable_init(p,64,&p->reg[0])==LB_WRITABLE_OK);
+    CHECK(lb_writable_append(p,p->reg[0],3,0,1,&writer,&result)==LB_WRITABLE_OK);
+    p->reg[1]=p->reg[0]; p->reg[0]=result;
+    CHECK(lb_bits_put_integer(&writer,make_small(5),3,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+    calls=m->calls; m->fail=calls+1;
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},0,&writer,&p->reg[0])==LB_WRITABLE_OK);
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},2,&writer,&p->reg[0])==LB_WRITABLE_OK && m->calls==calls);
+    CHECK(lb_bits_put_integer(&writer,make_small(3),2,LB_BITS_BIG_ENDIAN)==LB_BITS_OK); m->fail=0;
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},4096,&writer,&p->reg[0])==LB_WRITABLE_OK);
+    CHECK(lb_bits_put_integer(&writer,make_small(0),4096,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+    CHECK(lb_bitstring_view(p->reg[1],&view) && !view.bit_size); /* old prefix follows moved backing */
+    CHECK(lb_bitstring_pin(p->reg[0])); copy=lb_copy_flat(p->reg[0],&top,&shared); CHECK(!is_non_value(copy));
+    CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},0,&writer,&p->reg[0])==LB_WRITABLE_OK);
+    CHECK(binary_ref(copy)->val!=binary_ref(p->reg[0])->val && refcount(copy)==2);
+    CHECK(lb_bitstring_view(copy,&view) && view.bit_size==4101 && view.data[0]==0xb8);
+    run(p,1); lb_process_destroy(p);
+    CHECK(refcount(copy)==1 && m->live==live+1 && lb_bitstring_view(copy,&view) && view.data[0]==0xb8);
+    lb_offheap_clear(&shared); CHECK(m->live==live && m->bytes==bytes);
+}
 static void writable_binaries(Memory *m,LbCodeSpace *space,LbCodeModule *module)
 {
     LbCodeEntry *identity=entry(space,module,"identity",1); size_t live=m->live,bytes=m->bytes;
@@ -347,8 +472,13 @@ static void writable_binaries(Memory *m,LbCodeSpace *space,LbCodeModule *module)
     writable_boundaries(identity); CHECK(m->live==live && m->bytes==bytes);
     writable_heap_sources(identity); CHECK(m->live==live && m->bytes==bytes);
     writable_comparisons(space,module); CHECK(m->live==live && m->bytes==bytes);
+    private_aliases(m,identity); CHECK(m->live==live && m->bytes==bytes);
+    private_failures(m,identity); CHECK(m->live==live && m->bytes==bytes);
+    private_lifetime(m,identity); CHECK(m->live==live && m->bytes==bytes);
+    private_refusals(identity); CHECK(m->live==live && m->bytes==bytes);
     lb_code_entry_release(identity);
-    puts("CORE_WRITABLE_OK c_append=true volatile_prefixes=true moving_gc=true pin_and_copy=true failure_prefixes=8 retry=true windows=4128 identity_execution=true exact_comparison_execution=true capacity_boundaries=true exact_retirement=true guest_construction=false private_append=false");
+    puts("CORE_PRIVATE_APPEND_OK checked_unique_slot=true conservative_dead_aliases=true opaque_payloads=true x_y_roots=true frozen_fallback=true zero_extension=true allocation_failures=3 retry=true moving_gc=true identity_execution=true exact_retirement=true guest_construction=false");
+    puts("CORE_WRITABLE_OK c_append=true volatile_prefixes=true moving_gc=true pin_and_copy=true failure_prefixes=8 retry=true windows=4128 identity_execution=true exact_comparison_execution=true capacity_boundaries=true exact_retirement=true guest_construction=false private_append_instruction=false");
 }
 static void copied_inputs(LbAllocDomain *d,Memory *m,LbCodeSpace *space,LbCodeModule *module)
 {
