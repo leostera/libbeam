@@ -36,7 +36,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy bs_init_writable').split()
 
 
 def case(source, name):
@@ -107,6 +107,25 @@ def fallible_addition(body):
     return body.replace(error,'goto find_func_info;')
 
 
+def fallible_writable_init(body):
+    if 'OpCase(bs_init_writable):' not in body: return body
+    old='  HEAVY_SWAPOUT;\n  x(0) = erts_bs_init_writable(c_p, x(0));\n  HEAVY_SWAPIN;'
+    if body.count(old)!=1 or body.count('  GotoPF(next_pf);')!=1:
+        raise RuntimeError('Unreviewed writable initializer boundary')
+    body=body.replace(old,
+        '  Eterm lb_binary;\n  SWAPOUT;\n'
+        '  LbWritableStatus lb_status=lb_writable_init_term(c_p,x(0),&lb_binary);\n'
+        '  SWAPIN;\n  FCALLS-=(Sint)c_p->last_native_cost;\n'
+        '  if (lb_status==LB_WRITABLE_NO_MEMORY) goto memory_failure;\n'
+        '  if (lb_status==LB_WRITABLE_LIMIT) goto resource_limit;\n'
+        '  if (lb_status!=LB_WRITABLE_OK) goto malformed_code;\n'
+        '  x(0)=lb_binary;')
+    # Publication and the next real PC precede yielding. No constructor replay
+    # or borrowed writer survives the boundary. One bounded operation may overrun.
+    return body.replace('  GotoPF(next_pf);',
+        '  if (FCALLS<=0) goto context_switch3;\n  GotoPF(next_pf);')
+
+
 def project(source):
     bodies=[]
     groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd')]
@@ -115,6 +134,7 @@ def project(source):
     for name, body in selected:
         body=fallible_equality(body)
         body=fallible_addition(body)
+        body=fallible_writable_init(body)
         # No tracing/saved-call/lock instrumentation capability exists in this
         # serialized interpreter. Remove those paths, not their semantic peers.
         body=re.sub(r'^\s*DTRACE_\w+\([^;]+;', '', body, flags=re.M)

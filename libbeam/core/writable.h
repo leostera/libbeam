@@ -18,6 +18,10 @@ typedef enum {
  * The returned term must be rooted before another allocation/collection.
  * Capacity is in bytes; init creates an empty writable bitstring. */
 LbWritableStatus lb_writable_init(LbProcess *,size_t capacity,Eterm *out);
+/* Native instruction capacity decoding: nonnegative small, otherwise 1024.
+ * last_native_cost charges a bounded initialization attempt plus actual GC.
+ * Neither infrastructure limits nor OOM become guest exceptions. */
+LbWritableStatus lb_writable_init_term(LbProcess *,Eterm capacity,Eterm *out);
 /* Fresh native heap/refcounted bitstring, not an append-writable term. Storage
  * (including heap-word slack) is initialized. The returned span is exclusively
  * borrowed for construction: finish exactly bits before guest publication or
@@ -26,7 +30,8 @@ LbWritableStatus lb_writable_init(LbProcess *,size_t capacity,Eterm *out);
  * Free heap covers max(pending heap credit, extra_words); credit is unchanged.
  * Failure preserves outputs, old heap/roots and offheap chains. The byte span
  * includes at most seven padding bits; caller must not write beyond bits.
- * No instruction reduction or virtual-binary-heap policy is implemented here. */
+ * Fresh offheap storage applies owned virtual-heap pressure. Instruction work
+ * charging for the complete bs_create_bin operation is still outstanding. */
 LbWritableStatus lb_binary_begin(LbProcess *,size_t bits,size_t extra_words,
                                  LbBitWriter *,Eterm *out);
 /* Native non-private append, including immutable-source copying. No uniqueness

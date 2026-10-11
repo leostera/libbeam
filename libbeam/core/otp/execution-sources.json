@@ -12,7 +12,7 @@
     "beam/erts/emulator/beam/beam_transform_helpers.c": "5997b24ba2cd4c143753fb0a8617489573ba27fcfc7ecf36a5aa020e1f0c281c",
     "beam/erts/emulator/beam/export.h": "dcfa68db96b336560487c6ca6d99c12b4e19fb29fa097b1aefbbf607783e4169"
   },
-  "other_inputs": ["loader-sources.json", "binary-sources.json", "term-compare-sources.json", "numeric-sources.json", "decimal-sources.json", "bit-copy-sources.json", "bit-writer-sources.json", "writable-sources.json", "flatmap-error-sources.json", "binary-loader-sources.json", "binary-size-sources.json", "binary-vheap-sources.json", "exception-sources.json", "opcodes/manifest.json"],
+  "other_inputs": ["loader-sources.json", "binary-sources.json", "term-compare-sources.json", "numeric-sources.json", "decimal-sources.json", "bit-copy-sources.json", "bit-writer-sources.json", "writable-sources.json", "flatmap-error-sources.json", "binary-loader-sources.json", "binary-size-sources.json", "binary-vheap-sources.json", "writable-init-sources.json", "exception-sources.json", "opcodes/manifest.json"],
   "profile": {
     "wordsize": 64,
     "dispatch": "OTP NO_JUMP_TABLE numeric specific-instruction words",
@@ -25,6 +25,7 @@
     "analysis_limits": "64 MiB temporary proof workspace released before load completion; at most 256 distinct tuple arities per selector; no density, quota or latency guarantee",
     "native_imports": ["erlang:get_module_info/1", "erlang:get_module_info/2", "erlang:+/2", "erlang:integer_to_binary/1"],
     "addition": "Native small/bignum/finite-float addition; whole plus/increment groups and increment generator; fallible scratch before collection, preserved heap credit, repaired Y destinations and OOM checked before guard failure; scoped default IEEE environment; numeric-sources.json",
+    "writable_initialization": "Whole native bs_init_writable dispatch; allocating-frame proof, native capacity defaults, owned initialized storage, fallible publication, per-attempt/GC work charge, post-publication yields and explicit process/task/world infrastructure limits; writable-init-sources.json",
     "frame_trim": "Proven drop/remaining counts and transferred Y definitions/shapes; unchanged native trim and two-register move window",
     "native_kind": "heavy; these owned implementations may collect",
     "native_continuation": "Only integer_to_binary/1 retains typed process-owned scratch across native trampoline yields. Native schoolbook formatting is selected directly; no incomplete D&C wrapper or dirty scheduler. Process destruction frees pending state; decimal-sources.json",

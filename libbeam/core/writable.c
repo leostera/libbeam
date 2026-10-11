@@ -61,6 +61,20 @@ LbWritableStatus lb_writable_init(LbProcess *p,size_t capacity,Eterm *out)
     *out=wrap(p,binary,0,capacity);
     return LB_WRITABLE_OK;
 }
+LbWritableStatus lb_writable_init_term(LbProcess *p,Eterm requested,Eterm *out)
+{
+    size_t capacity=1024,collections; LbWritableStatus status;
+    if(!p || !out) return LB_WRITABLE_INVALID;
+    if(is_small(requested) && signed_val(requested)>=0) capacity=(size_t)signed_val(requested);
+    collections=p->collections; p->last_native_cost=1;
+    /* One reduction per attempted KiB initialization, in addition to the
+     * actual collector charge. Allocation failure may cost less; callbacks
+     * and a single bounded memset are not a hard-latency guarantee. */
+    if(capacity<=LB_MAX_BINARY_BYTES) p->last_native_cost+=(capacity+1023)/1024;
+    status=lb_writable_init(p,capacity,out);
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    return status;
+}
 LbWritableStatus lb_binary_begin(LbProcess *p,size_t bits,size_t extra,LbBitWriter *writer,Eterm *out)
 {
     size_t words,bytes; LbBinary *binary=NULL; unsigned char *data; Eterm result;

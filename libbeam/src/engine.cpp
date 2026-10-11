@@ -17,6 +17,7 @@ Error world_error(LbWorldStatus status) {
     case LB_WORLD_CLOSED: return {ErrorCode::closed, "handle closed"};
     case LB_WORLD_FULL: return {ErrorCode::full, "call capacity exhausted"};
     case LB_WORLD_LIMIT: return {ErrorCode::limit, "transport limit exceeded"};
+    case LB_WORLD_RESOURCE_LIMIT: return {ErrorCode::limit, "runtime resource limit exceeded"};
     case LB_WORLD_NO_MEMORY: return {ErrorCode::limit, "out of memory"};
     case LB_WORLD_BAD_BEAM: return {ErrorCode::invalid_beam, "invalid BEAM image"};
     case LB_WORLD_UNSUPPORTED: return {ErrorCode::unsupported, "unsupported BEAM profile or import"};

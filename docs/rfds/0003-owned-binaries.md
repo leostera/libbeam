@@ -848,3 +848,53 @@ Fresh locked evidence: `/tmp/libbeam-vheap-commit-reviewed/summary.json`
 (25 Debug and Release CTests, UBSan and real-process pressure/identity witnesses),
 plus `/tmp/libbeam-vheap-tooling-final/summary.json` (29 tooling tests).
 Unchanged lifecycle passes; unchanged stateful acceptance remains red.
+
+## Follow-on: executable writable initialization
+
+Baseline: `706121c8`. The **complete generated `bs_init_writable` case** now
+executes through the one C interpreter, including the Engine worker and public
+Isolate/Call adapter. This supersedes the initializer-only exclusions above;
+`bs_create_bin` and aggregate M3 acceptance are still unadmitted/incomplete.
+
+The native capacity rule is retained: a nonnegative small selects byte capacity;
+anything else, including negative smalls or positive bignums, selects 1024 bytes.
+Actual empty writable SubBits/BinRef/backing storage is owned by the process,
+initialized, traced and physically destroyed. The generated case stages its result
+until the C constructor succeeds, reloads the moved stack and publishes X0 last.
+The verifier additionally requires the native allocating body-call frame and
+initialized roots. Standard OTP assembler validation exposed this frame requirement;
+the fixture was corrected rather than bypassing the compiler's validator.
+
+Work charges one base reduction, a conservative KiB initialization attempt and
+actual successful collection cost. Exhaustion yields after publication at the next
+real instruction, without replaying construction. A single bounded allocation or
+memset and allocator callbacks are not hard-latency guarantees. General binary
+construction work accounting is still outstanding.
+
+The 64 MiB capacity ceiling returns `LB_PROCESS_LIMIT` → `LB_TASK_LIMIT` →
+`LB_WORLD_RESOURCE_LIMIT`. The C++ adapter reports `ErrorCode::limit` and
+`runtime resource limit exceeded`; existing transport-limit errors are unchanged.
+No `system_limit`/`badarg` guest exception or worker abort substitutes for this
+expected infrastructure refusal. Error completion remains copy-before-consume and
+once-only, and stopping still retires ready and pending ownership correctly.
+
+`writable_init_slice.S` is **standard OTP assembler input**, compiled/validated by
+`erlc` into ordinary BEAM. It isolates initialization from still-unadmitted
+comprehension matching/private construction; it introduces no alternate bytecode or
+evaluator. Tests inspect real capacities/flags/zeroed backing through 64 MiB, native
+defaults, moved Y roots, backing/tospace failures and fresh-process same-space retry,
+post-publication yielding without replay, and allocation-free limit refusal.
+Nine actual result vectors match stock OTP, including a 65-byte input saved in Y.
+Allocation above the owned cap is explicitly outside that comparison.
+
+Worker/public witnesses exercise off-host allocation and injected worker OOM/retry,
+a constructor loop alongside a progressing peer, limit completion, cancellation,
+peer-safe stop, copied replies,
+replacement and exact physical retirement. Empty results are the actual semantics
+of the initializer, **not** successful empty-handle evidence for stateful acceptance.
+The unchanged stateful example remains red, and the prior UTF8 backend discrepancy
+remains recorded rather than normalized.
+
+Fresh locked evidence: `/tmp/libbeam-init-commit-reviewed/summary.json`
+(26 Debug and Release CTests, UBSan, nine stock vectors, core/worker/public execution)
+and `/tmp/libbeam-init-tooling-final/summary.json` (29 tooling tests).

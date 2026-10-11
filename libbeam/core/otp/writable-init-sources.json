@@ -1,0 +1,19 @@
+{
+  "baseline": "706121c8",
+  "scope": "Whole native bs_init_writable instruction, checked capacity/default decoding, owned fallible construction, explicit infrastructure limits and worker execution. bs_create_bin remains unadmitted.",
+  "sources": {
+    "beam/erts/emulator/beam/emu/bs_instrs.tab": "49f203f8c900e9da964e3c483f186c7562fdb4ddb9bb2fa8a0f9af574c2d3279",
+    "beam/erts/emulator/beam/erl_bits.c": "2b803014c329c7c2c30e60c0bffda90911985b9ce1703952e7315e28694ccdb6",
+    "beam/lib/compiler/src/beam_validator.erl": "f77ffad2e94636df6475ff7f3651f521cc349ab1c5156523cb69571a313fa5a3"
+  },
+  "adaptations": [
+    "The full generated bs_init_writable case is retained with counted ownership-boundary substitutions. Native prefetch, next PC and dispatch remain. Heavy swaps become explicit owned process swaps; the initializer returns into a stable local, with status checked before X0 publication. Y roots are traced, and subsequent instructions use the moved stack after collection. No constructor replay or borrowed writer survives a yield.",
+    "Native erts_bs_init_writable takes a nonnegative small as byte capacity and otherwise defaults to 1024, including negative smalls and positive bignums. The existing C initializer creates the actual empty writable SubBits/BinRef/backing chain, zeroes capacity and rolls back detached backing on failed final reservation. The 64 MiB owned capacity limit is an infrastructure boundary, not guest system_limit or badarg.",
+    "The verifier now enforces the native allocating body-call frame requirement for bs_init_writable, in addition to initialized X0/Y roots. Its result supplies an append representation fact; other X values are logically clobbered. This is still not private-source uniqueness proof or bs_create_bin admission.",
+    "Work charges one base reduction plus a conservative KiB initialization attempt and actual successful GC cost. It may overcharge an allocation failure. Exhaustion yields after publication at the next real instruction. A single bounded allocation/memset and opaque allocator callbacks are not a hard-latency guarantee or complete binary-construction work policy.",
+    "LB_PROCESS_LIMIT propagates as LB_TASK_LIMIT and LB_WORLD_RESOURCE_LIMIT, then C++ ErrorCode::limit with runtime resource limit exceeded. Existing transport-limit messages are unchanged. No guest reason/value is fabricated, no verified worker abort is used for this expected resource refusal, and completion remains once-only/copy-before-consume.",
+    "The fixture is standard OTP assembler input compiled and validated by erlc, not another bytecode format or evaluator. This isolates initialization from unadmitted comprehension matching/private construction. Actual native words execute in C and on the Engine worker; the public adapter executes those same functions. Nine stock result vectors cover defaults and an input retained in Y across initialization. Native stock allocation beyond the owned cap is deliberately outside that comparison.",
+    "Tests inspect actual capacity/flags/zeroed storage, including zero and 64 MiB; cover positive/negative bignums, binary inputs, moving Y roots, backing/tospace OOM with fresh-process same-space retry, post-publication yield without replay, explicit limit without allocation, off-host allocation, injected worker allocation OOM/retry, peer progress, cancellation, replacement and physical retirement. Empty initializer results are only this instruction's genuine semantics, never evidence of stateful acceptance."
+  ],
+  "other_inputs": ["writable-sources.json", "binary-loader-sources.json", "binary-vheap-sources.json", "opcodes/manifest.json"]
+}

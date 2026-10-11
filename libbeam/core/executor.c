@@ -84,6 +84,7 @@ static void step(LbTask *task)
     case LB_PROCESS_DONE: finish_task(task,LB_TASK_DONE); break;
     case LB_PROCESS_EXCEPTION: finish_task(task,LB_TASK_EXCEPTION); break;
     case LB_PROCESS_NO_MEMORY: finish_task(task,LB_TASK_NO_MEMORY); break;
+    case LB_PROCESS_LIMIT: finish_task(task,LB_TASK_LIMIT); break;
     default: abort(); /* published tasks contain runnable, verified processes */
     }
 }

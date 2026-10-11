@@ -300,7 +300,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             }
             break;
         case genop_bs_init_writable_0:
-            REQUIRE(arguments(&f,1)); trim_live(&f,1);
+            REQUIRE(f.frame!=NO_FRAME && arguments(&f,1)); trim_live(&f,1);
             REQUIRE(destination(&f,(BeamOpArg){TAG_x,0},APPEND_SHAPE)); f.heap=0; break;
         case genop_bs_create_bin_6:
             p->error.stage="binary construction flow proof";

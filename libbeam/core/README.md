@@ -93,8 +93,11 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   Pin/GC retain capacity rather than performing fallible shrink operations.
   Checked private append consumes a unique X/Y source slot and preserves native
   in-place/frozen-copy branches; stored aliases refuse before mutation.
-  C-created values execute identity/comparison functions; compiler consumption
-  proof and all guest construction instructions remain unadmitted.
+  Source-slot consumption is statically checked, separately from runtime
+  uniqueness. The complete `bs_init_writable` case now executes with native
+  capacity defaults, allocation-failure rollback, work charging and explicit
+  infrastructure limits through the worker/public API. `bs_create_bin` remains
+  unadmitted; C-created compound values still exercise identity/comparison.
 - `bit_copy.c`: native forward bit copying behind checked span/overlap bounds.
   Disjoint bit intervals may share a boundary byte; exact self-copy is a no-op.
   Other overlapping bit ranges remain refused before mutation.

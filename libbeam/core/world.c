@@ -143,6 +143,7 @@ void lb_call_complete(LbCall *call,LbProcess *process,LbTaskStatus status)
     case LB_TASK_DONE: call->status=call->owner_live?copy_result(call,process):LB_WORLD_OK; break;
     case LB_TASK_EXCEPTION: call->status=LB_WORLD_EXCEPTION; break;
     case LB_TASK_NO_MEMORY: call->status=LB_WORLD_NO_MEMORY; break;
+    case LB_TASK_LIMIT: call->status=LB_WORLD_RESOURCE_LIMIT; break;
     case LB_TASK_CANCELLED: call->status=LB_WORLD_CANCELLED; break;
     default: abort();
     }

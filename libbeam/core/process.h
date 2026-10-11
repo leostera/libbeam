@@ -5,8 +5,10 @@
 #define LIBBEAM_CORE_PROCESS_H
 #include "code.h"
 typedef struct LbProcess LbProcess;
+/* NO_MEMORY/LIMIT are terminal infrastructure outcomes, not guest exceptions. */
 typedef enum { LB_PROCESS_READY, LB_PROCESS_YIELDED, LB_PROCESS_DONE,
-               LB_PROCESS_EXCEPTION, LB_PROCESS_NO_MEMORY, LB_PROCESS_INVALID } LbProcessStatus;
+               LB_PROCESS_EXCEPTION, LB_PROCESS_NO_MEMORY, LB_PROCESS_INVALID,
+               LB_PROCESS_LIMIT } LbProcessStatus;
 /* Internal synchronous executor, not host API success or a scheduler. Entry,
  * registers, stack, result and literal roots retain actual code until free.
  * Initial Eterm arguments are namespace-relative immediate values only.

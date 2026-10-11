@@ -13,7 +13,7 @@
 #define A(v) ((BeamOpArg){TAG_a,(Sint)(v)})
 #define N ((BeamOpArg){TAG_n,NIL})
 #define P ((BeamOpArg){TAG_p,0})
-typedef struct { BeamOp ops[80]; BeamOpArg args[80][24]; size_t count; } Program;
+typedef struct { BeamOp ops[80]; BeamOpArg args[80][24]; size_t count,function_frame; } Program;
 typedef struct { size_t calls,fail,live; } Memory;
 static void *allocate(void *context,size_t size)
 {
@@ -26,11 +26,22 @@ static BeamOp *add(Program *p,unsigned opcode,const BeamOpArg *args,size_t count
     CHECK(p->count<80 && count<=24); size_t index=p->count++; BeamOp *op=&p->ops[index];
     memset(op,0,sizeof(*op)); op->op=opcode; op->arity=(unsigned)count; op->a=p->args[index];
     if(count) memcpy(op->a,args,count*sizeof(*args));
+    if(opcode==genop_int_func_start_5) p->function_frame=SIZE_MAX;
+    if(opcode==genop_allocate_2) p->function_frame=(Uint)args[0].val;
     if(index) p->ops[index-1].next=op; return op;
 }
 #define ADD(p,op,...) add((p),genop_##op,(BeamOpArg[]){__VA_ARGS__},sizeof((BeamOpArg[]){__VA_ARGS__})/sizeof(BeamOpArg))
-static void ret(Program *p) { add(p,genop_return_0,NULL,0); }
-static void init(Program *p) { add(p,genop_bs_init_writable_0,NULL,0); }
+static void ret(Program *p)
+{
+    if(p->function_frame!=SIZE_MAX && p->ops[p->count-1].op!=genop_deallocate_1)
+        ADD(p,deallocate_1,U(p->function_frame));
+    add(p,genop_return_0,NULL,0);
+}
+static void init(Program *p)
+{
+    if(p->function_frame==SIZE_MAX) ADD(p,allocate_2,U(0),U(1));
+    add(p,genop_bs_init_writable_0,NULL,0);
+}
 static void begin(Program *p)
 {
     memset(p,0,sizeof(*p)); ADD(p,int_func_start_5,U(1),U(0),A(am_erlang),A(am_binary),U(2)); ADD(p,label_1,U(2));
@@ -106,7 +117,7 @@ static void consumption(LbCodeSpace *space)
     }
     /* A consumed X cannot silently become a callee argument or a return. */
     begin(&p); init(&p); binary(&p,am_private_append,X(0),X(1),P,1);
-    ADD(&p,call_only_2,U(1),F(8));
+    ADD(&p,call_last_3,U(1),F(8),U(0));
     ADD(&p,int_func_start_5,U(7),U(0),A(am_erlang),A(am_binary),U(1)); ADD(&p,label_1,U(8)); ret(&p);
     verify(space,&p,LB_CODE_FORMAT);
     for(unsigned reset=0;reset<2;++reset) {
@@ -173,11 +184,13 @@ int main(int argc,char **argv)
     Memory m={0}; LbSystemAllocator callbacks={&m,allocate,release}; LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(&callbacks,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
     live_and_destinations(space); consumption(space); joins_and_revocation(space);
-    Program p; begin(&p); init(&p); binary(&p,am_private_append,X(0),X(0),P,1); ret(&p);
+    Program p; begin(&p); add(&p,genop_bs_init_writable_0,NULL,0); ret(&p);
+    verify(space,&p,LB_CODE_FORMAT); /* Native allocating body-call frame required. */
+    begin(&p); init(&p); binary(&p,am_private_append,X(0),X(0),P,1); ret(&p);
     size_t live=m.live; m.fail=m.calls+1; verify(space,&p,LB_CODE_NO_MEMORY); CHECK(m.live==live);
     m.fail=0; verify(space,&p,LB_CODE_OK); CHECK(m.live==live);
     if(argc==2) fixture(space,argv[1]); else CHECK(argc==1);
-    CHECK(!lb_instruction_supported(op_i_bs_create_bin_jIWdW) && !lb_instruction_supported(op_bs_init_writable));
+    CHECK(!lb_instruction_supported(op_i_bs_create_bin_jIWdW) && lb_instruction_supported(op_bs_init_writable));
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!m.live);
     puts("CORE_BINARY_FLOW_OK live_roots=true late_destination=true private_representation=true consumed_slots=true failure_edges=true poisoned_joins=true backedges=true call_arguments=true revocation=true physical_y_roots=true runtime_uniqueness_still_required=true execution=false");
     return 0;

@@ -7,6 +7,7 @@
  */
 #include "process_internal.h"
 #include "term_compare.h"
+#include "writable.h"
 const BeamInstr lb_host_return[1]={op_normal_exit};
 int lb_instruction_supported(unsigned op)
 {
@@ -220,6 +221,8 @@ find_func_info: {
     if(!(c_p->freason&LB_EXF_HAS_EXT_INFO)) c_p->fvalue=NIL;
     c_p->status=LB_PROCESS_EXCEPTION; goto stop;
 }
+resource_limit:
+    c_p->status=LB_PROCESS_LIMIT; goto stop;
 memory_failure:
     /* The failed collection left the old roots intact. */
     c_p->status=LB_PROCESS_NO_MEMORY; goto stop;
