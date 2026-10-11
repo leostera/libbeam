@@ -7,6 +7,7 @@
  */
 #include "code_internal.h"
 #include "binary_error.h"
+#include "fun.h"
 #define VERIFY(x) do { if(!(x)) return LB_CODE_FORMAT; } while(0)
 #define ALLOC(x) do { if(!(x)) return st->program->error.status==LB_BEAM_LIMIT?LB_CODE_LIMIT:LB_CODE_NO_MEMORY; } while(0)
 static int need(LoaderState *st,size_t n)
@@ -24,7 +25,7 @@ static int need(LoaderState *st,size_t n)
 static int patch(LoaderState *st,LbPatch **list,size_t pos)
 {
     LbPatch *p=lb_palloc(st->program,1,sizeof(*p)); if(!p) return 0;
-    p->pos=pos; p->next=*list; *list=p; return 1;
+    p->pos=pos; p->pc=st->emitting_pc; p->next=*list; *list=p; return 1;
 }
 static int string_patch(LoaderState *st,size_t pos,size_t bytes)
 {
@@ -57,6 +58,7 @@ LbCodeStatus lb_emit(LoaderState *st,BeamOp *op)
     const OpEntry *entry=&opc[st->specific_op];
     const char *sign=entry->sign, *prog;
     size_t arg=0, start, trailing=0, before=st->ci;
+    st->emitting_pc=before;
     if(st->specific_op==op_i_bs_create_bin_jIWdW) {
         VERIFY(op->op==genop_i_bs_create_bin_5 && op->arity>=10 && op->a[4].type==TAG_u &&
                op->a[4].val>=5 && (Uint)op->a[4].val<=5*(65536/6) &&
@@ -298,6 +300,13 @@ LbCodeStatus lb_finish_emit(LoaderState *st)
         Eterm term;
         VERIFY(p->pos<st->ci && lb_beam_program_literal(st->program,st->space->atoms,(Sint)st->codev[p->pos],&term)==LB_BEAM_OK);
         st->codev[p->pos]=term;
+        const LbFun *fun=lb_fun(term);
+        if(fun) {
+            VERIFY(p->pc<st->ci && fun->entry.fun->owner==st->module_code && !lb_fun_free(fun));
+            LbLiteralFunUse *use=lb_palloc(st->program,1,sizeof(*use)); ALLOC(use);
+            *use=(LbLiteralFunUse){p->pc,fun->entry.fun,st->module_code->literal_fun_uses};
+            st->module_code->literal_fun_uses=use;
+        }
     }
     VERIFY(lb_beam_image_chunk(st->program->image,LB_BEAM_ID('S','t','r','T'),&strings)==LB_BEAM_OK);
     for(sp=st->string_patches;sp;sp=sp->next) {
@@ -309,7 +318,10 @@ LbCodeStatus lb_finish_emit(LoaderState *st)
         VERIFY(p->pos<st->ci && st->codev[p->pos]<st->module_code->import_count);
         st->codev[p->pos]=(Uint)st->module_code->imports[st->codev[p->pos]];
     }
-    if(st->lambda_patches) return LB_CODE_UNSUPPORTED;
+    for(p=st->lambda_patches;p;p=p->next) {
+        VERIFY(p->pos<st->ci && st->codev[p->pos]<st->module_code->fun_count);
+        st->codev[p->pos]=(Uint)&st->module_code->funs[st->codev[p->pos]];
+    }
     st->module_code->words=st->codev; st->module_code->word_count=st->ci;
     return LB_CODE_OK;
 }

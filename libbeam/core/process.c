@@ -11,6 +11,12 @@
 #include "binary_build.h"
 #include "reference.h"
 #define is_not_ref(term) (!lb_is_reference(term))
+typedef LbFunEntry ErlFunEntry;
+typedef LbFun ErlFunThing;
+#define ERL_FUN_SIZE LB_FUN_WORDS
+#define MAKE_FUN_HEADER(arity,free,external) (LB_FUN_HEADER(arity,free)|((Uint)!!(external)<<LB_FUN_KIND_SHIFT))
+#define fun_arity(fun) lb_fun_arity(fun)
+#define make_fun(fun) make_boxed((Eterm *)(fun))
 const BeamInstr lb_host_return[1]={op_normal_exit};
 int lb_instruction_supported(unsigned op)
 {
@@ -177,6 +183,12 @@ LbProcessStatus lb_process_run(LbProcess *c_p,size_t budget,unsigned reductions)
 dispatch:
     if(!pc_valid(c_p,I) || !VALID_INSTR(next_op) || (c_p->decimal && next_op!=op_call_bif_W)) goto malformed_code;
     if(!budget--) goto context_switch3;
+    {
+        Uint cost; LbAllocStatus held=lb_fun_prepare_instruction(c_p,I,&cost);
+        FCALLS-=(Sint)cost;
+        if(held==LB_ALLOC_NO_MEMORY) goto memory_failure;
+        if(held!=LB_ALLOC_OK) goto malformed_code;
+    }
     switch(next_op) {
 #include "lb_dispatch_generated.inc"
     OpCase(call_bif_W): {

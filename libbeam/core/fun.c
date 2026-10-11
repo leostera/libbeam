@@ -9,7 +9,7 @@ LbAllocStatus lb_fun_retain(LbProcess *p,const LbFunEntry *entry)
     if(!p || !entry || !entry->owner || entry->owner->space!=p->entry_module->space ||
        !entry->owner->published || !entry->dispatch.addresses[0] || entry->pend_purge_address) return LB_ALLOC_INVALID;
     for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next)
-        if(lease->entry==entry) return LB_ALLOC_OK;
+        if(lease->entry->owner==entry->owner) return LB_ALLOC_OK;
     if(entry->owner->users==SIZE_MAX) return LB_ALLOC_NO_MEMORY;
     void *memory;
     if(lb_alloc_domain_allocate(p->entry_module->space->domain,sizeof(LbFunLease),&memory)!=LB_ALLOC_OK) return LB_ALLOC_NO_MEMORY;
@@ -35,7 +35,7 @@ void lb_fun_marks_clear(LbProcess *p)
 void lb_fun_mark(LbProcess *p,const LbFunEntry *entry)
 {
     for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next)
-        if(lease->entry==entry) { lease->marked=1; return; }
+        if(lease->entry->owner==entry->owner) { lease->marked=1; return; }
     abort(); /* no code pointer may outlive its defining-module lease */
 }
 static int contains_code(LbCodeModule *module,Uint address)
@@ -59,6 +59,25 @@ Uint lb_fun_mark_code(LbProcess *p)
     }
     return cost/16+(cost%16!=0);
 }
+LbAllocStatus lb_fun_prepare_instruction(LbProcess *p,const BeamInstr *pc,Uint *cost)
+{
+    *cost=0; LbCodeSpace *space=p->entry_module->space;
+    if(!space->has_fun_literals) return LB_ALLOC_OK;
+    Uint address=(Uint)pc;
+    for(LbCodeModule *module=space->modules;module;module=module->next) {
+        ++*cost;
+        if(!contains_code(module,address)) continue;
+        size_t index=(size_t)(pc-module->words);
+        for(const LbLiteralFunUse *use=module->literal_fun_uses;use;use=use->next) {
+            ++*cost;
+            if(use->pc!=index) continue;
+            LbAllocStatus status=lb_fun_retain(p,use->entry);
+            if(status!=LB_ALLOC_OK) return status;
+        }
+        break;
+    }
+    return LB_ALLOC_OK;
+}
 /* Native beam_common.c call_fun's local loaded-fun and badfun/badarity
  * paths. Unloaded/purging/export fun effects have no admission: all accepted
  * entries carry a defining-module lease and a verified loaded code address. */
@@ -71,7 +90,7 @@ const BeamInstr *lb_fun_call(LbProcess *p,unsigned arity)
     const LbFunEntry *entry=fun->entry.fun; int retained=0;
     for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next) {
         ++p->last_native_cost;
-        if(lease->entry==entry) { retained=1; break; }
+        if(lease->entry->owner==entry->owner) { retained=1; break; }
     }
     if(!retained || entry->owner->space!=p->entry_module->space ||
        !entry->owner->published || entry->pend_purge_address || !entry->dispatch.addresses[0]) {

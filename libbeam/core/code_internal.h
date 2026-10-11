@@ -47,7 +47,8 @@ typedef struct LbExport {
 typedef struct { Eterm module, function; Uint arity; } BeamFile_ImportEntry;
 typedef struct { size_t pos; Sint offset; unsigned packed; } LabelPatch;
 typedef struct { size_t value, count, capacity; int looprec_targeted; LabelPatch *patches; } Label;
-typedef struct LbPatch { size_t pos; struct LbPatch *next; } LbPatch;
+typedef struct LbPatch { size_t pos,pc; struct LbPatch *next; } LbPatch;
+typedef struct LbLiteralFunUse { size_t pc; const struct LbFunEntry *entry; struct LbLiteralFunUse *next; } LbLiteralFunUse;
 typedef struct LbStringPatch { size_t pos,bytes; struct LbStringPatch *next; } LbStringPatch;
 typedef struct LbPidTable LbPidTable;
 struct LbCodeSpace {
@@ -58,8 +59,9 @@ struct LbCodeSpace {
     LbCodeModule *modules;
     Export *exports;
     Export natives[LB_NATIVE_COUNT];
-    int loading;
+    int loading,has_fun_literals;
 };
+struct LbFunEntry;
 struct LbCodeModule {
     LbCodeSpace *space;
     LbBeamProgram *program;
@@ -73,6 +75,9 @@ struct LbCodeModule {
     LbCodeModule **dependencies;
     size_t import_count;
     unsigned char md5[16];
+    struct LbFunEntry *funs;
+    size_t fun_count;
+    LbLiteralFunUse *literal_fun_uses;
     Eterm attributes, compile;
     int published;
 };
@@ -83,11 +88,12 @@ typedef struct LoaderState_ {
     LbCodeSpace *space;
     struct { struct { size_t count; BeamFile_ImportEntry *entries; } imports; } beam;
     const BifEntry **bif_imports;
+    Sint *lambda_literals;
     BeamOp *genop, *free_ops;
     Label *labels;
     size_t label_count;
     BeamInstr *codev;
-    size_t ci, capacity, function_number, last_func_start, last_label;
+    size_t ci, capacity, function_number, last_func_start, last_label,emitting_pc;
     int specific_op;
     Eterm module, function;
     unsigned arity;

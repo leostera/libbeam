@@ -11,7 +11,7 @@ import re
 PURE = {'distinct', 'equal', 'independent_moves', 'is_offset', 'negation_is_small',
         'never', 'succ', 'succ3', 'succ4'}
 OWNED = {'needs_nif_padding', 'is_heavy_bif', 'smp_already_locked', 'smp_mark_target_label'}
-GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2'}
+GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2', 'make_fun3'}
 
 
 def project(text):
@@ -80,6 +80,18 @@ def project(text):
             body = re.sub(r'\bBSC_(\w+)', r'LB_BSC_\1', body)
             if (assertions, arrays, literals) != (1, 1, 1):
                 raise RuntimeError('Unreviewed create_bin generator boundary')
+        if name == 'make_fun3':
+            for old,new,expected in (
+                ('S->beam.lambdas.count','S->program->lambda_count',1),
+                ('S->beam.lambdas.entries','S->program->lambdas',1),
+                ('beamfile_add_literal(&S->beam, make_fun((Eterm*)funp), 0)',
+                 'load_fun_literal(S, (size_t)Idx.val, make_fun((Eterm*)funp))',1),
+                ('erts_alloc(ERTS_ALC_T_LOADER_TMP, op->arity * sizeof(BeamOpArg))',
+                 'lb_palloc(S->program, op->arity, sizeof(BeamOpArg))',1)):
+                if body.count(old)!=expected: raise RuntimeError('Unreviewed fun generator boundary '+old)
+                body=body.replace(old,new)
+            body=body.replace('op->a = lb_palloc(S->program, op->arity, sizeof(BeamOpArg));',
+                'op->a = lb_palloc(S->program, op->arity, sizeof(BeamOpArg));\n  if (!op->a) return NULL;')
         if name == 'select_tuple_arity':
             body = body.replace('erts_alloc(ERTS_ALC_T_LOADER_TMP, op->arity * sizeof(BeamOpArg))',
                                 'lb_palloc(S->program, op->arity, sizeof(BeamOpArg))')

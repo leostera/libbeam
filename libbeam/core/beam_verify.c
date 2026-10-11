@@ -5,6 +5,7 @@
  * type hints are not evidence: facts come from real tests and constructors.
  */
 #include "code_internal.h"
+#include "fun.h"
 #define BITS (MAX_REG/64)
 #define NO_FRAME SIZE_MAX
 #define TUPLE_SHAPE UINT32_C(0x1000000)
@@ -208,11 +209,11 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:
         case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_get_list_3:
         case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif2_6:
-        case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:
+        case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_make_fun3_3:
         case genop_badmatch_1:case genop_case_end_1:break;
         default:p->error.stage=gen_opc[op->op].name; return LB_CODE_UNSUPPORTED;
         }
-        if(op->op!=genop_put_tuple2_2 && op->op!=genop_init_yregs_1 && op->op!=genop_select_tuple_arity_3 && op->op!=genop_bs_create_bin_6)
+        if(op->op!=genop_put_tuple2_2 && op->op!=genop_init_yregs_1 && op->op!=genop_select_tuple_arity_3 && op->op!=genop_bs_create_bin_6 && op->op!=genop_make_fun3_3)
             REQUIRE(op->arity==(unsigned)gen_opc[op->op].arity);
         nodes[i].op=op;
         if(op->op==genop_int_func_start_5) {
@@ -224,6 +225,14 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         }
         nodes[i].function=function;
         if(op->op==genop_label_1) labels[op->a[0].val]=i;
+    }
+    p->error.stage="lambda target admission";
+    for(i=0;i<p->lambda_count;++i) {
+        const LbBeamLambda *lambda=&p->lambdas[i]; size_t target=labels[lambda->label];
+        REQUIRE(target>0 && target<n && nodes[target-1].op->op==genop_int_func_start_5);
+        const BeamOp *header=nodes[target-1].op;
+        REQUIRE(header->a[3].type==TAG_a && (Eterm)header->a[3].val==lambda->function);
+        REQUIRE(header->a[4].type==TAG_u && (Uint)header->a[4].val==lambda->arity);
     }
     w->tail%=n;
     while(w->pending) {
@@ -300,6 +309,13 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
             }
             break;
+        case genop_make_fun3_3:
+            REQUIRE(op->arity>=3 && a[0].type==TAG_u && (Uint)a[0].val<p->lambda_count && a[2].type==TAG_u);
+            live=(Uint)a[2].val;
+            REQUIRE(live==p->lambdas[a[0].val].num_free && op->arity==3+live);
+            for(r=0;r<live;++r) REQUIRE(source(st,&f,a[3+r]));
+            if(live) { REQUIRE(f.heap>=LB_FUN_WORDS+live); f.heap-=LB_FUN_WORDS+live; }
+            REQUIRE(destination(&f,a[1],0)); break;
         case genop_bif0_2:
             REQUIRE(a[0].type==TAG_u && (Uint)a[0].val<st->beam.imports.count);
             if(st->bif_imports[a[0].val]!=&st->space->engine->bifs[BIF_self_0]) return LB_CODE_UNSUPPORTED;

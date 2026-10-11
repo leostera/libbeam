@@ -82,7 +82,7 @@ def main():
                             root / 'libbeam/core/otp/writable-init-sources.json',
                             root / 'libbeam/core/otp/binary-build-sources.json',
                             root / 'libbeam/tests/core_binary_build_test.c', root / 'libbeam/tests/api_binary_build_test.cpp',
-                            root / 'libbeam/tests/core_pid_test.c', root / 'libbeam/tests/fixtures/pid_slice.erl', root / 'libbeam/tests/fixtures/fun_target.erl',
+                            root / 'libbeam/tests/core_pid_test.c', root / 'libbeam/tests/fixtures/pid_slice.erl', root / 'libbeam/tests/fixtures/fun_target.erl', root / 'libbeam/tests/fixtures/fun_slice.erl',
                             root / 'libbeam/core/otp/process-identity-sources.json',
                             root / 'libbeam/tests/fixtures/binary_construct_slice.erl', root / 'libbeam/tests/fixtures/binary_control_slice.S',
                             root / 'libbeam/tests/fixtures/binary_construct_reference.erl',
@@ -267,11 +267,12 @@ def main():
             run('decimal-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/decimal_slice.erl'])
             decimal_fixture = fixture_dir / 'decimal_slice.beam'
             run('decimal-execution', [out / 'build/core_decimal_test', decimal_fixture])
-            run('pid-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/pid_slice.erl', root / 'libbeam/tests/fixtures/fun_target.erl'])
+            run('pid-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/pid_slice.erl', root / 'libbeam/tests/fixtures/fun_target.erl', root / 'libbeam/tests/fixtures/fun_slice.erl'])
             pid_fixture = fixture_dir / 'pid_slice.beam'
             fun_target_fixture = fixture_dir / 'fun_target.beam'
-            run('pid-execution', [out / 'build/core_pid_test', pid_fixture, fun_target_fixture])
-            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture])
+            fun_fixture = fixture_dir / 'fun_slice.beam'
+            run('pid-execution', [out / 'build/core_pid_test', pid_fixture, fun_target_fixture, fun_fixture])
+            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, fun_fixture])
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
             run('peer-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/code_peer.erl'])
@@ -607,8 +608,8 @@ def main():
             run('shape-ubsan', [out / 'engine-ubsan/core_shape_test', shape_fixture])
             run('add-ubsan', [out / 'engine-ubsan/core_add_test', add_fixture])
             run('decimal-ubsan', [out / 'engine-ubsan/core_decimal_test', decimal_fixture])
-            run('pid-ubsan', [out / 'engine-ubsan/core_pid_test', pid_fixture, fun_target_fixture])
-            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture])
+            run('pid-ubsan', [out / 'engine-ubsan/core_pid_test', pid_fixture, fun_target_fixture, fun_fixture])
+            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, fun_fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
@@ -650,8 +651,8 @@ def main():
             run('shape-release', [out / 'release/core_shape_test', shape_fixture])
             run('add-release', [out / 'release/core_add_test', add_fixture])
             run('decimal-release', [out / 'release/core_decimal_test', decimal_fixture])
-            run('pid-release', [out / 'release/core_pid_test', pid_fixture, fun_target_fixture])
-            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture])
+            run('pid-release', [out / 'release/core_pid_test', pid_fixture, fun_target_fixture, fun_fixture])
+            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, fun_fixture])
             for filename in ('lb_atoms_generated.h', 'lb_atoms_generated.inc', 'lb_bif_ids_generated.h'):
                 first = (out / 'build/generated/atoms' / filename).read_bytes()
                 second = (out / 'release/generated/atoms' / filename).read_bytes()
@@ -684,7 +685,7 @@ def main():
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, fun_target_fixture, many_fixture, *probes]}
+                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, fun_target_fixture, fun_fixture, many_fixture, *probes]}
             # G1 now requires the unchanged acceptance target and real C/adapter
             # failure recovery. Stateful G3 remains separately observed, not green.
             lifecycle = run('engine-lifecycle', [out / 'build/engine_lifecycle'])

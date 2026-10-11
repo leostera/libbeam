@@ -37,7 +37,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt').split()
 
 
 def case(source, name):
@@ -125,6 +125,28 @@ def fallible_writable_init(body):
     # or borrowed writer survives the boundary. One bounded operation may overrun.
     return body.replace('  GotoPF(next_pf);',
         '  if (FCALLS<=0) goto context_switch3;\n  GotoPF(next_pf);')
+
+
+def owned_make_fun(body):
+    if 'OpCase(i_make_fun3_Fdtt):' not in body: return body
+    old='  funp = (ErlFunThing*)HTOP;'
+    if body.count(old)!=1: raise RuntimeError('Changed fun construction boundary')
+    body=body.replace(old,
+        '  LbAllocStatus held=lb_fun_retain(c_p,fe);\n'
+        '  FCALLS-=1+num_free;\n'
+        '  if(held==LB_ALLOC_NO_MEMORY) goto memory_failure;\n'
+        '  if(held!=LB_ALLOC_OK || (Uint)(E-HTOP)<ERL_FUN_SIZE+(Uint)num_free+S_RESERVED) goto malformed_code;\n'+old)
+    old='const ErtsCodeMFA *mfa = erts_get_fun_mfa(fe, erts_active_code_ix());'
+    if body.count(old)!=1: raise RuntimeError('Changed fun debug MFA boundary')
+    body=body.replace(old,
+        'LbMFA actual_mfa; memcpy(&actual_mfa,fe->dispatch.addresses[0]-sizeof(LbMFA)/sizeof(BeamInstr),sizeof(actual_mfa));\n'
+        '    const LbMFA *mfa=&actual_mfa;')
+    old='ASSERT(tb((tmp_packed1>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK) == fe->arity);'
+    if body.count(old)!=1: raise RuntimeError('Changed fun arity boundary')
+    body=body.replace(old,old.replace('fe->arity','(Uint)fe->arity'))
+    old='  Goto(*I);ASSERT(!"Fell through \'i_make_fun3\' (-no_next)");'
+    if body.count(old)!=1: raise RuntimeError('Changed fun construction completion')
+    return body.replace(old,'  if(FCALLS<=0) goto context_switch3;\n'+old)
 
 
 def owned_call_fun(body):
@@ -234,6 +256,7 @@ def project(source):
         body=fallible_writable_init(body)
         body=fallible_self(body)
         body=owned_call_fun(body)
+        body=owned_make_fun(body)
         body=fallible_binary_build(body)
         # No tracing/saved-call/lock instrumentation capability exists in this
         # serialized interpreter. Remove those paths, not their semantic peers.

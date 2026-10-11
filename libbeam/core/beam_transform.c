@@ -6,6 +6,30 @@
  */
 #include "code_internal.h"
 #include "binary_error.h"
+#include "fun.h"
+typedef Sint SWord;
+typedef LbFun ErlFunThing;
+typedef LbBeamLambda BeamFile_LambdaEntry;
+#define ERL_FUN_SIZE LB_FUN_WORDS
+#define ERTS_SWORD_MAX INTPTR_MAX
+#define MAKE_FUN_HEADER(arity,free,external) (LB_FUN_HEADER(arity,free)|((Uint)!!(external)<<LB_FUN_KIND_SHIFT))
+#define make_fun(pointer) make_boxed((const Eterm *)(pointer))
+static Sint load_fun_literal(LoaderState *st,size_t index,Eterm placeholder)
+{
+    LbBeamProgram *p=st->program;
+    const LbFun *source=(const LbFun *)boxed_val(placeholder);
+    if(index>=p->lambda_count || p->lambdas[index].num_free ||
+       source->thing_word!=LB_FUN_HEADER(p->lambdas[index].arity,0)) {
+        lb_pfail(p,LB_BEAM_BAD_FORMAT); return INTPTR_MAX;
+    }
+    if(p->dynamic_count>=(size_t)INTPTR_MAX) { lb_pfail(p,LB_BEAM_LIMIT); return INTPTR_MAX; }
+    LbFun *fun=lb_palloc(p,LB_FUN_WORDS,sizeof(Eterm));
+    LbDynamicLiteral *literal=lb_palloc(p,1,sizeof(*literal));
+    if(!fun || !literal) return INTPTR_MAX;
+    fun->thing_word=source->thing_word; fun->entry.fun=&st->module_code->funs[index];
+    literal->value=make_fun(fun)|TAG_LITERAL_PTR; literal->index=~(Sint)p->dynamic_count++;
+    literal->next=p->dynamic; p->dynamic=literal; return literal->index;
+}
 typedef Uint UWord;
 #define BSF_LITTLE 2
 #define BSF_NATIVE 16
@@ -169,6 +193,18 @@ int lb_transform(LoaderState *st)
 {
     if(st->genop->op==genop_bs_create_bin_6 && !binary_descriptors_valid(st,st->genop)) {
         st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+    }
+    if(st->genop->op==genop_make_fun3_3) {
+        BeamOp *op=st->genop;
+        if(op->arity<3 || op->a[0].type!=TAG_u || (Uint)op->a[0].val>=st->program->lambda_count ||
+           op->a[2].type!=TAG_u || (Uint)op->a[2].val!=st->program->lambdas[op->a[0].val].num_free ||
+           (Uint)op->a[2].val!=op->arity-3 ||
+           (op->a[1].type!=TAG_x && op->a[1].type!=TAG_y) || (Uint)op->a[1].val>=MAX_REG) {
+            st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+        }
+        for(size_t i=3;i<op->arity;++i) if(!segment_value_valid(st,op->a[i])) {
+            st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+        }
     }
     return lb_transform_engine(st);
 }

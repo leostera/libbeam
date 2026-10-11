@@ -7,6 +7,7 @@
 #include "code_internal.h"
 #include "md5.h"
 #include "pid_table.h"
+#include "fun.h"
 static LbCodeStatus from_beam(LbBeamStatus s)
 {
     switch(s) {
@@ -129,6 +130,23 @@ static LbCodeStatus setup(LoaderState *st)
         module->imports[i]=e; module->dependencies[i]=e->owner==module?NULL:e->owner;
         if(e->bif_number>=0) st->bif_imports[i]=&st->space->engine->bifs[e->bif_number];
     }
+    module->fun_count=p->lambda_count;
+    if(p->lambda_count) {
+        module->funs=lb_palloc(p,p->lambda_count,sizeof(*module->funs));
+        st->lambda_literals=lb_palloc(p,p->lambda_count,sizeof(*st->lambda_literals));
+        unsigned char *indices=lb_palloc(p,p->lambda_count,1);
+        if(!module->funs || !st->lambda_literals || !indices) return from_beam(p->error.status);
+        for(i=0;i<p->lambda_count;++i) {
+            LbBeamLambda *lambda=&p->lambdas[i]; LbFunEntry *entry=&module->funs[i];
+            if(indices[lambda->index]) return LB_CODE_FORMAT;
+            indices[lambda->index]=1;
+            entry->module=module->name; entry->arity=(int)(lambda->arity-lambda->num_free);
+            entry->index=(int)lambda->index; entry->old_index=(int)i;
+            _Static_assert(sizeof(entry->old_uniq)==sizeof(lambda->old_uniq),"native fun uniq width");
+            memcpy(&entry->old_uniq,&lambda->old_uniq,sizeof(entry->old_uniq));
+            entry->owner=module; st->lambda_literals[i]=INTPTR_MAX;
+        }
+    }
     st->ci=(size_t)info->function_count+1;
     return LB_CODE_OK;
 }
@@ -200,6 +218,13 @@ LbCodeStatus lb_compile_code(LbCodeModule *module)
         module->exports[i].dispatch.addresses[0]=st.codev+st.labels[e.label].value;
     }
     checksum(module);
+    for(i=0;i<module->fun_count;++i) {
+        LbBeamLambda *lambda=&st.program->lambdas[i]; LbFunEntry *entry=&module->funs[i];
+        size_t address=st.labels[lambda->label].value;
+        if(!address || address>=st.ci || (!lambda->num_free && st.lambda_literals[i]==INTPTR_MAX)) return LB_CODE_FORMAT;
+        entry->dispatch.addresses[0]=st.codev+address;
+        memcpy(entry->uniq,module->md5,sizeof(entry->uniq));
+    }
     return LB_CODE_OK;
 }
 LbCodeStatus lb_code_load(LbCodeSpace *space,const void *bytes,size_t size,LbCodeModule **out,LbBeamError *error)
@@ -243,6 +268,7 @@ LbCodeStatus lb_code_load(LbCodeSpace *space,const void *bytes,size_t size,LbCod
     for(i=0;i<module->import_count;++i) if(module->dependencies[i]) ++module->dependencies[i]->importers;
     for(i=0;i<module->export_count;++i) { module->exports[i].next=space->exports; space->exports=&module->exports[i]; }
     module->next=space->modules; space->modules=module; module->published=1;
+    if(module->literal_fun_uses) space->has_fun_literals=1;
     space->loading=0; *out=module;
     if(error) *error=(LbBeamError){LB_BEAM_OK,0,"published native BEAM words"};
     return LB_CODE_OK;

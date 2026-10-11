@@ -53,4 +53,5 @@ void lb_fun_mark(LbProcess *,const LbFunEntry *);
 Uint lb_fun_mark_code(LbProcess *); /* in-flight PC and saved continuations */
 void lb_fun_sweep(LbProcess *);
 const BeamInstr *lb_fun_call(LbProcess *,unsigned arity);
+LbAllocStatus lb_fun_prepare_instruction(LbProcess *,const BeamInstr *,Uint *cost);
 #endif

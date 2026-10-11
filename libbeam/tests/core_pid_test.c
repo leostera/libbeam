@@ -211,16 +211,66 @@ static void references(LbCodeSpace *space,LbCodeModule *module,Memory *m)
     engine->reference_counter=saved; /* test-only injection; all generated refs destroyed */
     lb_code_entry_release(ref); lb_code_entry_release(pair);
 }
+static void fun_load_failures(LbCodeSpace *space,const char *path,Memory *m)
+{
+    FILE *file=fopen(path,"rb"); CHECK(file && !fseek(file,0,SEEK_END)); long size=ftell(file);
+    CHECK(size>0 && !fseek(file,0,SEEK_SET)); unsigned char *bytes=malloc((size_t)size);
+    CHECK(bytes && fread(bytes,1,(size_t)size,file)==(size_t)size && !fclose(file));
+    size_t live=m->live,atoms=lb_atoms_count(space->atoms);
+    for(size_t prefix=1;;++prefix) {
+        CHECK(prefix<1000); LbCodeModule *module=NULL; LbBeamError error;
+        m->fail=m->calls+prefix;
+        LbCodeStatus status=lb_code_load(space,bytes,(size_t)size,&module,&error); m->fail=0;
+        if(status==LB_CODE_OK) { CHECK(lb_code_unload(module)==LB_CODE_OK); break; }
+        CHECK(status==LB_CODE_NO_MEMORY && !module && !space->loading);
+        CHECK(m->live==live && lb_atoms_count(space->atoms)==atoms);
+    }
+    free(bytes);
+}
+static void guest_funs(LbCodeSpace *space,LbCodeModule *module,Memory *m)
+{
+    const char *functions[]={"echo","nested","closed","badarity","factory","closed_factory"};
+    unsigned char bytes[65]; memset(bytes,0x63,sizeof(bytes));
+    for(size_t i=0;i<6;++i) {
+        LbCodeEntry *e=entry(space,module,functions[i],1); LbProcess *p;
+        CHECK(lb_process_create_binary(e,bytes,sizeof(bytes),32,&p)==LB_PROCESS_READY);
+        CHECK(finish(p)==(i==3?LB_PROCESS_EXCEPTION:LB_PROCESS_DONE));
+        if(i==3) CHECK(lb_process_exception(p)==am_badarity);
+        else if(i>=4) {
+            const LbFun *fun=lb_fun(lb_process_result(p)); CHECK(fun && fun->entry.fun->owner==module);
+            CHECK(lb_fun_free(fun)==(i==4?1:0));
+            CHECK(lb_code_unload(module)==LB_CODE_BUSY);
+        } else {
+            LbBitstringView view; CHECK(lb_bitstring_view(lb_process_result(p),&view));
+            if(i==2) CHECK(view.bit_size==48 && !memcmp(view.data,"closed",6));
+            else CHECK(view.bit_size==520 && !memcmp(view.data,bytes,65));
+        }
+        CHECK(lb_process_collect(p,0)==p->status); lb_process_destroy(p); lb_code_entry_release(e);
+    }
+    /* Native constructor and literal producers both acquire leases before
+     * publication; inject their first lease allocation and retry from scratch. */
+    for(size_t closed=0;closed<2;++closed) {
+        LbCodeEntry *e=entry(space,module,closed?"closed_factory":"factory",1);
+        LbProcess *p; CHECK(lb_process_create_binary(e,bytes,65,64,&p)==LB_PROCESS_READY);
+        m->fail=m->calls+1; CHECK(finish(p)==LB_PROCESS_NO_MEMORY && !p->fun_leases);
+        CHECK(lb_process_result(p)==THE_NON_VALUE); m->fail=0; lb_process_destroy(p);
+        CHECK(lb_process_create_binary(e,bytes,65,64,&p)==LB_PROCESS_READY && finish(p)==LB_PROCESS_DONE);
+        CHECK(lb_fun(lb_process_result(p))); lb_process_destroy(p); lb_code_entry_release(e);
+    }
+}
 int main(int argc,char **argv)
 {
-    CHECK(lb_instruction_supported(op_self_x) && lb_instruction_supported(op_self_y) && lb_instruction_supported(op_is_pid_fx));
-    if(argc==1) { puts("CORE_PID_GATE_OK"); return 0; } CHECK(argc==3);
+    CHECK(lb_instruction_supported(op_self_x) && lb_instruction_supported(op_self_y) && lb_instruction_supported(op_is_pid_fx) && lb_instruction_supported(op_i_make_fun3_Fdtt));
+    if(argc==1) { puts("CORE_PID_GATE_OK"); return 0; } CHECK(argc==4);
     Memory m={0}; LbSystemAllocator allocator={&m,allocate,release}; LbEngine *engine; LbCodeSpace *a,*b;
     CHECK(lb_engine_create(&allocator,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&a)==LB_CODE_OK && lb_code_space_create(engine,&b)==LB_CODE_OK);
     LbCodeModule *ma=load(a,argv[1]),*mb=load(b,argv[1]); LbCodeEntry *ea=entry(a,ma,"identity",0),*eb=entry(b,mb,"identity",0);
     LbCodeModule *target_module=load(a,argv[2]);
     table(a,ea,&m); permuted_ring(a,ea); references(a,ma,&m); fun_consumers(a,ma,target_module,&m);
     CHECK(lb_code_unload(target_module)==LB_CODE_OK);
+    fun_load_failures(a,argv[3],&m);
+    LbCodeModule *fun_module=load(a,argv[3]); guest_funs(a,fun_module,&m);
+    CHECK(lb_code_unload(fun_module)==LB_CODE_OK);
     LbProcess *failed=create(ea); size_t before=m.live; m.fail=m.calls+1;
     CHECK(finish(failed)==LB_PROCESS_NO_MEMORY && !a->pids && !failed->identity.owner && m.live==before);
     m.fail=0; lb_process_destroy(failed);
