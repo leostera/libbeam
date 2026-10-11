@@ -232,6 +232,7 @@ static void close_admission(LbWorld *world)
         next=call->next;
         if(call->status==LB_WORLD_PENDING) lb_task_cancel_locked(call->task);
     }
+    lb_task_cancel_world_children_locked(world);
     if(!world->engine->worker_started)
         while(world->phase!=LB_WORLD_RECLAIMED) retire_one(world);
     else if(pthread_cond_signal(&world->engine->wake)) abort();

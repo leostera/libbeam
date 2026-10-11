@@ -246,7 +246,6 @@ def main():
             run('async-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/async_slice.erl'])
             async_fixture = fixture_dir / 'async_slice.beam'
             run('executor-execution', [out / 'build/core_executor_test', async_fixture])
-            run('world-execution', [out / 'build/core_world_test', async_fixture])
             large_source = fixture_dir / 'code_large.erl'
             large_source.write_text('-module(code_large).\n-export([value/1]).\nvalue(_) -> <<"'+'q'*65537+'">>.\n')
             summary['large_fixture_source_sha256'] = hashlib.sha256(large_source.read_bytes()).hexdigest()
@@ -271,6 +270,7 @@ def main():
             pid_fixture = fixture_dir / 'pid_slice.beam'
             fun_target_fixture = fixture_dir / 'fun_target.beam'
             fun_fixture = fixture_dir / 'fun_slice.beam'
+            run('world-execution', [out / 'build/core_world_test', async_fixture, fun_fixture])
             run('pid-execution', [out / 'build/core_pid_test', pid_fixture, fun_target_fixture, fun_fixture])
             run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, fun_fixture])
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
@@ -602,7 +602,7 @@ def main():
             if run('bit-writer-fallback-vectors', [out / 'bit-writer-fallback', '--reference']) != writer_reference:
                 raise RuntimeError('Native fallback bit writers differ from stock-OTP vectors')
             run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
-            run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture])
+            run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture, fun_fixture])
             run('local-ubsan', [out / 'engine-ubsan/core_local_test', local_fixture])
             run('compare-ubsan', [out / 'engine-ubsan/core_compare_test', compare_fixture])
             run('shape-ubsan', [out / 'engine-ubsan/core_shape_test', shape_fixture])

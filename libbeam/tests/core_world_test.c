@@ -3,6 +3,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "world_internal.h"
+#include "pid_table.h"
 #include <stdio.h>
 #include <stdatomic.h>
 #include <time.h>
@@ -209,9 +210,60 @@ static void pending_owner_drop(LbBytesView code)
     }
     puts("CORE_WORLD_OWNER_DROP_OK pending_retirement=true orphan_completion=true repeat=32");
 }
+static void spawned_children(LbBytesView code)
+{
+    Memory m={0}; LbEngine *engine=create(&m); LbWorld *world; LbCall *call;
+    CHECK(lb_world_create(engine,&world)==LB_WORLD_OK && lb_world_load(world,code)==LB_WORLD_OK);
+    CHECK(lb_world_start(world,text("fun_slice"),text("echo"),text("worker"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_OK);
+    const char *factories[]={"process_factory","process_nested","process_loop"};
+    for(size_t kind=0;kind<3;++kind) {
+        LbCodeEntry *entry; LbTask *source;
+        lb_engine_enter(engine);
+        Eterm module,function;
+        CHECK(lb_atoms_find(world->space->atoms,"fun_slice",9,&module)==LB_ATOM_OK);
+        CHECK(lb_atoms_find(world->space->atoms,factories[kind],strlen(factories[kind]),&function)==LB_ATOM_OK);
+        CHECK(lb_code_entry_acquire(world->space,module,function,1,&entry)==LB_CODE_OK);
+        lb_engine_leave(engine);
+        CHECK(lb_task_create_binary(engine,entry,"captured",8,&source)==LB_ENGINE_OK);
+        const struct timespec delay={0,1000000}; size_t spins=0;
+        while(lb_task_status(source)==LB_TASK_PENDING && ++spins<5000) nanosleep(&delay,NULL);
+        CHECK(lb_task_status(source)==LB_TASK_DONE);
+        lb_engine_enter(engine);
+        size_t live=m.live,bytes=m.bytes,members=lb_pid_count(world->space->pids);
+        Eterm pid;
+        for(size_t prefix=1;;++prefix) {
+            CHECK(prefix<100); m.fail_host=m.host_calls+prefix;
+            LbProcessStatus status=lb_task_spawn_result_locked(world,source,&pid); m.fail_host=0;
+            if(status==LB_PROCESS_READY) break;
+            CHECK(status==LB_PROCESS_NO_MEMORY && is_non_value(pid));
+            CHECK(m.live==live && m.bytes==bytes && lb_pid_count(world->space->pids)==members);
+        }
+        CHECK(lb_pid_lookup(world->space->pids,pid));
+        lb_task_release_locked(source); lb_code_entry_release(entry); // source heap cannot be borrowed
+        lb_engine_leave(engine);
+        if(kind<2) {
+            for(spins=0;spins<5000;++spins) {
+                lb_engine_enter(engine); int exited=!lb_pid_lookup(world->space->pids,pid); lb_engine_leave(engine);
+                if(exited) break; nanosleep(&delay,NULL);
+            }
+            CHECK(spins<5000);
+        } else {
+            nanosleep(&delay,NULL); lb_engine_enter(engine);
+            CHECK(lb_pid_lookup(world->space->pids,pid)); lb_engine_leave(engine);
+            CHECK(lb_world_call(world,text("fun_slice"),text("nested"),text("peer"),&call)==LB_WORLD_OK);
+            expect(call,LB_WORLD_OK); // persistent child does not prevent another runnable process
+        }
+    }
+    LbReclamation *r; CHECK(lb_world_stop(world,&r)==LB_WORLD_OK); reclaimed(r);
+    lb_reclamation_release(r); lb_world_release(world); lb_engine_release(engine);
+    CHECK(!m.live && !m.bytes && m.worker_calls);
+    puts("CORE_WORLD_CHILDREN_OK worker_execution=true prepared_before_runnable=true child_outlives_source=true stop_drains_children=true");
+}
 int main(int argc,char **argv)
 {
     construction();
-    if(argc==2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
-    CHECK(argc==1 || argc==2); return 0;
+    if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
+    if(argc==3) { LbBytesView code=image(argv[2]); spawned_children(code); free((void *)code.data); }
+    CHECK(argc>=1 && argc<=3); return 0;
 }

@@ -24,6 +24,12 @@ lifecycle target passes; the stateful example still refuses unsupported module i
 ## Boundaries
 
 - `engine.c`: fallible C parent for the actual allocation/native catalog substrate.
+  The existing executor also owns internal background local-fun tasks: queue
+  storage precedes child preparation, publication is nonfallible, terminal
+  children retire physically, and serialized world stop drains persistent
+  children before code-space retirement. Worker-produced closure tests cover
+  allocation-prefix rollback, source destruction, peer progress and stop.
+  This scheduling seam does not yet admit guest spawn imports or monitors.
   Spaces retain it through physical release; shutdown refuses live children;
   out-of-order owner drop defers cleanup to the last physical child. No singleton
   or implicit world. The C++ factory owns this C handle.

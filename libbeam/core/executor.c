@@ -7,6 +7,7 @@
 #include "code_internal.h"
 #include "binary.h"
 #include "world_internal.h"
+#include "process_internal.h"
 #include <sched.h>
 
 struct LbTask {
@@ -14,6 +15,8 @@ struct LbTask {
     LbTask *next;
     LbProcess *process;
     LbCall *completion;
+    LbWorld *world; /* borrowed until that world's serialized stop drains children */
+    int background;
     LbTaskStatus status;
 };
 static void checked(int status) { if(status) abort(); } /* ownership invariant */
@@ -71,6 +74,10 @@ static void finish_task(LbTask *task,LbTaskStatus status)
         if(!call->owner_live) {
             lb_task_release_locked(task); call->task=NULL; lb_call_discard_completed(call);
         }
+    } else if(task->background) {
+        /* No host completion handle owns a spawned process. Logical exit has
+         * already removed its PID; physically retire its task/code/heap now. */
+        lb_task_release_locked(task);
     } else if(status==LB_TASK_CANCELLED) {
         lb_process_destroy(task->process); task->process=NULL;
     }
@@ -123,7 +130,7 @@ static LbEngineStatus create_locked(LbEngine *engine,const LbCodeEntry *entry,
        entry->entry->info.mfa.arity!=1 || size>LB_MAX_BINARY_BYTES || (size && !bytes)) return LB_ENGINE_INVALID;
     if(lb_alloc_domain_allocate(engine->domain,sizeof(*task),&memory)!=LB_ALLOC_OK) return LB_ENGINE_NO_MEMORY;
     task=memory; memset(task,0,sizeof(*task)); task->engine=engine; task->status=LB_TASK_PENDING;
-    task->completion=completion;
+    task->completion=completion; task->world=completion?completion->world:NULL;
     process_status=lb_process_create_binary(entry,bytes,size,64,&task->process);
     if(process_status!=LB_PROCESS_READY) {
         status=process_status==LB_PROCESS_NO_MEMORY?LB_ENGINE_NO_MEMORY:LB_ENGINE_INVALID;
@@ -154,6 +161,40 @@ LbEngineStatus lb_task_create_call_locked(LbEngine *engine,const LbCodeEntry *en
 {
     assert(engine->control_borrow && call->world->engine==engine);
     return create_locked(engine,entry,input.data,input.size,call,out);
+}
+/* Internal serialized spawn publication, not a host interpreter or a native
+ * import admission. The real spawn effect must supply its parent/world and
+ * prepare monitors/signals before making this runnable boundary available. */
+LbProcessStatus lb_task_spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm fun,Eterm *out)
+{
+    if(!out) return LB_PROCESS_INVALID; *out=THE_NON_VALUE;
+    if(!world || !parent || world->phase!=LB_WORLD_RUNNING ||
+       parent->entry_module->space!=world->space || !world->engine->worker_started) return LB_PROCESS_REFUSED;
+    LbEngine *engine=world->engine; void *memory;
+    if(lb_alloc_domain_allocate(engine->domain,sizeof(LbTask),&memory)!=LB_ALLOC_OK) return LB_PROCESS_NO_MEMORY;
+    LbTask *task=memory; memset(task,0,sizeof(*task));
+    task->engine=engine; task->world=world; task->background=1; task->status=LB_TASK_PENDING;
+    LbProcessStatus status=lb_process_create_fun(parent,fun,64,&task->process);
+    if(status!=LB_PROCESS_READY) { lb_release(engine->domain,task); return status; }
+    *out=task->process->identity.id;
+    task->next=engine->tasks; engine->tasks=task;
+    checked(pthread_cond_signal(&engine->wake)); return LB_PROCESS_READY;
+}
+LbProcessStatus lb_task_spawn_result_locked(LbWorld *world,LbTask *source,Eterm *out)
+{
+    if(!out) return LB_PROCESS_INVALID; *out=THE_NON_VALUE;
+    if(!source || source->status!=LB_TASK_DONE || !source->process ||
+       !world || source->engine!=world->engine) return LB_PROCESS_REFUSED;
+    return lb_task_spawn_fun_locked(world,source->process,lb_process_result(source->process),out);
+}
+void lb_task_cancel_world_children_locked(LbWorld *world)
+{
+    LbTask *task=world->engine->tasks,*next;
+    while(task) {
+        next=task->next;
+        if(task->background && task->world==world) lb_task_cancel_locked(task);
+        task=next;
+    }
 }
 LbTaskStatus lb_task_status(LbTask *task)
 {

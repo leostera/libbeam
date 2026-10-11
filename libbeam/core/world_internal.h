@@ -32,6 +32,11 @@ void lb_call_complete(LbCall *,LbProcess *,LbTaskStatus);
 void lb_call_discard_completed(LbCall *);
 int lb_world_retire_step(LbEngine *);
 LbEngineStatus lb_task_create_call_locked(LbEngine *,const LbCodeEntry *,LbBytesView,LbCall *,LbTask **);
+LbProcessStatus lb_task_spawn_fun_locked(LbWorld *,LbProcess *,Eterm,Eterm *);
+/* Internal component seam: use a worker-produced retained closure, without
+ * exposing the source process or interpreting on the host control thread. */
+LbProcessStatus lb_task_spawn_result_locked(LbWorld *,LbTask *,Eterm *);
+void lb_task_cancel_world_children_locked(LbWorld *);
 void lb_task_cancel_locked(LbTask *);
 void lb_task_release_locked(LbTask *);
 #endif
