@@ -244,6 +244,14 @@ def main():
             if 'CORE_BINARY_BEGIN_OK' not in binary_execution:
                 raise RuntimeError('Missing fresh binary construction ownership/execution evidence')
             summary['fresh_binary_construction_dependencies_passed'] = True
+            if 'CORE_BINARY_SHARED_EDGE_OK' not in binary_execution:
+                raise RuntimeError('Missing shared-edge binary segment ownership/execution evidence')
+            alias_reference = run('bit-alias-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-eval', 'bit_writer_reference:aliases(),halt().'])
+            if run('bit-alias-vectors', [out / 'build/core_binary_test', '--alias-reference', binary_fixture]) != alias_reference or len(alias_reference.splitlines()) != 514:
+                raise RuntimeError('Shared-edge binary segments differ from stock-OTP vectors')
+            summary['shared_edge_binary_dependencies_passed'] = True
+            summary['bit_alias_reference_vectors'] = 514
             if 'CORE_PRIVATE_APPEND_OK' not in binary_execution:
                 raise RuntimeError('Missing checked private-append ownership/execution evidence')
             summary['private_append_dependencies_passed'] = True
@@ -409,6 +417,8 @@ def main():
                 *[f'libbeam/core/{s}.c' for s in execution_sources_c], 'libbeam/tests/core_binary_test.c',
                 '-pthread', '-lz', '-lm', '-o', out / 'binary-ubsan'])
             run('binary-ubsan', [out / 'binary-ubsan', binary_fixture, fixture, peer_fixture])
+            if run('bit-alias-ubsan-vectors', [out / 'binary-ubsan', '--alias-reference', binary_fixture]) != alias_reference:
+                raise RuntimeError('UBSan shared-edge segments differ from stock-OTP vectors')
             sanitizer_flags = '-Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all'
             run('engine-ubsan-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'engine-ubsan',
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
@@ -448,6 +458,8 @@ def main():
             run('release-execution', [out / 'release/core_code_test', fixture, peer_fixture])
             run('release-code-growth', [out / 'release/core_code_test', '--many', many_fixture])
             run('release-binary', [out / 'release/core_binary_test', binary_fixture, fixture, peer_fixture])
+            if run('bit-alias-release-vectors', [out / 'release/core_binary_test', '--alias-reference', binary_fixture]) != alias_reference:
+                raise RuntimeError('Release shared-edge segments differ from stock-OTP vectors')
             run('flatmap-release', [out / 'release/core_flatmap_test', binary_fixture])
             if run('binary-error-release-vectors', [out / 'release/core_flatmap_test', '--reference', binary_fixture]) != error_reference:
                 raise RuntimeError('Release binary error payloads differ from stock-OTP vectors')

@@ -65,14 +65,52 @@ static void refused(void)
     CHECK(!lb_bits_copy(other,sizeof(other),256,data,sizeof(data),0,1));
     CHECK(!lb_bits_copy(other,sizeof(other),0,data,sizeof(data),256,1));
     CHECK(!lb_bits_copy(other,sizeof(other),257,data,sizeof(data),0,0));
-    CHECK(!lb_bits_copy(data,sizeof(data),0,data,sizeof(data),0,8));
-    CHECK(!lb_bits_copy(data,sizeof(data),0,data,sizeof(data),1,1));
+    CHECK(lb_bits_copy(data,sizeof(data),0,data,sizeof(data),0,8));
+    CHECK(!lb_bits_copy(data,sizeof(data),0,data,sizeof(data),1,2));
     CHECK(!lb_bits_copy(data,sizeof(data),0,data,sizeof(data),8,9));
     CHECK(!lb_bits_copy(data,sizeof(data),8,data,sizeof(data),0,9));
     CHECK(!memcmp(data,saved,sizeof(data)) && !memcmp(other,other_saved,sizeof(other)));
     /* Disjoint byte intervals in the same allocation are permitted. */
     CHECK(lb_bits_copy(data,sizeof(data),0,data,sizeof(data),8,8)); CHECK(data[1]==saved[0]);
     CHECK(lb_bits_copy(data,sizeof(data),256,data,sizeof(data),256,0));
+}
+static void shared_case(size_t source,size_t destination,size_t bits)
+{
+    unsigned char data[80],saved[80],expected[80];
+    size_t sb=(destination&1)?source/8:0,db=(source&1)?destination/8:0;
+    int allowed=!bits || source==destination || source+bits<=destination || destination+bits<=source;
+    fill(data,sizeof(data),(unsigned)(source+destination+bits));
+    memcpy(saved,data,sizeof(data)); memcpy(expected,data,sizeof(data));
+    if(allowed) oracle(saved,source,expected,destination,bits);
+    CHECK(lb_bits_copy(data+sb,sizeof(data)-sb,source-sb*8,
+                       data+db,sizeof(data)-db,destination-db*8,bits)==allowed);
+    CHECK(!memcmp(data,expected,sizeof(data)));
+}
+static void shared_storage(void)
+{
+    size_t source,destination,bits,gap;
+    /* Exact identity and true-overlap refusal, including differently based
+     * views of the same allocation. Expected copies read a saved snapshot. */
+    for(source=0;source<32;++source) for(destination=0;destination<32;++destination)
+        for(bits=0;bits<=257;++bits) shared_case(source,destination,bits);
+    /* Both address orders, adjacency and small gaps. Non-byte-sized intervals
+     * can touch one physical byte without sharing any source/destination bit. */
+    for(source=0;source<16;++source) for(gap=0;gap<16;++gap) for(bits=0;bits<=257;++bits) {
+        destination=source+bits+gap;
+        shared_case(source,destination,bits); shared_case(destination,source,bits);
+    }
+    {
+        size_t bits=65536*8-3,offset=5,bytes=(offset+2*bits+7)/8;
+        unsigned char *data=malloc(bytes),*saved=malloc(bytes),*expected=malloc(bytes);
+        CHECK(data && saved && expected); fill(data,bytes,13);
+        memcpy(saved,data,bytes); memcpy(expected,data,bytes);
+        oracle(saved,offset,expected,offset+bits,bits);
+        CHECK(lb_bits_copy(data,bytes,offset,data,bytes,offset+bits,bits) && !memcmp(data,expected,bytes));
+        memcpy(data,saved,bytes); memcpy(expected,saved,bytes);
+        oracle(saved,offset+bits,expected,offset,bits);
+        CHECK(lb_bits_copy(data,bytes,offset+bits,data,bytes,offset,bits) && !memcmp(data,expected,bytes));
+        free(expected); free(saved); free(data);
+    }
 }
 static void guard_pages(void)
 {
@@ -96,7 +134,7 @@ static void guard_pages(void)
 }
 int main(void)
 {
-    offsets(); refused(); guard_pages();
-    puts("CORE_BIT_COPY_OK offsets=16 lengths=258 patterns=3 oracle=true outside_bits_preserved=true source_immutable=true invalid_unchanged=true overlap_refused=true exact_payload_guard_pages=true");
+    offsets(); refused(); shared_storage(); guard_pages();
+    puts("CORE_BIT_COPY_OK offsets=16 lengths=258 patterns=3 oracle=true outside_bits_preserved=true source_bits_preserved=true invalid_unchanged=true true_overlap_refused=true identity_noop=true shared_edge_byte=true different_base_views=true exact_payload_guard_pages=true");
     return 0;
 }

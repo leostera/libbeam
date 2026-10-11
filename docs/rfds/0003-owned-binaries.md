@@ -534,3 +534,46 @@ hashes) and `/tmp/libbeam-begin-tooling-final/summary.json` (29 tooling tests).
 Earlier passing integration is retained at
 `/tmp/libbeam-begin-integrated-first/summary.json`. The unchanged stateful example
 still reports unsupported BEAM profile/import; neither acceptance source changes.
+
+## Follow-on: shared-byte boundaries in binary segments
+
+Baseline: `53a56c88`. A valid unaligned append can read an old prefix and write
+new bits in the same physical byte without overlapping the prefix's logical bit
+range. Rejecting every touched-byte overlap is too conservative for that native
+case. `lb_bits_copy` now compares normalized byte-address/bit-offset endpoints,
+after checking spans and address overflow, and accepts disjoint bit intervals.
+No pointer is multiplied by eight. The native forward kernel is unchanged: its
+edge masks preserve the source bits, and its full-byte memcpy interiors remain
+byte-disjoint. An explicit identity no-op avoids invoking memcpy on itself.
+
+All other overlapping **bit** intervals remain refused, unchanged, in either
+address order. This is not a general memmove or reverse-copy implementation.
+Destination-outside bits and source bits survive; other bits in a shared source
+byte can legitimately be destination bits. Binary/string writers inherit that
+rule and advance their cursor on an exact self-copy. Input metadata, numeric
+storage and writer-control storage remain protected by their existing contract;
+this does not grant permission to overwrite an immutable term or to publish an
+unfinished constructor span.
+
+An independent bit-at-a-time oracle reads a saved source snapshot and checks
+both address orders, exact identity, genuine-overlap refusal, adjacent ranges,
+small gaps, differently based views, and long shared-edge copies. Existing exact
+payload guard-page checks remain. Binary/string component checks cover identity
+and unchanged true-overlap refusals. C-owned normal/private append consumes old
+volatile prefixes for all lengths 1..257, including backing growth. Those values
+execute actual identity BEAM with moving GC, then remain readable from a copied
+result after process destruction. A stock-OTP-only oracle adds 514 matching
+compound-result vectors; it proves values, not which optimization OTP selected.
+
+This supersedes only the earlier touched-byte refusal policy. Opcode admission,
+aggregate sizing/fixups, work/virtual-heap accounting, private-source consumption
+proof and complete exception integration remain outstanding. No M3/M4 completion
+or successful stateful acceptance is inferred from these helper witnesses.
+
+Final evidence: `/tmp/libbeam-bit-alias-commit-reviewed/summary.json` (19 passing
+Debug/Release CTests, 514 additional stock-OTP vectors, actual selected-profile
+execution, UBSan and stable source hashes) and
+`/tmp/libbeam-bit-alias-tooling-final/summary.json` (29 tooling tests). Earlier
+passing integration is retained at
+`/tmp/libbeam-bit-alias-integrated-first/summary.json`. Both acceptance sources
+remain unchanged and the stateful example is still refused.

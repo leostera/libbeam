@@ -76,6 +76,8 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   C-created values execute identity/comparison functions; compiler consumption
   proof and all guest construction instructions remain unadmitted.
 - `bit_copy.c`: native forward bit copying behind checked span/overlap bounds.
+  Disjoint bit intervals may share a boundary byte; exact self-copy is a no-op.
+  Other overlapping bit ranges remain refused before mutation.
   Copied public results use it; arbitrary offsets retain outside bits and need
   no terminal padding. No bit-syntax instruction is admitted by this helper.
 - `bit_writer.c`, `bit_float.c`: native integer, UTF, binary/string and float

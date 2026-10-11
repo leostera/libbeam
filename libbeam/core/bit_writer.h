@@ -14,8 +14,9 @@ typedef enum { LB_BITS_BIG_ENDIAN, LB_BITS_LITTLE_ENDIAN } LbBitEndian;
 typedef enum { LB_BITS_OK, LB_BITS_BADARG, LB_BITS_NO_SPACE, LB_BITS_INVALID, LB_BITS_ENVIRONMENT } LbBitWriteStatus;
 typedef enum { LB_FLOAT_NONE, LB_FLOAT_TYPE, LB_FLOAT_NO_FLOAT, LB_FLOAT_SIZE } LbBitFloatError;
 typedef struct { LbBitWriteStatus status; LbBitFloatError error; } LbBitFloatResult;
-/* Native segment writers. Valid owned input terms; the output span must
- * not overlap their storage during nonempty writes. No allocation, collection
+/* Native segment writers. Valid owned input terms; output must not overwrite
+ * input-term metadata or numeric storage. Binary/string data windows follow
+ * the bit-range sharing rules below. No allocation, collection
  * or input-term retention; the caller's writer borrows the output span. No
  * instruction/BIF admission. Every refusal preserves the cursor and bytes;
  * successful writes preserve bits outside the segment, including its tail.
@@ -25,7 +26,9 @@ LbBitWriteStatus lb_bits_put_integer(LbBitWriter *,Eterm,size_t,LbBitEndian);
 LbBitWriteStatus lb_bits_put_utf8(LbBitWriter *,Eterm);
 LbBitWriteStatus lb_bits_put_utf16(LbBitWriter *,Eterm,LbBitEndian);
 LbBitWriteStatus lb_bits_put_utf32(LbBitWriter *,Eterm,LbBitEndian);
-/* Byte strings and binary windows must not overlap touched destination bytes.
+/* Byte strings and binary windows may share a boundary byte with disjoint
+ * destination bits, or be the identical bit range (no-op plus cursor advance).
+ * All other overlapping bit ranges are refused before mutation.
  * binary_all accepts native language units 1..256, requiring exact divisibility.
  * No process reductions are charged here: future dispatch owns that accounting. */
 LbBitWriteStatus lb_bits_put_string(LbBitWriter *,const unsigned char *,size_t);

@@ -94,23 +94,35 @@ static int contains_bits(size_t bytes,size_t offset,size_t bits)
     return bytes<=SIZE_MAX/8 && offset<=bytes*8 && bits<=bytes*8-offset;
 }
 
+/* Compare normalized bit positions without multiplying a pointer by eight. */
+static int at_or_before(uintptr_t left,size_t left_bit,uintptr_t right,size_t right_bit)
+{
+    return left<right || (left==right && left_bit<=right_bit);
+}
+
 int lb_bits_copy(const unsigned char *source,size_t source_bytes,size_t source_bit,
                  unsigned char *destination,size_t destination_bytes,size_t destination_bit,
                  size_t bits)
 {
-    uintptr_t src,dst; size_t source_count,destination_count;
+    uintptr_t src,dst; size_t source_count,destination_count,source_end,destination_end;
     if((!source && source_bytes) || (!destination && destination_bytes) ||
        !contains_bits(source_bytes,source_bit,bits) ||
        !contains_bits(destination_bytes,destination_bit,bits)) return 0;
     if(!bits) return 1;
-    /* Bounds above prove these sums fit. Include partial edge bytes: even
-     * disjoint bit intervals sharing a byte are outside this copy contract. */
+    /* Bounds above prove these sums fit. Check address arithmetic before
+     * comparing normalized bit intervals, including their partial edge bytes. */
     src=(uintptr_t)(source+source_bit/8);
     dst=(uintptr_t)(destination+destination_bit/8);
     source_count=((source_bit&7)+bits+7)/8;
     destination_count=((destination_bit&7)+bits+7)/8;
-    if(src>UINTPTR_MAX-source_count || dst>UINTPTR_MAX-destination_count ||
-       (src<dst+destination_count && dst<src+source_count)) return 0;
+    if(src>UINTPTR_MAX-source_count || dst>UINTPTR_MAX-destination_count) return 0;
+    if(src==dst && (source_bit&7)==(destination_bit&7)) return 1;
+    source_end=(source_bit&7)+bits; destination_end=(destination_bit&7)+bits;
+    if(!at_or_before(src+source_end/8,source_end&7,dst,destination_bit&7) &&
+       !at_or_before(dst+destination_end/8,destination_end&7,src,source_bit&7)) return 0;
+    /* Disjoint bit intervals can share one boundary byte. Native edge masks
+     * preserve the source bits there; full-byte memcpy interiors never overlap.
+     * Exact identity returned above, avoiding C's overlapping-memcpy UB. */
     copy_forward(source,source_bit,destination,destination_bit,bits);
     return 1;
 }

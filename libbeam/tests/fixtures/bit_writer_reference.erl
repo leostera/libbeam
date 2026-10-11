@@ -3,7 +3,7 @@
 %% Stock-OTP oracle only. This module is NOT loaded into libbeam; its binary
 %% construction instructions deliberately exceed the admitted execution profile.
 -module(bit_writer_reference).
--export([run/0, segments/0]).
+-export([run/0, segments/0, aliases/0]).
 
 run() ->
     Values = [0, -1, (1 bsl 59)-1, -(1 bsl 59), 1 bsl 64, -((1 bsl 64)+1)],
@@ -23,6 +23,21 @@ segments() ->
         [(1 bsl 58)+(1 bsl 34)+1, (1 bsl 60)+(1 bsl 36)+1, 1 bsl 1024, [], -1],
     [float_field(V, W, O, E) || V <- Values, W <- [0,8,16,32,64,128],
                               O <- [0,1,7,8,15], E <- [big,little]],
+    ok.
+
+aliases() ->
+    Data = << <<(16#a5 + I*73):8>> || I <- lists:seq(0,32) >>,
+    [begin
+         <<Prefix:N/bitstring, _/bitstring>> = Data,
+         Bits = case Mode of
+             0 -> <<Prefix/bitstring, Prefix/bitstring>>;
+             1 -> <<Prefix/bitstring, 0:1, Prefix/bitstring>>
+         end,
+         Padding = (8 - bit_size(Bits) rem 8) rem 8,
+         Binary = <<Bits/bitstring, 0:Padding>>,
+         io:format("~B:~B:", [Mode,N]),
+         io:put_chars([[io_lib:format("~2.16.0b", [B]) || <<B>> <= Binary], $\n])
+     end || Mode <- [0,1], N <- lists:seq(1,257)],
     ok.
 
 from_raw(Raw) -> <<F:64/float>> = <<Raw:64>>, F.

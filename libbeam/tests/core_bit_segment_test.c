@@ -89,12 +89,23 @@ static void binaries(void)
       CHECK(lb_bits_put_binary_all(&w,small,8)==LB_BITS_BADARG);
       CHECK(lb_bits_put_string(&w,NULL,1)==LB_BITS_INVALID);
       CHECK(lb_bits_put_string(&w,source,SIZE_MAX)==LB_BITS_INVALID);
+      CHECK(!memcmp(actual,expected,sizeof(actual)) && !memcmp(&w,&old,sizeof(w)));
+      w.offset=1; old=w;
       CHECK(lb_bits_put_string(&w,actual,1)==LB_BITS_INVALID);
       CHECK(!memcmp(actual,expected,sizeof(actual)) && !memcmp(&w,&old,sizeof(w)));
+      w.offset=0;
+      CHECK(lb_bits_put_string(&w,actual,1)==LB_BITS_OK && w.offset==8 && !memcmp(actual,expected,sizeof(actual)));
       CHECK(lb_bits_put_string(&w,NULL,0)==LB_BITS_OK);
       w.offset=w.capacity*8; old=w;
       CHECK(lb_bits_put_string(&w,source,1)==LB_BITS_NO_SPACE);
       CHECK(lb_bits_put_binary(&w,small,1)==LB_BITS_NO_SPACE && !memcmp(&w,&old,sizeof(w)));
+    }
+    { LbBitstringView view; LbBitWriter w,old; unsigned char before[5];
+      CHECK(lb_bitstring_view(small,&view)); memcpy(before,view.data,sizeof(before));
+      CHECK(lb_bit_writer_init(&w,(unsigned char *)view.data,sizeof(before))==LB_BITS_OK);
+      CHECK(lb_bits_put_binary_all(&w,small,1)==LB_BITS_OK && w.offset==37 && !memcmp(view.data,before,sizeof(before)));
+      w.offset=1; old=w;
+      CHECK(lb_bits_put_binary(&w,small,36)==LB_BITS_INVALID && !memcmp(&w,&old,sizeof(w)) && !memcmp(view.data,before,sizeof(before)));
     }
     { LbBitstringView view; CHECK(lb_bitstring_view(term,&view));
       CHECK(!memcmp(view.data,source,sizeof(source)) && !memcmp(source,saved,sizeof(source))); }

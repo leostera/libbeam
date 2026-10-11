@@ -464,6 +464,46 @@ static void private_lifetime(Memory *m,LbCodeEntry *identity)
     CHECK(refcount(copy)==1 && m->live==live+1 && lb_bitstring_view(copy,&view) && view.data[0]==0xb8);
     lb_offheap_clear(&shared); CHECK(m->live==live && m->bytes==bytes);
 }
+static void shared_prefix_segments(LbCodeEntry *identity,int vectors)
+{
+    unsigned char pattern[33]; size_t n,i; unsigned private;
+    for(i=0;i<sizeof(pattern);++i) pattern[i]=(unsigned char)(0xa5+i*73);
+    for(private=0;private<2;++private) for(n=1;n<=257;++n) {
+        Eterm nil=NIL,storage[LB_REFC_BITS_WORDS],*top=storage,copy; LbOffHeap shared={0};
+        LbProcess *p; LbBitWriter writer; LbBitstringView view;
+        CHECK(lb_process_create(identity,&nil,1,5,&p)==LB_PROCESS_READY);
+        CHECK(lb_writable_init(p,64,&p->reg[0])==LB_WRITABLE_OK);
+        CHECK(lb_writable_append(p,p->reg[0],n,0,1,&writer,&p->reg[0])==LB_WRITABLE_OK);
+        CHECK(lb_bits_put_string(&writer,pattern,n/8)==LB_BITS_OK);
+        if(n&7) CHECK(lb_bits_put_integer(&writer,make_small(pattern[n/8]>>(8-(n&7))),n&7,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+        CHECK(writer.offset==n); p->reg[1]=p->reg[0];
+        CHECK(lb_writable_append(p,p->reg[0],private?1:n,0,1,&writer,&p->reg[0])==LB_WRITABLE_OK);
+        if(private) {
+            CHECK(lb_bits_put_integer(&writer,make_small(0),1,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+            CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},n,&writer,&p->reg[0])==LB_WRITABLE_OK);
+        }
+        /* The old prefix follows the BinRef even after growth. Its final byte
+         * can also contain destination bits, but its logical value is stable. */
+        CHECK(lb_bits_put_binary_all(&writer,p->reg[1],1)==LB_BITS_OK && writer.offset==2*n+private);
+        CHECK(lb_bitstring_view(p->reg[1],&view) && view.bit_size==n);
+        for(i=0;i<n;++i) CHECK(bit_at(view.data,view.bit_offset+i)==bit_at(pattern,i));
+        CHECK(lb_bitstring_pin(p->reg[0])); copy=lb_copy_flat(p->reg[0],&top,&shared); CHECK(!is_non_value(copy));
+        run(p,1); lb_process_destroy(p);
+        CHECK(lb_bitstring_view(copy,&view) && view.bit_size==2*n+private);
+        for(i=0;i<n;++i) {
+            CHECK(bit_at(view.data,view.bit_offset+i)==bit_at(pattern,i));
+            CHECK(bit_at(view.data,view.bit_offset+n+private+i)==bit_at(pattern,i));
+        }
+        if(private) CHECK(!bit_at(view.data,view.bit_offset+n));
+        if(vectors) {
+            CHECK(!view.bit_offset); printf("%u:%zu:",private,n);
+            for(i=0;i<(view.bit_size+7)/8;++i) printf("%02x",view.data[i]);
+            puts("");
+        }
+        lb_offheap_clear(&shared);
+    }
+    if(!vectors) puts("CORE_BINARY_SHARED_EDGE_OK normal_append=true private_append=true volatile_prefix=true lengths=257 source_bits_preserved=true backing_growth=true identity_execution=true moving_gc=true copied_lifetime=true exact_retirement=true guest_construction=false");
+}
 static void fresh_binary_failures(Memory *m,LbCodeEntry *identity)
 {
     const size_t sizes[]={0,1,512,513,520,65536*8}; size_t i,fail,prefixes=0;
@@ -595,6 +635,7 @@ static void fresh_binary_limits(Memory *m,LbCodeEntry *identity)
 static void writable_binaries(Memory *m,LbCodeSpace *space,LbCodeModule *module)
 {
     LbCodeEntry *identity=entry(space,module,"identity",1); size_t live=m->live,bytes=m->bytes;
+    shared_prefix_segments(identity,0); CHECK(m->live==live && m->bytes==bytes);
     fresh_binary_failures(m,identity); CHECK(m->live==live && m->bytes==bytes);
     fresh_binary_sizes(m,identity); CHECK(m->live==live && m->bytes==bytes);
     fresh_binary_roots(m,identity); CHECK(m->live==live && m->bytes==bytes);
@@ -826,8 +867,19 @@ static void source_retirement(const char *binary_path,const char *first_path,con
     lb_engine_release(engine); CHECK(!m.live && !m.bytes);
     puts("CORE_BINARY_RETIREMENT_OK copied_binary_survives_source_module=true replacement=true resource_balance=true");
 }
+static void alias_reference(const char *path)
+{
+    Memory m={0}; LbSystemAllocator callbacks={&m,allocate,release}; LbEngine *engine; LbCodeSpace *space;
+    LbCodeModule *module; LbCodeEntry *identity;
+    CHECK(lb_engine_create(&callbacks,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
+    module=load(space,path); identity=entry(space,module,"identity",1);
+    shared_prefix_segments(identity,1); lb_code_entry_release(identity);
+    CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
+    CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!m.live && !m.bytes);
+}
 int main(int argc,char **argv)
 {
+    if(argc==3 && !strcmp(argv[1],"--alias-reference")) { alias_reference(argv[2]); return 0; }
     component_test();
     if(argc==2 || argc==4) executable_test(argv[1]); else CHECK(argc==1);
     if(argc==4) source_retirement(argv[1],argv[2],argv[3]);
