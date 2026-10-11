@@ -60,7 +60,7 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
      * heap. No allocation/failure follows the first forwarding write. */
     for(i=0;i<live;++i) move_root(&p->reg[i],&top);
     for(i=live;i<MAX_REG;++i) p->reg[i]=NIL;
-    move_root(&p->fvalue,&top); move_root(&p->freason,&top);
+    move_root(&p->fvalue,&top); move_root(&p->exception_value,&top);
     move_root(&p->construction_root,&top);
     for(i=0;i<stack;++i) move_root(&stop[i],&top); /* CP words are primary headers */
     scan=heap;
@@ -99,7 +99,7 @@ int lb_process_has_other_reference(const LbProcess *p,Eterm value,const Eterm *e
     const Eterm *scan; size_t i;
     for(i=0;i<MAX_REG;++i) if(&p->reg[i]!=except && p->reg[i]==value) return 1;
     for(scan=p->stop;scan<p->hend;++scan) if(scan!=except && *scan==value) return 1;
-    if(p->fvalue==value || p->freason==value || p->construction_root==value) return 1;
+    if(p->fvalue==value || p->exception_value==value || p->construction_root==value) return 1;
     /* Scan stored terms, not arbitrary payload words: a float/bignum/binary
      * containing the pointer's bits is not an alias. Keep the object-family
      * list explicit so adding a new GC representation cannot hide its roots. */

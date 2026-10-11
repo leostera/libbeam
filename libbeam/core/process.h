@@ -23,6 +23,12 @@ LbProcessStatus lb_process_collect(LbProcess *,size_t needed_words);
 void lb_process_destroy(LbProcess *);
 /* Borrowed until next mutating/collecting call or destruction. */
 Eterm lb_process_result(const LbProcess *);
+/* Compatibility shorthand category atom, separate from the native expanded
+ * value. Extended info is a retained payload, NOT a captured stacktrace.
+ * All return THE_NON_VALUE unless the process has a terminal exception;
+ * info also requires EXF_HAS_EXT_INFO. No catch/unwind capability implied. */
 Eterm lb_process_exception(const LbProcess *);
+Eterm lb_process_exception_value(const LbProcess *);
+Eterm lb_process_exception_info(const LbProcess *);
 size_t lb_process_collections(const LbProcess *);
 #endif

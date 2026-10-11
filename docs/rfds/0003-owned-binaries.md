@@ -711,3 +711,54 @@ plus `/tmp/libbeam-binary-size-tooling-final/summary.json` (29 tooling tests).
 Earlier passing integration: `/tmp/libbeam-binary-size-integrated-first/summary.json`.
 `binary_size_reference_all_match=false` is deliberate recorded evidence, not an
 all-reference pass. Stateful acceptance still fails and both sources are unchanged.
+
+## Follow-on: encoded reasons and owned terminal error values
+
+Baseline: `8c86d346`. `exception.c/.h` now preserve native `error.h` class,
+index and action-flag encodings, immutable descriptor/class tables and
+`expand_error_value`. `freason` is a scalar `Uint`, no longer an Eterm or a GC
+root. Existing instruction and BIF failures set these codes directly. GC and
+private-alias checks instead visit the process-owned `exception_value` root;
+this supersedes the earlier experimental term-valued reason field.
+
+Error expansion preserves primary passthrough, all ten `{Atom,Value}` shorthand
+cases and ordinary atom descriptors. A collecting tuple reservation explicitly
+roots its input, preserves pending credit and publishes last; failure leaves the
+output unchanged. PANIC/internal-error cases refuse instead of exiting the host.
+The executor expands actual admitted failures before exposing its terminal
+exception status. OOM here is an infrastructure failure, not a guest exception.
+The category getter remains compatible; a separate getter exposes the expanded
+value. These are error values, not process-exit signals or captured stacktraces.
+
+`lb_binary_error_prepare` accepts bare native BADARG/SYSTEM_LIMIT, constructs the
+existing rooted payload, then publishes `fvalue` and `freason|EXF_HAS_EXT_INFO`
+without further failure. Refusal preserves both pending fields, including when
+replacing an existing reason/value. It neither raises nor changes execution
+status. The pure sizing helper still classifies reasons as atoms; its future
+caller must select the corresponding encoded reason at this explicit boundary.
+
+The terminal boundary retains original codes/flags, including pending SAVETRACE;
+it does **not** pretend that a trace was saved or that `handle_error` ran.
+Nonextended pending values clear after expansion. Extended payloads remain owned
+separately and are available only through the terminal-info getter. Unsupported
+classes/action flags cannot enter a partial error handler. Stacktrace capture,
+symbolization, arglist extraction, catch/unwind, throw promotion, exit signals,
+logging and additional error BIFs remain unadmitted.
+
+Tests cover all 23 shorthand indices and class/flag encodings, native-source
+Debug/Release representation/table checks, all expansion branches, scalar
+exit/throw codes across real GC (not guest effects), borrowed binary roots and
+OOM/retry. Real badmatch/case/function-clause/decimal-BIF failures produce native
+values that survive exception-root-only GC, exact comparison, flat copying and
+source destruction. Terminal expansion OOM has same-space fresh-execution retry.
+An unrelated later BIF failure cannot expose stale prepared binary error info.
+Four expanded-value vectors match stock OTP using a separate, never-admitted
+driver. Both unchanged acceptance sources are retained; M3 remains incomplete.
+
+Final evidence: `/tmp/libbeam-exception-commit-reviewed/summary.json` (23 passing
+Debug/Release CTests, actual exception execution, four stock value vectors,
+representation checks, UBSan and stable hashes), plus
+`/tmp/libbeam-exception-tooling-final/summary.json` (29 tooling tests).
+Earlier passing integration remains at
+`/tmp/libbeam-exception-integrated-first/summary.json`. The previously recorded
+UTF8 stock/interpreter sizing discrepancy remains explicit and unchanged.

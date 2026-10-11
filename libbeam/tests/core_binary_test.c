@@ -351,7 +351,7 @@ static void private_aliases(Memory *m,LbCodeEntry *identity)
         case 0:p->reg[1]=source; break;
         case 1:*--p->stop=source; break;
         case 2:p->fvalue=source; break;
-        case 3:p->freason=source; break;
+        case 3:p->exception_value=source; break;
         case 4:p->construction_root=source; break;
         case 5:case 7:p->reg[1]=TUPLE2(p->htop,source,NIL); p->htop+=3; break;
         case 6:p->reg[1]=CONS(p->htop,source,NIL); p->htop+=2; break;
@@ -361,7 +361,7 @@ static void private_aliases(Memory *m,LbCodeEntry *identity)
         CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},1,&writer,&result)==LB_WRITABLE_NOT_UNIQUE);
         CHECK(m->calls==calls && result==make_small(99) && p->reg[0]==source && !writer.data);
         CHECK(((LbSubBits *)boxed_val(source))->end==0 && refcount(source)==1);
-        p->reg[1]=p->fvalue=p->freason=p->construction_root=NIL; p->stop+=stack;
+        p->reg[1]=p->fvalue=p->exception_value=p->construction_root=NIL; p->stop+=stack;
         if(kind>=5) {
             CHECK(lb_writable_private_append(p,(LbBinarySource){LB_BINARY_SOURCE_X,0},1,&writer,&result)==LB_WRITABLE_NOT_UNIQUE);
             CHECK(lb_process_collect(p,0)==LB_PROCESS_READY);

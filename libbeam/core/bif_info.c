@@ -56,7 +56,7 @@ Eterm lb_bif_module_info_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     Eterm result=NIL,*hp;
     LbBinRef *checkpoint;
     (void)pc;
-    if(!m) { p->freason=am_badarg; return THE_NON_VALUE; }
+    if(!m) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
     for(i=0;i<5;++i) {
         if(!info_size(p,m,keys[i],&n) || !lb_size_add(size,n,&size)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }
     }
@@ -79,7 +79,7 @@ Eterm lb_bif_module_info_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
     Eterm what=args[1],result,*hp;
     size_t size;
     (void)pc;
-    if(!m || !info_size(p,m,what,&size)) { p->freason=am_badarg; return THE_NON_VALUE; }
+    if(!m || !info_size(p,m,what,&size)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
     if(!lb_heap_reserve(p,size,2)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }
     hp=p->htop; result=build_info(p,m,what,&hp);
     if(is_non_value(result)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }

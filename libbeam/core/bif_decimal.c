@@ -32,10 +32,10 @@ Eterm lb_bif_integer_to_binary_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
             unsigned char output[LB_DECIMAL_SMALL_BYTES];
             return publish(p,lb_decimal_small(signed_val(args[0]),output));
         }
-        if(!lb_is_big(args[0])) { p->freason=am_badarg; return THE_NON_VALUE; }
+        if(!lb_is_big(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
         status=lb_decimal_create(domain,args[0],&p->decimal);
         if(status==LB_ALLOC_NO_MEMORY) return no_memory(p);
-        if(status!=LB_ALLOC_OK) { p->freason=am_system_limit; return THE_NON_VALUE; }
+        if(status!=LB_ALLOC_OK) { p->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE; }
     }
     if(!lb_decimal_step(p->decimal,DECIMAL_SLICE_WORDS,&work)) {
         p->last_native_cost=work/16+1;

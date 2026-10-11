@@ -23,4 +23,10 @@ typedef enum {
  * success preserves heap credit and may move X/Y/exception roots. */
 LbAllocStatus lb_binary_error_payload(LbProcess *,LbBinarySegmentKind,Uint segment,
                                      Eterm info,Eterm value,Eterm *out);
+/* Prepare native process error fields for construction failure. Only bare
+ * BADARG/SYSTEM_LIMIT encoded reasons are accepted (see exception.h). Publish
+ * payload then reason|EXF_HAS_EXT_INFO after all fallible work; failure preserves
+ * both pending fields. Does not raise, build a trace or enter a catch handler. */
+LbAllocStatus lb_binary_error_prepare(LbProcess *,LbBinarySegmentKind,Uint segment,
+                                     Uint reason,Eterm info,Eterm value);
 #endif

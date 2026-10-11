@@ -180,7 +180,7 @@ static void error_root(LbCodeEntry *identity,Memory *m)
     CHECK(lb_binary_error_payload(p,f.kind,f.segment,f.info,f.value,&payload)==LB_ALLOC_NO_MEMORY && payload==make_small(17));
     CHECK(m->live==live && p->heap==heap && p->collections==collections && p->construction_root==NIL);
     m->fail=0; CHECK(lb_binary_error_payload(p,f.kind,f.segment,f.info,f.value,&payload)==LB_ALLOC_OK && p->collections>collections);
-    CHECK(p->heap_reserved==7 && p->freason==NIL && p->fvalue==NIL); p->reg[0]=payload;
+    CHECK(p->heap_reserved==7 && p->freason==LB_EXC_NULL && p->fvalue==NIL); p->reg[0]=payload;
     run_identity(p); Eterm cause=boxed_val(p->reg[0])[3],value=boxed_val(cause)[4];
     CHECK(lb_is_big(value) && boxed_val(value)[1]==0 && boxed_val(value)[2]==1 && boxed_val(cause)[1]==make_small(MAX_SMALL));
     lb_process_destroy(p);

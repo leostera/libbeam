@@ -135,7 +135,7 @@ static void payloads(Memory *m,LbCodeEntry *identity)
         m->fail=m->calls+1;
         CHECK(lb_binary_error_payload(p,(LbBinarySegmentKind)kind,MAX_SMALL,am_type,make_small(42),&result)==LB_ALLOC_NO_MEMORY);
         CHECK(result==make_small(99) && p->heap==heap && p->htop==top && p->construction_root==NIL);
-        CHECK(p->fvalue==NIL && p->freason==NIL && m->live==before && m->bytes==held); m->fail=0;
+        CHECK(p->fvalue==NIL && p->freason==LB_EXC_NULL && m->live==before && m->bytes==held); m->fail=0;
         CHECK(lb_binary_error_payload(p,(LbBinarySegmentKind)kind,MAX_SMALL,am_type,make_small(42),&p->reg[0])==LB_ALLOC_OK);
         run(p); result=cause(p->reg[0]);
         CHECK(tuple_val(result)[1]==make_small(MAX_SMALL) && tuple_val(result)[2]==operations[kind] &&

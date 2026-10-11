@@ -39,3 +39,13 @@ LbAllocStatus lb_binary_error_payload(LbProcess *p,LbBinarySegmentKind kind,Uint
     result=lb_map3(hp,am_cause,cause,am_function,am_format_bs_fail,am_module,am_erl_erts_errors);
     p->htop=hp+LB_MAP3_WORDS; *out=result; return LB_ALLOC_OK;
 }
+LbAllocStatus lb_binary_error_prepare(LbProcess *p,LbBinarySegmentKind kind,Uint segment,
+                                     Uint reason,Eterm info,Eterm value)
+{
+    Eterm payload; LbAllocStatus status;
+    if(reason!=LB_EXC_BADARG && reason!=LB_EXC_SYSTEM_LIMIT) return LB_ALLOC_INVALID;
+    status=lb_binary_error_payload(p,kind,segment,info,value,&payload);
+    if(status!=LB_ALLOC_OK) return status;
+    p->fvalue=payload; p->freason=reason|LB_EXF_HAS_EXT_INFO;
+    return LB_ALLOC_OK;
+}

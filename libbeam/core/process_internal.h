@@ -5,6 +5,7 @@
 #ifndef LIBBEAM_CORE_PROCESS_INTERNAL_H
 #define LIBBEAM_CORE_PROCESS_INTERNAL_H
 #include "process.h"
+#include "exception.h"
 #include "code_internal.h"
 #include "decimal.h"
 struct LbProcess {
@@ -17,7 +18,8 @@ struct LbProcess {
     LbOffHeap off_heap, writable;
     Eterm construction_root; /* explicit temporary root during fallible append */
     LbDecimal *decimal; /* sole pending native continuation; independent scratch */
-    Eterm fvalue, freason;
+    Uint freason; /* Native encoded scalar, never a GC root. */
+    Eterm fvalue,exception_value; /* Pending payload and expanded terminal value. */
     Uint arity, last_gc_cost, last_native_cost;
     size_t collections, heap_reserved;
     LbProcessStatus status;

@@ -71,6 +71,10 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   arrays. `beam_emit.c` packs native words and fixes retained literal/string
   pointers, checking whole string spans across code growth. These are preparation
   dependencies only: executable proof and the whole dispatch case remain gated.
+- `exception.c`: native scalar reason codes and error-value expansion. The
+  executor owns expanded terminal values as real GC roots; reason flags are
+  not terms. Binary failure preparation atomically sets extended payload/code.
+  These dependencies do not implement stacktraces, catch/unwind or new effects.
 - `binary_size.c`: read-only native flat64 aggregate sizing over emitted
   descriptors, with explicit register spans and typed guest/metadata/policy
   failures. Native UTF8/16 deferred validation remains distinct from UTF32.

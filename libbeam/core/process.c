@@ -33,7 +33,7 @@ LbProcessStatus lb_process_create(const LbCodeEntry *entry,const Eterm *args,siz
     p->entry_module=module; p->heap=p->htop=memory; p->hend=p->heap+words; p->stop=p->hend-1;
     *p->stop=(Eterm)lb_host_return;
     for(i=0;i<MAX_REG;++i) p->reg[i]=i<arity?args[i]:NIL;
-    p->fvalue=p->freason=p->construction_root=NIL; p->arity=arity; p->current=&entry->entry->info.mfa;
+    p->fvalue=p->exception_value=p->construction_root=NIL; p->freason=LB_EXC_NULL; p->arity=arity; p->current=&entry->entry->info.mfa;
     p->i=entry->entry->dispatch.addresses[0]; p->status=LB_PROCESS_READY;
     ++module->users; *out=p; return LB_PROCESS_READY;
 }
@@ -73,7 +73,9 @@ LbProcessStatus lb_process_collect(LbProcess *p,size_t need)
     return lb_process_collect_live(p,need,p->status==LB_PROCESS_DONE?1:MAX_REG)?p->status:LB_PROCESS_NO_MEMORY;
 }
 Eterm lb_process_result(const LbProcess *p) { return p && p->status==LB_PROCESS_DONE?p->reg[0]:THE_NON_VALUE; }
-Eterm lb_process_exception(const LbProcess *p) { return p && p->status==LB_PROCESS_EXCEPTION?p->freason:THE_NON_VALUE; }
+Eterm lb_process_exception(const LbProcess *p) { return p && p->status==LB_PROCESS_EXCEPTION?lb_exception_atom(p->freason):THE_NON_VALUE; }
+Eterm lb_process_exception_value(const LbProcess *p) { return p && p->status==LB_PROCESS_EXCEPTION?p->exception_value:THE_NON_VALUE; }
+Eterm lb_process_exception_info(const LbProcess *p) { return p && p->status==LB_PROCESS_EXCEPTION && (p->freason&LB_EXF_HAS_EXT_INFO)?p->fvalue:THE_NON_VALUE; }
 size_t lb_process_collections(const LbProcess *p) { return p?p->collections:0; }
 static int pc_valid(LbProcess *p,const BeamInstr *pc)
 {
@@ -150,8 +152,8 @@ static int32_t lb_packed_label(const BeamInstr *table,size_t index)
 #define SWAPIN do { HTOP=c_p->htop; E=c_p->stop; } while(0)
 #define Goto(op) do { next_op=(op); goto dispatch; } while(0)
 #define GotoPF(op) Goto(op)
-#define BADMATCH am_badmatch
-#define EXC_CASE_CLAUSE am_case_clause
+#define BADMATCH LB_EXC_BADMATCH
+#define EXC_CASE_CLAUSE LB_EXC_CASE_CLAUSE
 LbProcessStatus lb_process_run(LbProcess *c_p,size_t budget,unsigned reductions)
 {
     Eterm *reg,*E,*HTOP;
@@ -196,7 +198,7 @@ dispatch:
     OpCase(normal_exit):
         c_p->status=LB_PROCESS_DONE; c_p->arity=1; goto stop;
     OpCase(i_func_info_IaaI):
-        c_p->freason=am_function_clause; goto find_func_info;
+        c_p->freason=LB_EXC_FUNCTION_CLAUSE; goto find_func_info;
     default:goto malformed_code;
     }
 context_switch:
@@ -205,8 +207,19 @@ context_switch:
     c_p->arity=c_p->current->arity;
 context_switch3:
     c_p->status=LB_PROCESS_YIELDED; goto stop;
-find_func_info:
+find_func_info: {
+    /* Materialize the native error value, not handle_error/stacktrace/catch.
+     * Keep the original code/flags and extended payload for future handling.
+     * No producer of other exception classes or arglist wrappers is admitted. */
+    LbAllocStatus expanded;
+    if(LB_GET_EXC_CLASS(c_p->freason)!=LB_EXTAG_ERROR ||
+       (c_p->freason&(LB_EXF_ARGLIST|LB_EXF_RESTORE_NFUNC|LB_EXF_PANIC|LB_EXF_THROWN|LB_EXF_NATIVE))) goto malformed_code;
+    SWAPOUT; expanded=lb_exception_expand(c_p,c_p->freason,c_p->fvalue,&c_p->exception_value); SWAPIN;
+    if(expanded==LB_ALLOC_NO_MEMORY) goto memory_failure;
+    if(expanded!=LB_ALLOC_OK) goto malformed_code;
+    if(!(c_p->freason&LB_EXF_HAS_EXT_INFO)) c_p->fvalue=NIL;
     c_p->status=LB_PROCESS_EXCEPTION; goto stop;
+}
 memory_failure:
     /* The failed collection left the old roots intact. */
     c_p->status=LB_PROCESS_NO_MEMORY; goto stop;
