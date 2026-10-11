@@ -762,3 +762,48 @@ representation checks, UBSan and stable hashes), plus
 Earlier passing integration remains at
 `/tmp/libbeam-exception-integrated-first/summary.json`. The previously recorded
 UTF8 stock/interpreter sizing discrepancy remains explicit and unchanged.
+
+## Follow-on: construction flow and private-slot consumption
+
+Baseline: `3cc20f12`. The all-path verifier now recognizes binary construction
+and writable initialization as proof operations, while the independent dispatch
+support gate still refuses both instructions. Generator validation continues to
+check full descriptor structure after executable register hints are stripped.
+No opcode identity, flow fact or available helper enables guest execution.
+
+Construction requires initialized X/Y roots and source operands that survive
+trimming X to Live. Every operand is read before the destination gets its success
+fact; successful extra heap credit is not propagated to failure edges. A private
+source must be a register with an append fact from a reviewed producer, not an
+unknown entry argument or a compiler hint. Calls and appends conservatively drop
+facts for potentially revoked headers; only a proven new append result gets one.
+
+Private append cannot read its old source slot in later descriptors. Both outgoing
+edges mark that old logical value consumed, with successful destination publication
+then replacing it if appropriate. Slots remain initialized GC roots: NIL after
+actual consumption, possibly the old value on an early failure. Their logical
+values cannot be read, returned or passed as callee arguments. Poison dominates
+joins and backedges, and explicit overwrites restore ordinary availability. This
+separates logical consumption from physical initialization, especially for Y slots.
+
+This is **not uniqueness proof**. Other aliases, including references in compound
+terms or conservative dead storage, still require the checked runtime guard before
+any private mutation. `NOT_UNIQUE` is an ownership refusal, never guest `badarg`.
+Private entry arguments still lack interprocedural append facts; valid programs
+outside this conservative proof profile continue to refuse admission.
+
+Tests exercise Live/Y bounds, late destination publication, consumed slots across
+GC points, failure edges, caller arguments, late joins/backedges, overwritten and
+revoked facts, hints, and proof-allocation failure/retry. A freshly compiled
+`binary_flow_slice.erl` passes proof; three IR mutations fail and restore/retry in
+the same space. Actual loading then refuses unsupported dispatch without publishing
+a module. The broader construction fixture now reaches the separate unadmitted
+binary-matching gate before its private-loop proof. These are proof/preparation
+witnesses, not constructor execution or M3 acceptance. Whole dispatch, allocation
+work/virtual-heap policy and the remaining exception/scheduling work are outstanding.
+
+Fresh locked validation: `/tmp/libbeam-binary-flow-commit-reviewed/summary.json`
+(Debug/Release: 24 CTests each, compiled proof/refusal and UBSan) and
+`/tmp/libbeam-binary-flow-tooling-final/summary.json` (29 tooling tests).
+The unchanged lifecycle example passes; unchanged stateful acceptance remains red.
+The previously recorded UTF8 stock/interpreter ordering difference remains explicit.

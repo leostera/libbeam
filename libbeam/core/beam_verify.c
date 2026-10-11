@@ -9,13 +9,15 @@
 #define NO_FRAME SIZE_MAX
 #define TUPLE_SHAPE UINT32_C(0x1000000)
 #define LIST_SHAPE UINT32_C(0x2000000)
+#define APPEND_SHAPE UINT32_C(0x4000000) /* reviewed append result; not uniqueness */
+#define CONSUMED_VALUE UINT32_C(0x8000000) /* initialized GC root, unavailable logical value */
 #define ARITY_MASK UINT32_C(0xffffff)
 #define ANALYSIS_LIMIT (64u*1024u*1024u)
 #define REQUIRE(test) do { if(!(test)) return LB_CODE_FORMAT; } while(0)
 _Static_assert(MAX_ARITYVAL==ARITY_MASK,"Shape facts cover native tuple arities");
 typedef struct {
     uint64_t x[BITS],y[BITS];
-    uint32_t xs[MAX_REG],ys[MAX_REG]; /* tuple minimum arity, nonempty list, or unknown */
+    uint32_t xs[MAX_REG],ys[MAX_REG]; /* representation fact, consumed value, or unknown */
     size_t frame,heap;
 } Flow;
 typedef struct { BeamOp *op; Flow in; size_t function; int reached,queued; } Node;
@@ -28,8 +30,8 @@ static int source(LoaderState *st,const Flow *f,BeamOpArg arg)
 {
     size_t reg=(Uint)arg.val&REG_MASK;
     switch(arg.type) {
-    case TAG_x:return defined(f->x,reg);
-    case TAG_y:return f->frame!=NO_FRAME && reg<f->frame && defined(f->y,reg);
+    case TAG_x:return defined(f->x,reg) && f->xs[reg]!=CONSUMED_VALUE;
+    case TAG_y:return f->frame!=NO_FRAME && reg<f->frame && defined(f->y,reg) && f->ys[reg]!=CONSUMED_VALUE;
     case TAG_a:return is_atom((Eterm)arg.val);
     case TAG_i:return IS_SSMALL(arg.val);
     case TAG_n:return 1;
@@ -68,6 +70,12 @@ static int roots(const Flow *f,size_t live)
     if(f->frame!=NO_FRAME) for(i=0;i<f->frame;++i) if(!defined(f->y,i)) return 0;
     return 1;
 }
+static int arguments(const Flow *f,size_t arity)
+{
+    if(!roots(f,arity)) return 0;
+    for(size_t i=0;i<arity;++i) if(f->xs[i]==CONSUMED_VALUE) return 0;
+    return 1;
+}
 static void trim_live(Flow *f,size_t live)
 {
     size_t i;
@@ -75,6 +83,7 @@ static void trim_live(Flow *f,size_t live)
 }
 static uint32_t common_shape(uint32_t a,uint32_t b)
 {
+    if(a==CONSUMED_VALUE || b==CONSUMED_VALUE) return CONSUMED_VALUE;
     if((a&TUPLE_SHAPE) && (b&TUPLE_SHAPE)) return a<b?a:b;
     return a==b?a:0;
 }
@@ -127,6 +136,59 @@ static LbCodeStatus select_arities(LoaderState *st,Analysis *w,size_t index,Flow
     }
     return LB_CODE_OK;
 }
+static void forget_append_facts(Flow *f)
+{
+    /* A call or append through an alias can revoke a header. Do not confuse
+     * its unchanged SubBits layout with permission for later private append. */
+    for(size_t i=0;i<MAX_REG;++i) {
+        if(f->xs[i]==APPEND_SHAPE) f->xs[i]=0;
+        if(f->ys[i]==APPEND_SHAPE) f->ys[i]=0;
+    }
+}
+static int same_register(BeamOpArg a,BeamOpArg b)
+{
+    return (a.type==TAG_x || a.type==TAG_y) && a.type==b.type &&
+        ((Uint)a.val&REG_MASK)==((Uint)b.val&REG_MASK);
+}
+static LbCodeStatus binary_flow(LoaderState *st,Flow *f,Flow *failed,BeamOp *op)
+{
+    BeamOpArg *a=op->a; uint32_t result_shape=0; int consuming;
+    REQUIRE(op->arity>=12 && a[5].type==TAG_u && a[5].val>=6 &&
+            (Uint)a[5].val==op->arity-6 && a[5].val%6==0 && (Uint)a[5].val<=65536);
+    REQUIRE(a[1].type==TAG_u && (Uint)a[1].val<=UINT32_MAX && a[2].type==TAG_u && roots(f,(Uint)a[2].val));
+    /* Every X operand must survive the possible collection. Unlike addition,
+     * construction reloads these values after allocating, not into scratch. */
+    trim_live(f,(Uint)a[2].val);
+    consuming=a[6].type==TAG_a && a[6].val==am_private_append;
+    for(size_t i=6;i<op->arity;i+=6) {
+        BeamOpArg *s=a+i;
+        REQUIRE(s[0].type==TAG_a);
+        switch((Eterm)s[0].val) {
+        case am_append:case am_private_append:REQUIRE(i==6);break;
+        case am_binary:case am_integer:case am_float:case am_utf8:case am_utf16:case am_utf32:break;
+        case am_string:continue; /* raw string offsets/sizes, checked by generator */
+        default:return LB_CODE_FORMAT;
+        }
+        REQUIRE(source(st,f,s[4]) && source(st,f,s[5]));
+        if(consuming && i>6) REQUIRE(!same_register(a[10],s[4]) && !same_register(a[10],s[5]));
+    }
+    if(consuming) {
+        st->program->error.stage="private append source/consumption proof";
+        REQUIRE((a[10].type==TAG_x || a[10].type==TAG_y) && shape(st,f,a[10])==APPEND_SHAPE);
+        REQUIRE(destination(f,a[10],CONSUMED_VALUE)); result_shape=APPEND_SHAPE;
+    } else if(a[6].val==am_append && shape(st,f,a[10])==APPEND_SHAPE) {
+        result_shape=APPEND_SHAPE; /* zero extension also preserves this representation */
+    }
+    /* Appending can revoke a header reached through aliases. Even other
+     * append facts are conservatively forgotten; only the new result gets one. */
+    if(a[6].val==am_append || consuming) forget_append_facts(f);
+    /* Any failure can follow private consumption, but never destination
+     * publication. Poison also covers early failure with the original value
+     * still in its initialized slot. Promise no heap credit on that edge. */
+    *failed=*f; failed->heap=0;
+    REQUIRE(destination(f,a[4],result_shape)); f->heap=(Uint)a[1].val;
+    return LB_CODE_OK;
+}
 static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
 {
     LbBeamProgram *p=st->program; BeamOp *op;
@@ -145,10 +207,11 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:
         case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_get_list_3:
         case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif2_6:
+        case genop_bs_create_bin_6:case genop_bs_init_writable_0:
         case genop_badmatch_1:case genop_case_end_1:break;
         default:p->error.stage=gen_opc[op->op].name; return LB_CODE_UNSUPPORTED;
         }
-        if(op->op!=genop_put_tuple2_2 && op->op!=genop_init_yregs_1 && op->op!=genop_select_tuple_arity_3)
+        if(op->op!=genop_put_tuple2_2 && op->op!=genop_init_yregs_1 && op->op!=genop_select_tuple_arity_3 && op->op!=genop_bs_create_bin_6)
             REQUIRE(op->arity==(unsigned)gen_opc[op->op].arity);
         nodes[i].op=op;
         if(op->op==genop_int_func_start_5) {
@@ -236,7 +299,20 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
             }
             break;
-        case genop_return_0:REQUIRE(f.frame==NO_FRAME && defined(f.x,0)); terminal=1;break;
+        case genop_bs_init_writable_0:
+            REQUIRE(arguments(&f,1)); trim_live(&f,1);
+            REQUIRE(destination(&f,(BeamOpArg){TAG_x,0},APPEND_SHAPE)); f.heap=0; break;
+        case genop_bs_create_bin_6:
+            p->error.stage="binary construction flow proof";
+            status=binary_flow(st,&f,&failed,op); if(status!=LB_CODE_OK) return status;
+            failure=&failed;
+            if(a[0].type==TAG_p) REQUIRE(!a[0].val);
+            else {
+                REQUIRE(label(st,a[0])); alternate=labels[a[0].val];
+                REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+            }
+            break;
+        case genop_return_0:REQUIRE(f.frame==NO_FRAME && source(st,&f,(BeamOpArg){TAG_x,0})); terminal=1;break;
         case genop_call_2:case genop_call_only_2:case genop_call_last_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
             REQUIRE(a[0].type==TAG_u); live=(Uint)a[0].val;
@@ -249,7 +325,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 REQUIRE(a[1].type==TAG_u && (Uint)a[1].val<st->beam.imports.count);
                 imp=(Uint)a[1].val; REQUIRE(live==st->beam.imports.entries[imp].arity);
             }
-            REQUIRE(roots(&f,live));
+            REQUIRE(arguments(&f,live)); forget_append_facts(&f);
             if(op->op==genop_call_2 || op->op==genop_call_ext_2) {
                 REQUIRE(f.frame!=NO_FRAME); memset(f.x,0,sizeof(f.x)); memset(f.xs,0,sizeof(f.xs)); define(f.x,0); f.heap=0;
             } else {

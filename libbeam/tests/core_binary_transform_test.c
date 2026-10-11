@@ -181,11 +181,12 @@ static void fixture(Memory *m,LbCodeSpace *space,const char *path)
     }
     CHECK(count>=5 && strings);
     LoaderState verify=state(space,p,p->ops); verify.label_count=lb_beam_image_info(p->image)->label_count;
-    CHECK(lb_verify_program(&verify)==LB_CODE_UNSUPPORTED && !strcmp(p->error.stage,gen_opc[genop_bs_create_bin_6].name));
+    LbCodeStatus proof=lb_verify_program(&verify);
+    CHECK(proof==LB_CODE_UNSUPPORTED && !strcmp(p->error.stage,gen_opc[genop_bs_start_match3_4].name));
     lb_beam_program_destroy(p);
     LbCodeStatus status=lb_code_load(space,data,(size_t)size,&module,&error);
-    /* The comprehension may also import erlang:error/1. Eager linking must
-     * refuse that independently; the verifier check above isolates bs_create. */
+    /* The binary comprehension still requires unadmitted matching. Eager
+     * linking may independently reject erlang:error/1 first. */
     CHECK((status==LB_CODE_UNSUPPORTED || status==LB_CODE_UNRESOLVED) && !module && !space->modules);
     free(data);
     /* Preparation legitimately interns fixture atoms; complete space retirement

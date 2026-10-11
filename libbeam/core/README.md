@@ -70,7 +70,9 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   generator after structural descriptor validation and with fallible owned
   arrays. `beam_emit.c` packs native words and fixes retained literal/string
   pointers, checking whole string spans across code growth. These are preparation
-  dependencies only: executable proof and the whole dispatch case remain gated.
+  dependencies only: register/root and private-slot consumption proofs now
+  precede transforms, but runtime uniqueness checks remain mandatory and the
+  whole dispatch case remains gated. Facts never come from compiler hints.
 - `exception.c`: native scalar reason codes and error-value expansion. The
   executor owns expanded terminal values as real GC roots; reason flags are
   not terms. Binary failure preparation atomically sets extended payload/code.
