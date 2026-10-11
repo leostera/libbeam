@@ -43,6 +43,7 @@ jobs:
               libbeam/core/otp/term-compare-sources.json libbeam/core/otp/numeric-sources.json \
               libbeam/core/otp/decimal-sources.json libbeam/core/otp/writable-sources.json \
               libbeam/core/otp/flatmap-error-sources.json libbeam/tools/check_flatmap_representation.py \
+              libbeam/core/otp/binary-loader-sources.json \
               libbeam/core/otp/bit-copy-sources.json libbeam/core/otp/bit-writer-sources.json \
               libbeam/tools/check_binary_representation.py libbeam/tools/project_transform.py \
               libbeam/tools/project_dispatch.py libbeam/src/engine.cpp \

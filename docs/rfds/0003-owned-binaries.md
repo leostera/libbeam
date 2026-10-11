@@ -577,3 +577,48 @@ execution, UBSan and stable source hashes) and
 passing integration is retained at
 `/tmp/libbeam-bit-alias-integrated-first/summary.json`. Both acceptance sources
 remain unchanged and the stateful example is still refused.
+
+## Follow-on: complete native loader generator
+
+Baseline: `92b50536`. `project_transform.py` now retains the complete native
+`create_bin` generator and `bs_create_bin/6` transformation case. No segment-kind
+branch is dropped: append/private append, binary-all, dynamic/fixed binary,
+float/integer, string and UTF descriptors are all translated by the generated
+native body. `otp/binary-loader-sources.json` records the sources and adaptations.
+This is preparation of native loader IR, **not executable opcode admission**.
+
+`beam_transform.c` establishes structural preconditions before any generator
+allocation: nonempty count/arity agreement, bounded counts, fixed fields,
+canonical register numbers, unit/segment ranges, valid literal lookups, proper
+atom flag lists and string spans within retained StrT. Append kinds must be first;
+normal append's Live leaves a temporary register available. These conditions do
+not establish must-definition, Y-frame validity, private-source consumption or
+uniqueness. The executable verifier still refuses the opcode before transforming
+it, and interpreter support remains absent independently.
+
+The native multiplication helper uses unsigned wrap and quotient checking. Fixed
+sizes preserve the native 56-bit ceiling; overflowing or negative constants keep
+the dynamic descriptor rather than becoming truncated lengths. Native-endian
+flags are resolved before packing the segment number. The original generator's
+assignment inside ASSERT is corrected to equality after preflight, eliminating
+a Debug-only input mutation. Bounded arena allocation replaces fatal operation
+and argument-array allocation; OOM is never an optimization miss. Failed temporary
+prefixes remain owned by the program and retire through its ordinary destructor.
+
+Tests cover all non-string kind variants directly, overflow/fixed-size boundaries,
+flag/endian handling, 65,532 input segment operands, malformed descriptors without
+allocation, and both generator allocation failures with exact retirement and
+same-space retry. A freshly compiled `binary_create_slice.erl` exercises actual
+source operations, including string offsets and bounds. Its executable verifier
+refuses `bs_create_bin`; eager loading also independently refuses unresolved
+imports when present. Nothing is published as executable code on either path.
+Full emission/fixups, executable proof, runtime sizing, work/virtual-heap policy,
+exception integration and complete generated dispatch remain outstanding.
+
+Final evidence: `/tmp/libbeam-create-bin-generator-commit-reviewed/summary.json`
+(20 passing Debug/Release CTests, compiled-fixture transformation, actual existing
+selected-profile execution, UBSan and stable source hashes), plus
+`/tmp/libbeam-create-bin-generator-tooling-final/summary.json` (29 tooling tests).
+Earlier passing integration is retained at
+`/tmp/libbeam-create-bin-generator-integrated-first/summary.json`. Both acceptance
+sources remain unchanged; the stateful example still refuses unsupported code.

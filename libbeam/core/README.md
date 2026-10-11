@@ -66,6 +66,10 @@ lifecycle target passes; the stateful example still refuses unsupported module i
 - `binary.c`: real immutable refcounted payloads, native BinRef/SubBits layouts,
   owner-local offheap chains, GC sweep and physical release. Literal/metadata
   decoding and copied byte-input invocation share this constructor.
+- `beam_transform.c`: additionally projects the complete native `create_bin`
+  generator after structural descriptor validation and with fallible owned
+  arrays. This is loader IR only: executable verification, emitter/fixups and
+  the whole binary-construction dispatch case remain unadmitted.
 - `writable.c`: fresh heap/refcounted construction spans, process-owned native
   writable backing and non-private append,
   fallible preparation before revocation/publication, volatile-prefix reads,

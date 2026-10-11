@@ -5,6 +5,84 @@
  * fallible allocation and explicit unsupported-case exits are adapted.
  */
 #include "code_internal.h"
+#include "binary_error.h"
+typedef Uint UWord;
+#define BSF_LITTLE 2
+#define BSF_NATIVE 16
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define WORDS_BIGENDIAN 1
+#elif !defined(__BYTE_ORDER__) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "Native binary descriptors require a known byte order"
+#endif
+/* beam_transform_helpers.c: unsigned wrap plus quotient detects overflow. */
+static int beam_load_safe_mul(UWord a,UWord b,UWord *result)
+{
+    Uint product=a*b; *result=product;
+    return b==0 || product/b==a;
+}
+static Eterm load_literal(LoaderState *st,Sint index)
+{
+    Eterm term;
+    if(lb_beam_program_literal(st->program,st->space->atoms,index,&term)!=LB_BEAM_OK) abort();
+    return term;
+}
+static int segment_value_valid(LoaderState *st,BeamOpArg arg)
+{
+    Eterm term;
+    switch(arg.type) {
+    case TAG_x:case TAG_y:return (Uint)arg.val<MAX_REG;
+    case TAG_i:return IS_SSMALL(arg.val);
+    case TAG_a:return is_atom((Eterm)arg.val);
+    case TAG_n:return (Eterm)arg.val==NIL;
+    case TAG_q:return lb_beam_program_literal(st->program,st->space->atoms,arg.val,&term)==LB_BEAM_OK;
+    default:return 0;
+    }
+}
+static int segment_flags_valid(LoaderState *st,BeamOpArg arg)
+{
+    Eterm term;
+    if(arg.type==TAG_n) return (Eterm)arg.val==NIL;
+    if(arg.type!=TAG_q || lb_beam_program_literal(st->program,st->space->atoms,arg.val,&term)!=LB_BEAM_OK) return 0;
+    while(is_list(term)) {
+        if(!is_atom(CAR(list_val(term)))) return 0;
+        term=CDR(list_val(term));
+    }
+    return is_nil(term);
+}
+/* These are structural generator preconditions, not execution/linearity facts.
+ * Canonical registers come from executable verification before transformation.
+ * Every descriptor is checked before the generator allocates or mutates a node. */
+static int binary_descriptors_valid(LoaderState *st,const BeamOp *op)
+{
+    const BeamOpArg *a=op->a; size_t i; LbBeamBytes strings;
+    if(op->arity<12 || a[5].type!=TAG_u || a[5].val<6 || a[5].val%6 ||
+       (Uint)a[5].val!=op->arity-6 || (Uint)a[5].val>65536) return 0;
+    if(!((a[0].type==TAG_p && !a[0].val) ||
+         (a[0].type==TAG_f && a[0].val>0 && (Uint)a[0].val<st->label_count))) return 0;
+    if(a[1].type!=TAG_u || (Uint)a[1].val>UINT32_MAX || a[2].type!=TAG_u ||
+       (Uint)a[2].val>MAX_REG || a[3].type!=TAG_u || (Uint)a[3].val>256 ||
+       (a[4].type!=TAG_x && a[4].type!=TAG_y) || (Uint)a[4].val>=MAX_REG) return 0;
+    for(i=6;i<op->arity;i+=6) {
+        const BeamOpArg *s=a+i; int utf=0;
+        if(s[0].type!=TAG_a || s[1].type!=TAG_u || (Uint)s[1].val>MAX_SMALL ||
+           s[2].type!=TAG_u || (Uint)s[2].val>256 || !segment_flags_valid(st,s[3])) return 0;
+        switch((Eterm)s[0].val) {
+        case am_append:case am_private_append:
+            if(i!=6 || (s[0].val==am_append && a[2].val>=MAX_REG)) return 0;
+            break;
+        case am_binary:case am_float:case am_integer:break;
+        case am_utf8:case am_utf16:case am_utf32:utf=1;break;
+        case am_string:
+            if(s[2].val!=8 || s[4].type!=TAG_u || s[5].type!=TAG_i || s[5].val<0 ||
+               lb_beam_image_chunk(st->program->image,LB_BEAM_ID('S','t','r','T'),&strings)!=LB_BEAM_OK ||
+               (Uint)s[4].val>strings.size || (Uint)s[5].val>strings.size-(Uint)s[4].val) return 0;
+            continue;
+        default:return 0;
+        }
+        if((!utf && !s[2].val) || !segment_value_valid(st,s[4]) || !segment_value_valid(st,s[5])) return 0;
+    }
+    return 1;
+}
 BeamOp *lb_load_new_op(LoaderState *st)
 {
     BeamOp *op;
@@ -87,4 +165,10 @@ static void beam_load_sort_select_vals(BeamOpArg *base,size_t n)
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
-int lb_transform(LoaderState *st) { return lb_transform_engine(st); }
+int lb_transform(LoaderState *st)
+{
+    if(st->genop->op==genop_bs_create_bin_6 && !binary_descriptors_valid(st,st->genop)) {
+        st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+    }
+    return lb_transform_engine(st);
+}

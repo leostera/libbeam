@@ -68,6 +68,8 @@ def main():
                             root / 'libbeam/tests/core_bit_segment_test.c', root / 'libbeam/tests/core_flatmap_test.c',
                             root / 'libbeam/core/otp/flatmap-error-sources.json', root / 'libbeam/tools/check_flatmap_representation.py',
                             root / 'libbeam/tests/fixtures/binary_error_reference.erl',
+                            root / 'libbeam/tests/core_binary_transform_test.c', root / 'libbeam/tests/fixtures/binary_create_slice.erl',
+                            root / 'libbeam/core/otp/binary-loader-sources.json',
                             root / 'libbeam/tests/fixtures/bit_writer_reference.erl',
                             root / 'libbeam/tests/core_binary_test.c', root / 'libbeam/tests/fixtures/binary_slice.erl',
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
@@ -138,6 +140,11 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError(f'Flatmap/error reference changed: {filename}')
             summary['flatmap_error_sources'] = flatmap_sources
+            binary_loader_sources = json.loads((root / 'libbeam/core/otp/binary-loader-sources.json').read_text())
+            for filename, expected in binary_loader_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Binary loader reference changed: {filename}')
+            summary['binary_loader_sources'] = binary_loader_sources
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
@@ -235,6 +242,13 @@ def main():
             if 'CORE_BINARY_ERROR_PAYLOAD_OK' not in flatmap_execution:
                 raise RuntimeError('Missing flatmap/error payload execution evidence')
             summary['flatmap_error_payload_dependencies_passed'] = True
+            run('binary-create-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/binary_create_slice.erl'])
+            binary_create_fixture = fixture_dir / 'binary_create_slice.beam'
+            binary_transform = run('binary-transform', [out / 'build/core_binary_transform_test', binary_create_fixture])
+            if 'CORE_BINARY_TRANSFORM_FIXTURE_OK' not in binary_transform:
+                raise RuntimeError('Missing native binary generator/fixture evidence')
+            summary['binary_transform_dependencies_passed'] = True
+            summary['binary_create_fixture_sha256'] = hashlib.sha256(binary_create_fixture.read_bytes()).hexdigest()
             binary_execution = run('binary-execution', [out / 'build/core_binary_test', binary_fixture, fixture, peer_fixture])
             if 'CORE_BINARY_EXECUTION_OK' not in binary_execution or 'CORE_BINARY_RETIREMENT_OK' not in binary_execution:
                 raise RuntimeError('Missing binary execution/retirement evidence')
@@ -424,12 +438,13 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
                 raise RuntimeError('UBSan float segments differ from stock-OTP vectors')
             run('flatmap-ubsan', [out / 'engine-ubsan/core_flatmap_test', binary_fixture])
+            run('binary-transform-ubsan', [out / 'engine-ubsan/core_binary_transform_test', binary_create_fixture])
             if run('binary-error-ubsan-vectors', [out / 'engine-ubsan/core_flatmap_test', '--reference', binary_fixture]) != error_reference:
                 raise RuntimeError('UBSan binary error payloads differ from stock-OTP vectors')
             run('bit-writer-fallback-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-DDEBUG',
@@ -461,6 +476,7 @@ def main():
             if run('bit-alias-release-vectors', [out / 'release/core_binary_test', '--alias-reference', binary_fixture]) != alias_reference:
                 raise RuntimeError('Release shared-edge segments differ from stock-OTP vectors')
             run('flatmap-release', [out / 'release/core_flatmap_test', binary_fixture])
+            run('binary-transform-release', [out / 'release/core_binary_transform_test', binary_create_fixture])
             if run('binary-error-release-vectors', [out / 'release/core_flatmap_test', '--reference', binary_fixture]) != error_reference:
                 raise RuntimeError('Release binary error payloads differ from stock-OTP vectors')
             run('release-executor', [out / 'release/core_executor_test', async_fixture])

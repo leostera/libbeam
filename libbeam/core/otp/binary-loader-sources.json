@@ -1,0 +1,19 @@
+{
+  "baseline": "92b50536",
+  "scope": "Complete native create_bin loader generator with checked structural descriptors and fallible arena allocation. This does not admit executable bs_create_bin, its emitter/fixups, register/linearity proof or dispatch.",
+  "sources": {
+    "beam/erts/emulator/beam/emu/generators.tab": "e2980f167ddb6f30a920c1bd9fe5bda682d0e73b8b744a7abfba4723e7965138",
+    "beam/erts/emulator/beam/emu/ops.tab": "d204cbdd007a51df81203211675354274b5fcabd67e8fe65e0f4badf4071e234",
+    "beam/erts/emulator/beam/beam_transform_helpers.c": "5997b24ba2cd4c143753fb0a8617489573ba27fcfc7ecf36a5aa020e1f0c281c",
+    "beam/erts/emulator/beam/erl_bits.h": "5a72bb9b9c14690d55ff94912faf3e8f0e9914e155593d2c6aa7474c3ff5bfec"
+  },
+  "adaptations": [
+    "project_transform retains the whole generated bs_create_bin transformation and create_bin generator, including append/private, dynamic/fixed binary/float/integer, binary-all, string and UTF branches. The upstream assertion assigning TAG_a becomes an equality check after structural preflight; valid inputs are no longer rewritten as an assertion side effect in Debug.",
+    "Operation blocks and expanded operand arrays use the existing fallible, bounded preparation arena. Failure is TE_NO_MEMORY with the actual program error, never TE_FAIL and an omitted optimization. Input operands remain untouched; source-node replacement occurs only after the generator succeeds. The temporary arena owns failure prefixes until normal program retirement.",
+    "Structural preflight bounds count/arity, fixed fields, canonical register operands, segment numbers before packing, unit ranges, literal indices, proper atom flag lists and string spans. Append kinds can occur only first. An empty descriptor sequence is rejected because native allocation reads the first descriptor. Append Live leaves room for its native temporary register. These checks are not must-definition, Y-frame, source-consumption or uniqueness proof.",
+    "The native unsigned safe-multiply helper retains wrap-and-quotient overflow detection. Fixed-size conversion keeps its native 56-bit ceiling and falls back to the dynamic size representation on overflow or negative size. Invalid dynamic guest sizes are not silently converted to zero or pre-evaluated into results.",
+    "Flag literal lookup uses the retained program and explicit atom namespace. BSF_LITTLE=2 and BSF_NATIVE=16 retain native values; NativeEndian resolves the latter before segment-number packing. Compilation requires an explicitly known host byte order. Other atom flag names retain the native ignored behavior.",
+    "Components cover kind translation, proper flags/native-endian resolution, the largest bounded descriptor array, malformed descriptors without allocation, two real allocation failure prefixes and same-space retry. Actual compiled BEAM operations exercise the generator and StrT bounds. Independent checks keep executable verification and instruction support refused; unresolved imports remain independently rejected. No new executable bytecode format or native effect is introduced."
+  ],
+  "other_inputs": ["loader-sources.json", "flatmap-error-sources.json", "opcodes/manifest.json"]
+}

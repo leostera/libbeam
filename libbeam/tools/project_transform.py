@@ -11,7 +11,7 @@ import re
 PURE = {'distinct', 'equal', 'independent_moves', 'is_offset', 'negation_is_small',
         'never', 'succ', 'succ3', 'succ4'}
 OWNED = {'needs_nif_padding', 'is_heavy_bif', 'smp_already_locked', 'smp_mark_target_label'}
-GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment'}
+GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin'}
 
 
 def project(text):
@@ -67,6 +67,19 @@ def project(text):
         if not match: raise RuntimeError('Missing generator '+name)
         body = re.sub(r'(\w+) = beamopallocator_new_op\(&\(S\)->op_allocator\);',
             r'\1 = lb_load_new_op(S);\n  if (!\1) return NULL;', match[0])
+        if name == 'create_bin':
+            # The complete native generator is retained. Structural validation
+            # runs before entry; the upstream assertion's assignment is a typo,
+            # not permission to rewrite a malformed source operand in Debug.
+            body, assertions = re.subn(r'ASSERT\(src\[0\]\.type = TAG_a\);',
+                                       'ASSERT(src[0].type == TAG_a);', body)
+            body, arrays = re.subn(r'op->a = erts_alloc\(ERTS_ALC_T_LOADER_TMP, op->arity \* sizeof\(BeamOpArg\)\);',
+                'op->a = lb_palloc(S->program, op->arity, sizeof(BeamOpArg));\n  if (!op->a) return NULL;', body)
+            body, literals = re.subn(r'beamfile_get_literal\(&S->beam, Flags.val\)',
+                                    'load_literal(S, Flags.val)', body)
+            body = re.sub(r'\bBSC_(\w+)', r'LB_BSC_\1', body)
+            if (assertions, arrays, literals) != (1, 1, 1):
+                raise RuntimeError('Unreviewed create_bin generator boundary')
         if name == 'select_tuple_arity':
             body = body.replace('erts_alloc(ERTS_ALC_T_LOADER_TMP, op->arity * sizeof(BeamOpArg))',
                                 'lb_palloc(S->program, op->arity, sizeof(BeamOpArg))')
