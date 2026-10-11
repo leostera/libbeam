@@ -45,6 +45,10 @@ typedef struct LbFunLease {
 /* Retain before publishing a fun or copying one into the process; no borrowed
  * entry survives module retirement. The fallible step does not move the heap. */
 LbAllocStatus lb_fun_retain(LbProcess *,const LbFunEntry *);
+/* Valid owned terms only. Prepare all embedded defining modules before copy.
+ * A failure may leave additional destination leases; destroy the unpublished
+ * destination to roll back. cost is incremented by actual visited terms. */
+LbAllocStatus lb_fun_retain_term(LbProcess *,Eterm,Uint *cost);
 void lb_fun_leases_clear(LbProcess *);
 /* Infallible GC commit: reset marks, mark each copied live fun, sweep afterward.
  * Every live entry must already have a lease. Missing leases are invariants. */

@@ -227,6 +227,43 @@ static void fun_load_failures(LbCodeSpace *space,const char *path,Memory *m)
     }
     free(bytes);
 }
+static void prepared_children(LbCodeSpace *space,LbCodeModule *module,Memory *m)
+{
+    unsigned char bytes[65]; memset(bytes,0x68,sizeof(bytes));
+    for(size_t nested=0;nested<2;++nested) {
+        LbCodeEntry *e=entry(space,module,nested?"process_nested":"process_factory",1);
+        LbProcess *parent,*child;
+        CHECK(lb_process_create_binary(e,bytes,65,32,&parent)==LB_PROCESS_READY && finish(parent)==LB_PROCESS_DONE);
+        Eterm closure=lb_process_result(parent),parent_pid=parent->identity.id;
+        CHECK(lb_fun(closure) && lb_fun_arity(lb_fun(closure))==0);
+        CHECK(!lb_pid_lookup(space->pids,parent_pid));
+        size_t live=m->live,members=lb_pid_count(space->pids),users=module->users;
+        for(size_t prefix=1;;++prefix) {
+            CHECK(prefix<100); m->fail=m->calls+prefix;
+            LbProcessStatus status=lb_process_create_fun(parent,closure,16,&child); m->fail=0;
+            if(status==LB_PROCESS_READY) break;
+            CHECK(status==LB_PROCESS_NO_MEMORY && !child);
+            CHECK(m->live==live && module->users==users && lb_pid_count(space->pids)==members);
+        }
+        Eterm child_pid=child->identity.id;
+        CHECK(child_pid!=parent_pid && lb_pid_lookup(space->pids,child_pid)==child);
+        CHECK(child->current==&child->local_mfa && child->current->arity==lb_fun_free(lb_fun(closure)));
+        lb_process_destroy(parent); // only cloned environment/code ownership may survive
+        CHECK(lb_process_collect(child,1024)==LB_PROCESS_READY);
+        CHECK(finish(child)==LB_PROCESS_DONE && !lb_pid_lookup(space->pids,child_pid));
+        Eterm result=lb_process_result(child); CHECK(is_boxed(result) && is_arity_value(*boxed_val(result)));
+        Eterm *tuple=boxed_val(result); CHECK(arityval(tuple[0])==3 && tuple[1]==parent_pid && tuple[2]==child_pid);
+        Eterm payload=tuple[3]; if(nested) { CHECK(arityval(*boxed_val(payload))==2); payload=boxed_val(payload)[2]; }
+        LbBitstringView view; CHECK(lb_bitstring_view(payload,&view) && view.bit_size==520 && !memcmp(view.data,bytes,65));
+        lb_process_destroy(child); lb_code_entry_release(e);
+    }
+    LbCodeEntry *e=entry(space,module,"factory",1); LbProcess *parent,*child=(void *)1;
+    CHECK(lb_process_create_binary(e,bytes,65,32,&parent)==LB_PROCESS_READY && finish(parent)==LB_PROCESS_DONE);
+    size_t live=m->live;
+    CHECK(lb_process_create_fun(parent,lb_process_result(parent),32,&child)==LB_PROCESS_INVALID && !child && m->live==live);
+    CHECK(lb_process_create_fun(parent,NIL,32,&child)==LB_PROCESS_INVALID && !child && m->live==live);
+    lb_process_destroy(parent); lb_code_entry_release(e);
+}
 static void guest_funs(LbCodeSpace *space,LbCodeModule *module,Memory *m)
 {
     const char *functions[]={"echo","nested","closed","badarity","factory","closed_factory"};
@@ -268,9 +305,6 @@ int main(int argc,char **argv)
     LbCodeModule *target_module=load(a,argv[2]);
     table(a,ea,&m); permuted_ring(a,ea); references(a,ma,&m); fun_consumers(a,ma,target_module,&m);
     CHECK(lb_code_unload(target_module)==LB_CODE_OK);
-    fun_load_failures(a,argv[3],&m);
-    LbCodeModule *fun_module=load(a,argv[3]); guest_funs(a,fun_module,&m);
-    CHECK(lb_code_unload(fun_module)==LB_CODE_OK);
     LbProcess *failed=create(ea); size_t before=m.live; m.fail=m.calls+1;
     CHECK(finish(failed)==LB_PROCESS_NO_MEMORY && !a->pids && !failed->identity.owner && m.live==before);
     m.fail=0; lb_process_destroy(failed);
@@ -303,6 +337,9 @@ int main(int argc,char **argv)
     CHECK(lb_pid_count(a->pids)==1024 && finish(held[1024])==LB_PROCESS_LIMIT);
     CHECK(held[1024]->reg[0]==NIL && lb_process_exception(held[1024])==THE_NON_VALUE);
     for(size_t i=0;i<1025;++i) lb_process_destroy(held[i]); free(held); CHECK(!lb_pid_count(a->pids));
+    fun_load_failures(a,argv[3],&m);
+    LbCodeModule *fun_module=load(a,argv[3]); guest_funs(a,fun_module,&m); prepared_children(a,fun_module,&m);
+    CHECK(lb_code_unload(fun_module)==LB_CODE_OK);
     lb_code_entry_release(ea); lb_code_entry_release(eb);
     CHECK(lb_code_unload(ma)==LB_CODE_OK && lb_code_unload(mb)==LB_CODE_OK);
     CHECK(lb_code_space_destroy(a)==LB_CODE_OK && lb_code_space_destroy(b)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK);

@@ -4,6 +4,7 @@
  */
 #include "process_internal.h"
 #include "fun.h"
+#include "flatmap.h"
 LbAllocStatus lb_fun_retain(LbProcess *p,const LbFunEntry *entry)
 {
     if(!p || !entry || !entry->owner || entry->owner->space!=p->entry_module->space ||
@@ -15,6 +16,46 @@ LbAllocStatus lb_fun_retain(LbProcess *p,const LbFunEntry *entry)
     if(lb_alloc_domain_allocate(p->entry_module->space->domain,sizeof(LbFunLease),&memory)!=LB_ALLOC_OK) return LB_ALLOC_NO_MEMORY;
     LbFunLease *lease=memory; *lease=(LbFunLease){p->fun_leases,entry,0};
     ++entry->owner->users; p->fun_leases=lease; return LB_ALLOC_OK;
+}
+/* Prepare code ownership before copying a valid owned term into this process.
+ * Term storage is not mutated; a failed preparation remains wholly owned by
+ * the unpublished destination and is reclaimed by its destructor. */
+LbAllocStatus lb_fun_retain_term(LbProcess *p,Eterm term,Uint *cost)
+{
+    Eterm local[64],*todo=local; size_t count=1,capacity=64;
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    LbAllocStatus status=LB_ALLOC_OK; todo[0]=term;
+    while(count) {
+        Eterm value=todo[--count]; const Eterm *children=NULL; size_t n=0;
+        ++*cost;
+        if(is_list(value)) { children=list_val(value); n=2; }
+        else if(is_boxed(value)) {
+            const Eterm *pointer=boxed_val(value);
+            if(is_arity_value(*pointer)) { children=pointer+1; n=arityval(*pointer); }
+            else if(*pointer==LB_FLATMAP_HEADER) {
+                (void)lb_flatmap_words(pointer); children=pointer+2; n=pointer[1]+1;
+            } else if((*pointer&_TAG_HEADER_MASK)==FUN_SUBTAG) {
+                const LbFun *fun=lb_fun(value);
+                status=lb_fun_retain(p,fun->entry.fun); if(status!=LB_ALLOC_OK) break;
+                children=fun->env; n=lb_fun_free(fun);
+            }
+        }
+        if(n>capacity-count) {
+            size_t next=capacity; void *memory;
+            while(next-count<n) {
+                if(next>SIZE_MAX/2/sizeof(Eterm)) { status=LB_ALLOC_NO_MEMORY; break; }
+                next*=2;
+            }
+            if(status!=LB_ALLOC_OK) break;
+            status=lb_alloc_domain_allocate(domain,next*sizeof(Eterm),&memory);
+            if(status!=LB_ALLOC_OK) break;
+            Eterm *grown=memory; memcpy(grown,todo,count*sizeof(Eterm));
+            if(todo!=local) lb_release(domain,todo);
+            todo=grown; capacity=next;
+        }
+        if(n) memcpy(todo+count,children,n*sizeof(Eterm)); count+=n;
+    }
+    if(todo!=local) lb_release(domain,todo); return status;
 }
 static void release(LbProcess *p,LbFunLease *lease)
 {

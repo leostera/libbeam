@@ -25,27 +25,88 @@ int lb_instruction_supported(unsigned op)
     default:return 0;
     }
 }
-LbProcessStatus lb_process_create(const LbCodeEntry *entry,const Eterm *args,size_t arity,size_t words,LbProcess **out)
+static LbProcessStatus create_owned(LbCodeModule *module,const BeamInstr *pc,const LbMFA *mfa,
+                                   size_t words,LbProcess **out)
 {
-    LbProcess *p; LbCodeModule *module; LbAllocDomain *domain; void *memory; size_t i;
-    if(!out) return LB_PROCESS_INVALID; *out=NULL;
-    if(!entry || (arity && !args) || arity!=entry->entry->info.mfa.arity || words>64u*1024u*1024u/sizeof(Eterm)) return LB_PROCESS_INVALID;
-    module=entry->module; domain=module->space->domain;
+    LbProcess *p; LbAllocDomain *domain=module->space->domain; void *memory; size_t i;
     if(module->space->loading || module->users==SIZE_MAX) return LB_PROCESS_INVALID;
-    for(i=0;i<arity;++i) {
-        if(!is_small(args[i]) && !is_nil(args[i]) && !is_atom(args[i])) return LB_PROCESS_INVALID;
-        if(is_atom(args[i]) && atom_val(args[i])>=lb_atoms_count(module->space->atoms)) return LB_PROCESS_INVALID;
-    }
     if(words<S_RESERVED+1) words=S_RESERVED+1;
     if(lb_alloc_domain_allocate(domain,sizeof(*p),&memory)!=LB_ALLOC_OK) return LB_PROCESS_NO_MEMORY;
     p=memory; memset(p,0,sizeof(*p));
     if(lb_alloc_domain_allocate(domain,words*sizeof(Eterm),&memory)!=LB_ALLOC_OK) { lb_release(domain,p); return LB_PROCESS_NO_MEMORY; }
     p->entry_module=module; p->heap=p->htop=memory; p->hend=p->heap+words; p->stop=p->hend-1;
     *p->stop=(Eterm)lb_host_return; p->bin_vheap_sz=LB_BINARY_VHEAP_MIN_WORDS;
-    for(i=0;i<MAX_REG;++i) p->reg[i]=i<arity?args[i]:NIL;
-    p->fvalue=p->exception_value=p->construction_root=NIL; p->freason=LB_EXC_NULL; p->arity=arity; p->current=&entry->entry->info.mfa;
-    p->i=entry->entry->dispatch.addresses[0]; p->status=LB_PROCESS_READY;
+    for(i=0;i<MAX_REG;++i) p->reg[i]=NIL;
+    p->fvalue=p->exception_value=p->construction_root=NIL; p->freason=LB_EXC_NULL;
+    p->local_mfa=*mfa; p->arity=mfa->arity; p->current=&p->local_mfa;
+    p->i=pc; p->status=LB_PROCESS_READY;
     ++module->users; *out=p; return LB_PROCESS_READY;
+}
+static int private_mfa(const LbCodeModule *module,const BeamInstr *pc,LbMFA *mfa)
+{
+    for(size_t i=0;i<lb_code_module_function_count(module);++i) {
+        const BeamInstr *info=(const BeamInstr *)module->words[i];
+        if(info+sizeof(LbCodeInfo)/sizeof(BeamInstr)!=pc) continue;
+        memcpy(mfa,info+offsetof(LbCodeInfo,mfa)/sizeof(BeamInstr),sizeof(*mfa)); return 1;
+    }
+    return 0;
+}
+/* erl_create_process's owned heap/register/code/PID preparation for a local
+ * closure entry. The executor must prepare its queue node before this call
+ * and publish runnable membership afterwards; no helper VM or export stub. */
+LbProcessStatus lb_process_create_fun(LbProcess *parent,Eterm value,size_t words,LbProcess **out)
+{
+    if(!out) return LB_PROCESS_INVALID; *out=NULL;
+    if(!parent) return LB_PROCESS_INVALID;
+    parent->last_native_cost=1;
+    const LbFun *fun=lb_fun(value);
+    if(!fun || lb_fun_arity(fun)!=0) return LB_PROCESS_INVALID;
+    const LbFunEntry *entry=fun->entry.fun; LbCodeModule *module=entry->owner;
+    if(!module || module->space!=parent->entry_module->space || !module->published ||
+       entry->pend_purge_address) return LB_PROCESS_REFUSED;
+    size_t free=lb_fun_free(fun),needed=0; LbMFA mfa;
+    if(!private_mfa(module,entry->dispatch.addresses[0],&mfa) || mfa.arity!=free) return LB_PROCESS_INVALID;
+    for(size_t i=0;i<free;++i) {
+        size_t size;
+        if(!lb_flat_size(module->space->domain,fun->env[i],&size)) return LB_PROCESS_NO_MEMORY;
+        if(!lb_size_add(needed,size,&needed)) return LB_PROCESS_LIMIT;
+        parent->last_native_cost+=1+size/16;
+    }
+    if(!lb_size_add(needed,S_RESERVED+1,&needed) || needed>64u*1024u*1024u/sizeof(Eterm) ||
+       words>64u*1024u*1024u/sizeof(Eterm)) return LB_PROCESS_LIMIT;
+    if(words<needed) words=needed;
+    LbProcess *child; LbProcessStatus status=create_owned(module,entry->dispatch.addresses[0],&mfa,words,&child);
+    if(status!=LB_PROCESS_READY) return status;
+    for(size_t i=0;i<free;++i) {
+        LbAllocStatus held=lb_fun_retain_term(child,fun->env[i],&parent->last_native_cost);
+        if(held!=LB_ALLOC_OK) {
+            status=held==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_REFUSED; goto failure;
+        }
+    }
+    for(size_t i=0;i<free;++i) {
+        child->reg[i]=lb_copy_flat(fun->env[i],&child->htop,&child->off_heap);
+        if(is_non_value(child->reg[i])) { status=LB_PROCESS_NO_MEMORY; goto failure; }
+    }
+    /* Identity is the final fallible acquisition. There is no runnable task
+     * or caller-visible PID until the fully prepared child is returned. */
+    Eterm pid; status=lb_process_identity(child,&pid);
+    if(status!=LB_PROCESS_READY) goto failure;
+    *out=child; return LB_PROCESS_READY;
+failure:
+    lb_process_destroy(child); return status;
+}
+LbProcessStatus lb_process_create(const LbCodeEntry *entry,const Eterm *args,size_t arity,size_t words,LbProcess **out)
+{
+    if(!out) return LB_PROCESS_INVALID; *out=NULL;
+    if(!entry || (arity && !args) || arity!=entry->entry->info.mfa.arity || words>64u*1024u*1024u/sizeof(Eterm)) return LB_PROCESS_INVALID;
+    LbCodeModule *module=entry->module;
+    for(size_t i=0;i<arity;++i) {
+        if(!is_small(args[i]) && !is_nil(args[i]) && !is_atom(args[i])) return LB_PROCESS_INVALID;
+        if(is_atom(args[i]) && atom_val(args[i])>=lb_atoms_count(module->space->atoms)) return LB_PROCESS_INVALID;
+    }
+    LbProcessStatus status=create_owned(module,entry->entry->dispatch.addresses[0],&entry->entry->info.mfa,words,out);
+    if(status==LB_PROCESS_READY) for(size_t i=0;i<arity;++i) (*out)->reg[i]=args[i];
+    return status;
 }
 LbProcessStatus lb_process_create_binary(const LbCodeEntry *entry,const void *bytes,size_t size,
                                         size_t words,LbProcess **out)
@@ -102,20 +163,14 @@ static int pc_valid(LbProcess *p,const BeamInstr *pc)
 static const LbMFA *entry_mfa(LbProcess *p,const BeamInstr *pc)
 {
     LbCodeSpace *space=p->entry_module->space;
-    LbCodeModule *module; Export *e; size_t i;
+    LbCodeModule *module; Export *e;
     for(e=space->exports;e;e=e->next)
         if(e->dispatch.addresses[0]==pc) return &e->info.mfa;
     /* Local calls can yield at non-exported entries. Use the emitted native
      * function directory, not an export stub or a fabricated scheduling MFA.
      * memcpy avoids aliasing instruction-word storage as an LbMFA object. */
     for(module=space->modules;module;module=module->next)
-        for(i=0;i<lb_code_module_function_count(module);++i) {
-            const BeamInstr *info=(const BeamInstr *)module->words[i];
-            if(info+sizeof(LbCodeInfo)/sizeof(BeamInstr)==pc) {
-                memcpy(&p->local_mfa,info+offsetof(LbCodeInfo,mfa)/sizeof(BeamInstr),sizeof(p->local_mfa));
-                return &p->local_mfa;
-            }
-        }
+        if(private_mfa(module,pc,&p->local_mfa)) return &p->local_mfa;
     return NULL;
 }
 static int32_t lb_packed_label(const BeamInstr *table,size_t index)

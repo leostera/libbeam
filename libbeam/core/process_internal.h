@@ -14,7 +14,7 @@
 struct LbProcess {
     LbCodeModule *entry_module;
     LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
-    LbFunLease *fun_leases; /* live closure entries retain their defining code */
+    LbFunLease *fun_leases; /* one lease per defining module, represented by a stable entry */
     const LbMFA *current;
     LbMFA local_mfa; /* owned copy of a private function's native word header */
     const BeamInstr *i;
@@ -33,6 +33,9 @@ struct LbProcess {
     int running;
 };
 LbProcessStatus lb_process_identity(LbProcess *,Eterm *);
+/* Prepare an unpublished local-fun/0 child with copied environment and PID.
+ * Domain/namespace serialization is required; queue publication is separate. */
+LbProcessStatus lb_process_create_fun(LbProcess *,Eterm,size_t,LbProcess **);
 int lb_process_collect_live(LbProcess *,size_t,size_t);
 int lb_heap_reserve(LbProcess *,size_t,size_t);
 int lb_heap_reserve_binary(LbProcess *,size_t need,size_t incoming_bytes,size_t live);
