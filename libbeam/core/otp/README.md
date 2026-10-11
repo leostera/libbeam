@@ -15,3 +15,5 @@ Opcode generation and selected whole execution cases are recorded separately in
 `opcodes/` and `execution-sources.json`. `numeric-sources.json` records native
 addition; `decimal-sources.json` records resumable native schoolbook decimal
 formatting. Their real catalog entries are distinct from generated BIF identities.
+`bit-copy-sources.json` records native forward copying used by result transport;
+this does not admit `bs_create_bin` or any additional BIF.

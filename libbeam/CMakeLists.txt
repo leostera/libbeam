@@ -43,7 +43,7 @@ if(NOT UNIX)
 endif()
 add_library(libbeam_core STATIC core/alloc.c core/utf8.c core/beam_image.c core/atoms.c
     core/opcodes.c core/beam_reader.c core/beam_program.c core/beam_decode.c
-    core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c core/term_compare.c
+    core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c core/bit_copy.c core/term_compare.c
     core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/engine.c core/executor.c core/world.c core/md5.c core/process.c core/heap.c core/bif_info.c core/big.c core/bif_numeric.c core/decimal.c core/bif_decimal.c)
 add_dependencies(libbeam_core libbeam_atom_definitions libbeam_opcode_definitions)
 target_link_libraries(libbeam_core PUBLIC ZLIB::ZLIB Threads::Threads m)
@@ -83,6 +83,9 @@ include(CTest)
 if(BUILD_TESTING)
     add_test(NAME engine_lifecycle_acceptance COMMAND engine_lifecycle)
     set_tests_properties(engine_lifecycle_acceptance PROPERTIES TIMEOUT 20)
+    add_executable(core_bit_copy_test tests/core_bit_copy_test.c)
+    target_link_libraries(core_bit_copy_test PRIVATE libbeam_core)
+    add_test(NAME core_bit_copy_components COMMAND core_bit_copy_test)
     add_executable(core_decimal_test tests/core_decimal_test.c)
     target_link_libraries(core_decimal_test PRIVATE libbeam_core)
     add_test(NAME core_decimal_components COMMAND core_decimal_test)

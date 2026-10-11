@@ -4,6 +4,7 @@
  */
 #include "world_internal.h"
 #include "binary.h"
+#include "bit_copy.h"
 
 static LbWorldStatus code_status(LbCodeStatus status)
 {
@@ -120,16 +121,17 @@ LbWorldStatus lb_world_call(LbWorld *w,LbBytesView m,LbBytesView f,LbBytesView b
 
 static LbWorldStatus copy_result(LbCall *call,LbProcess *process)
 {
-    LbBitstringView view; size_t size,i,offset; unsigned shift; void *memory;
+    LbBitstringView view; size_t size,source_bits; void *memory;
     if(!lb_bitstring_view(lb_process_result(process),&view) || view.bit_size%8) return LB_WORLD_BAD_RESULT;
     size=view.bit_size/8; if(size>LB_CALL_BYTES_LIMIT) return LB_WORLD_LIMIT;
     if(!size) return LB_WORLD_OK;
     if(lb_alloc_domain_allocate(call->world->engine->domain,size,&memory)!=LB_ALLOC_OK) return LB_WORLD_NO_MEMORY;
     call->bytes=memory; call->size=size;
-    offset=view.bit_offset/8; shift=(unsigned)(view.bit_offset%8);
-    if(!shift) memcpy(call->bytes,view.data+offset,size);
-    else for(i=0;i<size;++i)
-        call->bytes[i]=(unsigned char)((view.data[offset+i]<<shift)|(view.data[offset+i+1]>>(8-shift)));
+    /* Valid owned views fit their backing binary. Treat broken internal
+     * metadata as an invariant violation, not a successful truncated reply. */
+    if(!lb_size_add(view.bit_offset,view.bit_size,&source_bits) || source_bits>SIZE_MAX-7 ||
+       !lb_bits_copy(view.data,(source_bits+7)/8,view.bit_offset,
+                     call->bytes,size,0,view.bit_size)) abort();
     return LB_WORLD_OK;
 }
 void lb_call_complete(LbCall *call,LbProcess *process,LbTaskStatus status)

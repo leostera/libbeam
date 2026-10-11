@@ -152,3 +152,50 @@ a fallible C Engine and connect the C++ adapter, then demonstrate the unchanged 
 lifecycle target. B-cluster stateful execution and unchanged G3 acceptance still
 follow. Earlier uncommitted native lifecycle work remains preserved, not validated
 by these additive tests.
+
+## Follow-on: native forward bit copying
+
+Baseline `068aa543`. The preceding milestone status is historical; shared worker
+execution and public copied results now exist as recorded in
+[public Isolates](0003-public-isolates.md). `bit_copy.c` brings the native
+`erts_copy_bits_fwd` algorithm into that existing result-copy path. The source
+hash and exact adaptations are in `core/otp/bit-copy-sources.json` under `libbeam/`.
+
+The pure copier handles single-byte masks, aligned `memcpy`, shifted bytes and
+masked tails. It allocates nothing, retains nothing, and never collects. Its
+checked boundary refuses out-of-range offsets/counts, arithmetic overflow, NULL
+nonempty spans, and overlap of touched bytes **before writing**. Disjoint byte
+intervals in one allocation are allowed; disjoint bit intervals sharing a byte
+are not. Partial destination bytes must be initialized and retain their outside
+bits. Full-byte destinations need no initialization. Zero-length copies never
+dereference the spans. Valid declared pointer spans remain a caller obligation;
+this is not arbitrary-address validation.
+
+The native masked-tail algorithm already reads an extra source byte only when
+needed. It does not rely on payload padding. Public completion retains its existing
+byte-sized-result check, 64-KiB bound and fallible allocation; the new helper replaces
+the local aligned/unaligned copy loop without changing completion or ownership.
+
+Validation covers source/destination offsets 0–15, lengths 0–257, three data
+patterns, a 64-KiB unaligned copy, an independent bit-at-a-time oracle, preservation
+of outside destination bits and source bytes, unchanged destinations on refusal,
+and exact-end source/destination guard pages. Real compiled `binary_slice:identity/1`
+also returns native private SubBits argument views at 16 offsets and 513 lengths,
+with collection after every dispatch, copied result checks and exact retirement.
+Those argument views are constructed by the C test; **guest slicing is not
+admitted**. Existing public tests exercise the real worker's copied-result path.
+
+Final evidence: `/tmp/libbeam-bit-copy-commit-reviewed/summary.json` records 16
+passing Debug/Release CTests, actual fixture/public execution and UBSan, including
+the new copier and moving-GC view cases. All 29 tooling tests pass under the lock
+at `/tmp/libbeam-bit-copy-tooling/summary.json`. Earlier passing evidence is retained
+at `/tmp/libbeam-bit-copy-integrated-first/summary.json`. This is not new ASan,
+platform or performance acceptance. Stateful `two_isolates.cpp` remains red and
+unchanged.
+
+`bs_create_bin` remains explicitly refused. Its single generated case covers
+binary, integer, float, UTF, append/private-append and associated error handling.
+The copier supplies one real dependency; it does not justify dropping branches,
+substituting successful helpers, or admitting that case before its other consumers
+exist. Reverse copying, overlapping copies, writable binaries, matching contexts,
+and those construction instructions remain outside this slice.

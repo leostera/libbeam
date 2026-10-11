@@ -66,6 +66,9 @@ lifecycle target passes; the stateful example still refuses unsupported module i
 - `binary.c`: real immutable refcounted payloads, native BinRef/SubBits layouts,
   owner-local offheap chains, GC sweep and physical release. Literal/metadata
   decoding and copied byte-input invocation share this constructor.
+- `bit_copy.c`: native forward bit copying behind checked span/overlap bounds.
+  Copied public results use it; arbitrary offsets retain outside bits and need
+  no terminal padding. No bit-syntax instruction is admitted by this helper.
 - `term_compare.c`: native-derived nonrecursive exact equality for admitted terms
   and aligned/unaligned bitstrings. Explicit scratch OOM is checked before a
   generated comparison branch; failure is never an equality/inequality answer.

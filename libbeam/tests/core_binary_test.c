@@ -2,6 +2,7 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  */
 #include "process_internal.h"
+#include "bit_copy.h"
 #include <stdio.h>
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"CHECK %s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while(0)
 typedef struct { size_t calls,fail,live,bytes; } Memory;
@@ -179,6 +180,33 @@ static void copied_inputs(LbAllocDomain *d,Memory *m,LbCodeSpace *space,LbCodeMo
     CHECK(lb_alloc_domain_destroy(d)==LB_ALLOC_BUSY);
     lb_code_entry_release(wrap); lb_code_entry_release(identity);
 }
+static void unaligned_results(Memory *memory,LbCodeSpace *space,LbCodeModule *module)
+{
+    LbCodeEntry *identity=entry(space,module,"identity",1);
+    unsigned char data[66],expected[64],copied[64]; size_t offset,i,n;
+    size_t live=memory->live,bytes=memory->bytes;
+    for(i=0;i<sizeof(data);++i) data[i]=(unsigned char)(i*173+19);
+    for(offset=0;offset<16;++offset) for(n=0;n<=512;++n) {
+        LbProcess *p; LbSubBits *sub; LbBitstringView view;
+        CHECK(lb_process_create_binary(identity,data,sizeof(data),5,&p)==LB_PROCESS_READY);
+        /* A valid private native argument view. No guest slicing instruction
+         * is claimed: the guest executes the actual identity/1 BEAM code. */
+        sub=(LbSubBits *)boxed_val(p->reg[0]); CHECK(sub->thing_word==LB_HEADER_SUB_BITS);
+        sub->start=offset; sub->end=offset+n;
+        run(p,1);
+        CHECK(lb_bitstring_view(lb_process_result(p),&view) && view.bit_offset==offset && view.bit_size==n);
+        memset(expected,0xa5,sizeof(expected)); memset(copied,0xa5,sizeof(copied));
+        for(i=0;i<n;++i) {
+            unsigned bit=(data[(offset+i)/8]>>(7-(offset+i)%8))&1,mask=1u<<(7-i%8);
+            expected[i/8]=(unsigned char)((expected[i/8]&~mask)|(bit?mask:0));
+        }
+        CHECK(lb_bits_copy(view.data,(offset+n+7)/8,offset,copied,sizeof(copied),0,n));
+        CHECK(!memcmp(copied,expected,sizeof(copied)) && refcount(lb_process_result(p))==1);
+        lb_process_destroy(p); CHECK(memory->live==live && memory->bytes==bytes);
+    }
+    lb_code_entry_release(identity);
+    puts("CORE_BINARY_BIT_COPY_OK native_argument_views=true identity_execution=true moving_gc=true offsets=16 lengths=513 exact_retirement=true guest_slicing=false");
+}
 static void metadata_copy_failure(Memory *memory,LbCodeSpace *space,LbCodeModule *module)
 {
     Eterm literal=payload(space,module->attributes);
@@ -224,6 +252,7 @@ static void executable_test(const char *path)
         CHECK(lb_code_unload(module)==LB_CODE_BUSY); lb_process_destroy(p);
     }
     copied_inputs(engine->domain,&m,space,module);
+    unaligned_results(&m,space,module);
     metadata_copy_failure(&m,space,module);
     { Eterm what=atom(space,"attributes"),value; LbProcess *p=invoke(space,module,"module_info",&what,1);
       run(p,1); value=payload(space,lb_process_result(p)); zero_binary(value,2056,0x7f);

@@ -1,0 +1,15 @@
+{
+  "baseline": "068aa543",
+  "scope": "Native forward bit copying used by copied public results; no binary-construction instruction admission.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_bits.c": "2b803014c329c7c2c30e60c0bffda90911985b9ce1703952e7315e28694ccdb6"
+  },
+  "adaptations": [
+    "erts_copy_bits_fwd and its MAKE_MASK/MASK_BITS macros preserve the native same-byte, aligned memcpy, shifted-byte and masked-tail algorithms. Uint/byte/sys_memcpy use size_t/unsigned char/memcpy; offsets use division and masking by eight.",
+    "A checked byte-span boundary rejects out-of-range offsets/counts, size arithmetic overflow, NULL nonempty spans and touched-byte overlap before mutation. Non-overlapping intervals within one allocation are allowed; zero-length copies do not dereference either span.",
+    "Partial destination bytes must be initialized and retain bits outside the requested interval. Full-byte destinations need no initialization. The native tail read is already conditional on the source bits needed; no allocator padding or extra terminal lookahead is assumed.",
+    "Public result transport uses this pure copier after its existing fallible allocation and byte-sized/64-KiB result checks. No scratch, collection, ownership transfer, new BIF or generated instruction is introduced.",
+    "bs_create_bin remains refused: admitting its whole generated transform/dispatch requires the remaining integer, float, Unicode, append/writable and error-context dependencies. A copied-buffer helper grants none of those capabilities. Reverse copying and overlapping copies are not supplied."
+  ],
+  "other_inputs": ["binary-sources.json", "execution-sources.json"]
+}

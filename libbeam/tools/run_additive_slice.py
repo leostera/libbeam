@@ -63,6 +63,7 @@ def main():
                             root / 'libbeam/tests/fixtures/add_slice.erl',
                             root / 'libbeam/tests/core_decimal_test.c', root / 'libbeam/tests/fixtures/decimal_slice.erl',
                             root / 'libbeam/core/otp/decimal-sources.json',
+                            root / 'libbeam/tests/core_bit_copy_test.c', root / 'libbeam/core/otp/bit-copy-sources.json',
                             root / 'libbeam/tests/core_binary_test.c', root / 'libbeam/tests/fixtures/binary_slice.erl',
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
@@ -112,6 +113,11 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError(f'Decimal reference changed: {filename}')
             summary['decimal_sources'] = decimal_sources
+            bit_copy_sources = json.loads((root / 'libbeam/core/otp/bit-copy-sources.json').read_text())
+            for filename, expected in bit_copy_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Bit-copy reference changed: {filename}')
+            summary['bit_copy_sources'] = bit_copy_sources
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
@@ -334,7 +340,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -353,9 +359,9 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
             run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture])
             run('local-ubsan', [out / 'engine-ubsan/core_local_test', local_fixture])
@@ -407,6 +413,7 @@ def main():
             summary['tuple_list_shape_execution_passed'] = True
             summary['numeric_addition_execution_passed'] = True
             summary['decimal_continuation_execution_passed'] = True
+            summary['native_bit_copy_passed'] = True
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
