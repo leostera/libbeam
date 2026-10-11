@@ -88,6 +88,71 @@ static void permuted_ring(LbCodeSpace *space,LbCodeEntry *e)
     }
     CHECK(lb_pid_table_destroy(t)==LB_PID_OK);
 }
+static void fun_consumers(LbCodeSpace *space,LbCodeModule *module,LbCodeModule *target_module,Memory *m)
+{
+    LbCodeEntry *compare=entry(space,module,"reference_equal",2);
+    LbFunEntry target={.dispatch={.addresses={compare->entry->dispatch.addresses[0]}},
+        .module=module->name,.arity=1,.owner=module};
+    for(size_t different=0;different<2;++different) {
+        LbProcess *p=create(compare); size_t users=module->users;
+        size_t calls=m->calls; m->fail=calls+1;
+        CHECK(lb_fun_retain(p,&target)==LB_ALLOC_NO_MEMORY && !p->fun_leases && module->users==users);
+        m->fail=0; CHECK(lb_fun_retain(p,&target)==LB_ALLOC_OK && module->users==users+1);
+        unsigned char bytes[65]; memset(bytes,0x6b,sizeof(bytes)); Eterm binary;
+        CHECK(lb_bitstring_build(space->domain,&p->off_heap,&p->htop,bytes,520,0,&binary)==LB_ALLOC_OK);
+        LbFun *fun=(LbFun *)p->htop; p->htop+=LB_FUN_WORDS+1;
+        fun->thing_word=LB_FUN_HEADER(1,1); fun->entry.fun=&target; fun->env[0]=binary;
+        p->reg[0]=make_boxed((Eterm *)fun);
+        size_t words=0; CHECK(lb_flat_size(space->domain,p->reg[0],&words) && words==LB_FUN_WORDS+1+LB_REFC_BITS_WORDS);
+        p->reg[1]=lb_copy_flat(p->reg[0],&p->htop,&p->off_heap);
+        CHECK(!is_non_value(p->reg[1]) && lb_fun_free(lb_fun(p->reg[1]))==1);
+        if(different) ((LbFun *)boxed_val(p->reg[1]))->env[0]=make_small(7);
+        CHECK(lb_process_has_other_reference(p,binary,NULL)); /* closure environment is an alias */
+        m->fail=m->calls+1; CHECK(lb_process_collect(p,0)==LB_PROCESS_NO_MEMORY && module->users==users+1);
+        m->fail=0; CHECK(lb_process_collect(p,0)==LB_PROCESS_READY && module->users==users+1);
+        CHECK(lb_fun(p->reg[0])->entry.fun==&target);
+        CHECK(finish(p)==LB_PROCESS_DONE); LbBitstringView view;
+        CHECK(lb_bitstring_view(lb_process_result(p),&view)); const char *expected=different?"different":"equal";
+        CHECK(view.bit_size==strlen(expected)*8 && !memcmp(view.data,expected,strlen(expected)));
+        CHECK(lb_process_collect(p,0)==LB_PROCESS_DONE && !p->fun_leases && module->users==users);
+        lb_process_destroy(p);
+    }
+    lb_code_entry_release(compare);
+    LbCodeEntry *callee=entry(space,target_module,"captured_pair",2);
+    LbFunEntry callable={.dispatch={.addresses={callee->entry->dispatch.addresses[0]}},
+        .module=target_module->name,.arity=1,.owner=target_module};
+    lb_code_entry_release(callee); /* only the closure/process lease may pin target code */
+    for(size_t badarity=0;badarity<2;++badarity) {
+        LbCodeEntry *invoke=entry(space,module,badarity?"invoke0":"invoke",badarity?1:2);
+        LbProcess *p=create(invoke); CHECK(lb_fun_retain(p,&callable)==LB_ALLOC_OK);
+        unsigned char bytes[65]; memset(bytes,0x74,sizeof(bytes)); Eterm binary;
+        CHECK(lb_bitstring_build(space->domain,&p->off_heap,&p->htop,bytes,520,0,&binary)==LB_ALLOC_OK);
+        LbFun *fun=(LbFun *)p->htop; p->htop+=LB_FUN_WORDS+1;
+        fun->thing_word=LB_FUN_HEADER(1,1); fun->entry.fun=&callable; fun->env[0]=binary;
+        p->reg[0]=make_boxed((Eterm *)fun); p->reg[1]=make_small(42);
+        CHECK(lb_process_collect(p,0)==LB_PROCESS_READY);
+        CHECK(lb_code_unload(target_module)==LB_CODE_BUSY);
+        if(!badarity) {
+            for(size_t i=0;i<100 && *p->i!=op_call_bif_W;++i) CHECK(lb_process_run(p,1,128)==LB_PROCESS_YIELDED);
+            CHECK(*p->i==op_call_bif_W); /* current PC is native; only the saved target continuation pins code */
+            while(p->htop<p->stop-S_RESERVED-2) *p->htop++=NIL;
+        }
+        size_t collected=p->collections;
+        CHECK(finish(p)==(badarity?LB_PROCESS_EXCEPTION:LB_PROCESS_DONE));
+        if(!badarity) CHECK(p->collections>collected); /* collection while executing foreign defining code */
+        if(badarity) CHECK(lb_process_exception(p)==am_badarity);
+        else {
+            Eterm *result=tuple_val(lb_process_result(p)); LbBitstringView view;
+            CHECK(arityval(result[0])==3 && result[1]==make_small(42) && lb_is_reference(result[3]));
+            CHECK(lb_bitstring_view(result[2],&view) && view.bit_size==520 && !memcmp(view.data,bytes,65));
+        }
+        CHECK(lb_process_collect(p,0)==p->status); lb_process_destroy(p); lb_code_entry_release(invoke);
+    }
+    CHECK(!target_module->users);
+    LbCodeEntry *invoke=entry(space,module,"invoke0",1); LbProcess *p=create(invoke);
+    CHECK(finish(p)==LB_PROCESS_EXCEPTION && lb_process_exception(p)==am_badfun);
+    lb_process_destroy(p); lb_code_entry_release(invoke);
+}
 static void references(LbCodeSpace *space,LbCodeModule *module,Memory *m)
 {
     LbEngine *engine=space->engine;
@@ -149,11 +214,13 @@ static void references(LbCodeSpace *space,LbCodeModule *module,Memory *m)
 int main(int argc,char **argv)
 {
     CHECK(lb_instruction_supported(op_self_x) && lb_instruction_supported(op_self_y) && lb_instruction_supported(op_is_pid_fx));
-    if(argc==1) { puts("CORE_PID_GATE_OK"); return 0; } CHECK(argc==2);
+    if(argc==1) { puts("CORE_PID_GATE_OK"); return 0; } CHECK(argc==3);
     Memory m={0}; LbSystemAllocator allocator={&m,allocate,release}; LbEngine *engine; LbCodeSpace *a,*b;
     CHECK(lb_engine_create(&allocator,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&a)==LB_CODE_OK && lb_code_space_create(engine,&b)==LB_CODE_OK);
     LbCodeModule *ma=load(a,argv[1]),*mb=load(b,argv[1]); LbCodeEntry *ea=entry(a,ma,"identity",0),*eb=entry(b,mb,"identity",0);
-    table(a,ea,&m); permuted_ring(a,ea); references(a,ma,&m);
+    LbCodeModule *target_module=load(a,argv[2]);
+    table(a,ea,&m); permuted_ring(a,ea); references(a,ma,&m); fun_consumers(a,ma,target_module,&m);
+    CHECK(lb_code_unload(target_module)==LB_CODE_OK);
     LbProcess *failed=create(ea); size_t before=m.live; m.fail=m.calls+1;
     CHECK(finish(failed)==LB_PROCESS_NO_MEMORY && !a->pids && !failed->identity.owner && m.live==before);
     m.fail=0; lb_process_destroy(failed);

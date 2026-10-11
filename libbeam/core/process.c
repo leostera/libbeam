@@ -66,6 +66,7 @@ void lb_process_destroy(LbProcess *p)
     if(p->running) abort(); /* internal serialized API misuse, not a guest path */
     module=p->entry_module; d=module->space->domain;
     if(p->identity.owner && lb_pid_remove(p->identity.owner,&p->identity)!=LB_PID_OK) abort();
+    lb_fun_leases_clear(p);
     lb_decimal_destroy(p->decimal);
     lb_offheap_clear(&p->off_heap);
     lb_offheap_clear(&p->writable);

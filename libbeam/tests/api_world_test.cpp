@@ -65,6 +65,8 @@ int main(int argc,char** argv) {
         auto fresh_ref_a=take(a.call("pid_slice","reference_echo",view(kept)));
         auto fresh_ref_b=take(b.call("pid_slice","reference_echo",view(kept)));
         CHECK(take(fresh_ref_a.wait_until(deadline()))==kept && take(fresh_ref_b.wait_until(deadline()))==kept);
+        auto not_a_fun=take(b.call("pid_slice","invoke0",view(kept)));
+        error(not_a_fun.wait_until(deadline()),ErrorCode::exception);
         for(const char* function : {"identity","gc","tail"}) {
             auto call=take(b.call("local_slice",function,view(kept)));
             CHECK(take(call.wait_until(deadline()))==kept);

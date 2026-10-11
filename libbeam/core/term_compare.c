@@ -8,6 +8,7 @@
 #include "term_compare.h"
 #include "flatmap.h"
 #include "reference.h"
+#include "fun.h"
 #include <stdlib.h>
 
 typedef unsigned char byte;
@@ -112,6 +113,12 @@ tailrecur_ne:
             bb=tuple_val(b); sz=(Sint)arityval(*aa);
             if(!sz) goto pop_next;
             ++aa; ++bb; goto term_array;
+        case FUN_SUBTAG: {
+            const LbFun *af=lb_fun(a),*bf=lb_fun(b);
+            if(!bf || af->thing_word!=bf->thing_word || af->entry.fun!=bf->entry.fun) goto not_equal;
+            sz=(Sint)lb_fun_free(af); if(!sz) goto pop_next;
+            aa=(Eterm *)af->env; bb=(Eterm *)bf->env; goto term_array;
+        }
         case REF_SUBTAG: {
             const LbOrdinaryRef *ar=lb_reference(a),*br=lb_reference(b);
             if(br && ar->num[0]==br->num[0] && ar->num[1]==br->num[1] && ar->num[2]==br->num[2]) goto pop_next;

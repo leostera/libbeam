@@ -91,7 +91,12 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   `make_ref/0` also executes: native ordinary references use an Engine-owned
   serialized counter, survive moving GC/copying, and support native equality
   and reference tests. Exhaustion refuses before allocation or counter wrap.
-  Spawn, closures, mailboxes and monitors still require their own implementation.
+  Spawn, guest closure creation, mailboxes and monitors still require their own implementation.
+- `fun.c`: local closure layout and defining-code leases, environment tracing,
+  copying and exact equality. Native fun-call cases now execute C-created owned
+  closures against real loaded BEAM functions, including captured binaries,
+  badfun/badarity and moving GC while a saved continuation pins another module.
+  The loader's guest `make_fun3` path remains unadmitted; this is not yet spawn.
 - `binary_size.c`: read-only native flat64 aggregate sizing over emitted
   descriptors, with explicit register spans and typed guest/metadata/policy
   failures. Native UTF8/16 deferred validation remains distinct from UTF32.

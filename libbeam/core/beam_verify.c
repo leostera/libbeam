@@ -201,6 +201,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_label_1:case genop_line_1:
         case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:
         case genop_call_2:case genop_call_only_2:case genop_call_last_3:
+        case genop_call_fun_1:case genop_call_fun2_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
         case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:case genop_trim_2:
         case genop_jump_1:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:
@@ -317,6 +318,12 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             }
             break;
         case genop_return_0:REQUIRE(f.frame==NO_FRAME && source(st,&f,(BeamOpArg){TAG_x,0})); terminal=1;break;
+        case genop_call_fun_1:case genop_call_fun2_3:
+            r=op->op==genop_call_fun_1?0:1;
+            REQUIRE(a[r].type==TAG_u && (Uint)a[r].val<=MAX_ARG && f.frame!=NO_FRAME);
+            live=(Uint)a[r].val; REQUIRE(arguments(&f,live));
+            REQUIRE(source(st,&f,op->op==genop_call_fun_1?(BeamOpArg){TAG_x,(Sint)live}:a[2]));
+            forget_append_facts(&f); memset(f.x,0,sizeof(f.x)); memset(f.xs,0,sizeof(f.xs)); define(f.x,0); f.heap=0; break;
         case genop_call_2:case genop_call_only_2:case genop_call_last_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
             REQUIRE(a[0].type==TAG_u); live=(Uint)a[0].val;

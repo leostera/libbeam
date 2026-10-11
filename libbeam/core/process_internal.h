@@ -10,9 +10,11 @@
 #include "decimal.h"
 #include "binary_vheap.h"
 #include "pid_table.h"
+#include "fun.h"
 struct LbProcess {
     LbCodeModule *entry_module;
     LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
+    LbFunLease *fun_leases; /* live closure entries retain their defining code */
     const LbMFA *current;
     LbMFA local_mfa; /* owned copy of a private function's native word header */
     const BeamInstr *i;
@@ -39,7 +41,10 @@ int lb_heap_reserve_binary(LbProcess *,size_t need,size_t incoming_bytes,size_t 
 int lb_process_has_other_reference(const LbProcess *,Eterm,const Eterm *except);
 int lb_flat_size(LbAllocDomain *,Eterm,size_t *);
 /* Fallible only on binary reference/overhead exhaustion after size/reserve.
- * Failure rolls back the new offheap prefix and heap top, never shared source. */
+ * Failure rolls back the new offheap prefix and heap top, never shared source.
+ * For fun-containing terms the caller must first retain every defining entry
+ * in the destination process with lb_fun_retain. This primitive copies term
+ * storage only; it neither acquires nor transfers code leases. */
 Eterm lb_copy_flat(Eterm,Eterm **,LbOffHeap *);
 extern const BeamInstr lb_host_return[1];
 #endif

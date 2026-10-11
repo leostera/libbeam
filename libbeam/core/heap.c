@@ -5,7 +5,7 @@
  * sweep. Explicit heap/stack/X/result/exception roots replace global Process
  * machinery. Immutable and process-owned writable binary references join
  * tuple/list/big/float and small flatmap layouts. No generational collector,
- * funs or HAMT nodes yet.
+ * external funs or HAMT nodes yet.
  */
 #include "process_internal.h"
 #include "binary_internal.h"
@@ -24,13 +24,19 @@ static size_t boxed_words(const Eterm *pointer)
     case SUB_BITS_SUBTAG:ASSERT(header==LB_HEADER_SUB_BITS); return LB_SUB_BITS_WORDS;
     case MAP_SUBTAG:return lb_flatmap_words(pointer);
     case REF_SUBTAG:(void)lb_reference(make_boxed(pointer)); return LB_REF_WORDS;
+    case FUN_SUBTAG:return LB_FUN_WORDS+lb_fun_free(lb_fun(make_boxed(pointer)));
     default:abort(); /* internal invariant: these representations are not admitted */
     }
 }
-static void move_root(Eterm *root,Eterm **top)
+static void move_root(LbProcess *p,Eterm *root,Eterm **top)
 {
     Eterm term=*root,*ptr,*dst=*top;
     size_t words;
+    if(is_boxed(term) && is_literal_ptr(term) && (*boxed_val(term)&_TAG_HEADER_MASK)==FUN_SUBTAG) {
+        const LbFun *fun=lb_fun(term);
+        if(lb_fun_free(fun)) abort(); /* only closed literal funs are admitted */
+        lb_fun_mark(p,fun->entry.fun);
+    }
     if(is_boxed(term) && !is_literal_ptr(term)) {
         ptr=boxed_val(term);
         if(!is_header(*ptr)) { *root=*ptr; return; }
@@ -65,36 +71,43 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
     memcpy(stop,p->stop,stack*sizeof(Eterm));
     /* Commit: tospace capacity bounds all unique live objects by the old used
      * heap. No allocation/failure follows the first forwarding write. */
-    for(i=0;i<live;++i) move_root(&p->reg[i],&top);
+    lb_fun_marks_clear(p);
+    for(i=0;i<live;++i) move_root(p,&p->reg[i],&top);
     for(i=live;i<MAX_REG;++i) p->reg[i]=NIL;
-    move_root(&p->fvalue,&top); move_root(&p->exception_value,&top);
-    move_root(&p->construction_root,&top);
-    for(i=0;i<stack;++i) move_root(&stop[i],&top); /* CP words are primary headers */
+    move_root(p,&p->fvalue,&top); move_root(p,&p->exception_value,&top);
+    move_root(p,&p->construction_root,&top);
+    for(i=0;i<stack;++i) move_root(p,&stop[i],&top); /* CP words are primary headers */
     scan=heap;
     while(scan<top) {
         Eterm value=*scan;
         if(is_header(value)) {
             if(is_arity_value(value)) scan+=(value>>_HEADER_ARITY_OFFS)?1:2;
             else if(value==LB_FLATMAP_HEADER) { (void)lb_flatmap_words(scan); scan+=2; }
+            else if((value&_TAG_HEADER_MASK)==FUN_SUBTAG) {
+                const LbFun *fun=lb_fun(make_boxed(scan)); lb_fun_mark(p,fun->entry.fun);
+                scan+=LB_FUN_WORDS; /* the following environment words are roots */
+            }
             else {
                 if(value==LB_HEADER_SUB_BITS) {
                     LbSubBits *sub=(LbSubBits *)scan;
                     /* Volatile views follow their BinRef after backing growth.
                      * Match contexts still require additional representations. */
                     ASSERT((sub->base_flags&3)!=LB_SUB_MUTABLE);
-                    move_root(&sub->orig,&top);
+                    move_root(p,&sub->orig,&top);
                     ASSERT(*boxed_val(sub->orig)==LB_HEADER_BIN_REF);
                 }
                 scan+=boxed_words(scan);
             }
-        } else { move_root(scan,&top); ++scan; }
+        } else { move_root(p,scan,&top); ++scan; }
     }
+    Uint code_cost=lb_fun_mark_code(p);
+    lb_fun_sweep(p);
     lb_offheap_sweep(&p->off_heap);
     lb_writable_sweep(&p->writable,&p->off_heap);
     p->bin_vheap_sz=lb_binary_vheap_next(binary_words(p),p->bin_vheap_sz);
     ASSERT(top<=stop && (size_t)(stop-top)>=need+S_RESERVED);
     p->heap=heap; p->htop=top; p->stop=stop; p->hend=heap+size;
-    p->last_gc_cost=1+(Uint)(top-heap)/16; ++p->collections;
+    p->last_gc_cost=1+(Uint)(top-heap)/16+code_cost; ++p->collections;
     lb_release(domain,old); return 1;
 }
 int lb_heap_reserve(LbProcess *p,size_t need,size_t live)
@@ -127,6 +140,7 @@ int lb_process_has_other_reference(const LbProcess *p,Eterm value,const Eterm *e
             if(((const LbSubBits *)scan)->orig==value) return 1;
             scan+=boxed_words(scan); break;
         case MAP_SUBTAG:(void)lb_flatmap_words(scan); scan+=2; break;
+        case FUN_SUBTAG:(void)lb_fun(make_boxed(scan)); scan+=LB_FUN_WORDS; break;
         case POS_BIG_SUBTAG:case NEG_BIG_SUBTAG:case FLOAT_SUBTAG:
         case HEAP_BITS_SUBTAG:case BIN_REF_SUBTAG:case REF_SUBTAG:
             scan+=boxed_words(scan); break;
@@ -152,6 +166,7 @@ int lb_flat_size(LbAllocDomain *domain,Eterm term,size_t *out)
             Eterm *p=boxed_val(value); words=boxed_words(p);
             if(is_arity_value(*p)) { n=(size_t)(*p>>_HEADER_ARITY_OFFS); children=p+1; }
             else if(*p==LB_FLATMAP_HEADER) { n=p[1]+1; children=p+2; }
+            else if((*p&_TAG_HEADER_MASK)==FUN_SUBTAG) { n=lb_fun_free(lb_fun(value)); children=p+LB_FUN_WORDS; }
             else if(*p==LB_HEADER_SUB_BITS) words=LB_REFC_BITS_WORDS;
             else if(*p==LB_HEADER_BIN_REF) goto done; /* not a user term */
         } else if(!is_immed(value)) goto done;
@@ -192,6 +207,7 @@ Eterm lb_copy_flat(Eterm value,Eterm **top,LbOffHeap *offheap)
         if(is_header(*scan)) {
             if(is_arity_value(*scan)) scan+=(*scan>>_HEADER_ARITY_OFFS)?1:2;
             else if(*scan==LB_FLATMAP_HEADER) { (void)lb_flatmap_words(scan); scan+=2; }
+            else if((*scan&_TAG_HEADER_MASK)==FUN_SUBTAG) { (void)lb_fun(make_boxed(scan)); scan+=LB_FUN_WORDS; }
             else scan+=boxed_words(scan); /* SubBits and BinRef already paired */
         } else {
             if(!copy_root(scan,top,offheap)) goto fail;
