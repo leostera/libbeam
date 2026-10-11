@@ -3,7 +3,11 @@
  * Joinable Engine worker driving the existing generated BEAM interpreter.
  * No independent VM, tenant TLS, ambient native callbacks or process startup.
  */
+#define _POSIX_C_SOURCE 200809L
 #include "executor.h"
+#include "receive.h"
+#include <time.h>
+#include <errno.h>
 #include "code_internal.h"
 #include "binary.h"
 #include "world_internal.h"
@@ -59,7 +63,11 @@ static LbTask *runnable(LbEngine *engine)
     LbTask *first=engine->cursor?engine->cursor:engine->tasks,*task=first;
     if(!first) return NULL;
     do {
-        if(task->status==LB_TASK_PENDING) return task;
+        if(task->status==LB_TASK_PENDING) {
+            LbProcessStatus status=lb_receive_timer_poll(task->process);
+            if(status!=LB_PROCESS_READY) { task->process->status=status; task->process->waiting=0; }
+            if(!task->process->waiting) return task;
+        }
         task=task->next?task->next:engine->tasks;
     } while(task!=first);
     return NULL;
@@ -104,7 +112,26 @@ static void *worker_main(void *context)
     while(!engine->worker_stop) {
         int retired=lb_world_retire_step(engine);
         LbTask *task=runnable(engine);
-        if(!task && !retired) { checked(pthread_cond_wait(&engine->wake,&engine->mutex)); continue; }
+        if(!task && !retired) {
+            int timed=0;
+            for(LbTask *pending=engine->tasks;pending;pending=pending->next)
+                if(pending->status==LB_TASK_PENDING && (pending->process->flags&F_INSLPQUEUE)) timed=1;
+            if(timed) {
+                struct timespec until;
+                if(clock_gettime(CLOCK_REALTIME,&until)) {
+                    for(LbTask *pending=engine->tasks;pending;pending=pending->next)
+                        if(pending->status==LB_TASK_PENDING && (pending->process->flags&F_INSLPQUEUE)) {
+                            pending->process->status=LB_PROCESS_ENVIRONMENT; pending->process->waiting=0;
+                        }
+                    continue;
+                }
+                until.tv_nsec+=1000000;
+                if(until.tv_nsec>=1000000000) { ++until.tv_sec; until.tv_nsec-=1000000000; }
+                int result=pthread_cond_timedwait(&engine->wake,&engine->mutex,&until);
+                if(result!=ETIMEDOUT) checked(result);
+            } else checked(pthread_cond_wait(&engine->wake,&engine->mutex));
+            continue;
+        }
         if(task) {
             engine->cursor=task->next?task->next:engine->tasks;
             step(task);

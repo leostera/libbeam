@@ -10,6 +10,7 @@
 #include "writable.h"
 #include "binary_build.h"
 #include "reference.h"
+#include "receive.h"
 #define is_not_ref(term) (!lb_is_reference(term))
 #define erl_send lb_erl_send
 #define TRAP (1u<<LB_EXC_OFFSET)
@@ -242,6 +243,8 @@ LbProcessStatus lb_process_run(LbProcess *c_p,size_t budget,unsigned reductions)
     if(!c_p || c_p->running || c_p->entry_module->space->loading) return LB_PROCESS_INVALID;
     if(c_p->status!=LB_PROCESS_READY && c_p->status!=LB_PROCESS_YIELDED) return c_p->status;
     if(reductions<4) return LB_PROCESS_INVALID;
+    if(c_p->waiting) return LB_PROCESS_INVALID;
+    if(c_p->receive_message) c_p->flags|=F_DELAY_GC;
     c_p->running=1; reg=c_p->reg; I=c_p->i; E=c_p->stop; HTOP=c_p->htop; FCALLS=reductions;
     next_op=*I;
 dispatch:
@@ -294,6 +297,7 @@ context_switch:
     if(!c_p->current) goto malformed_code;
     c_p->arity=c_p->current->arity;
 context_switch3:
+    c_p->flags &= ~(1u<<13); /* native F_DELAY_GC cannot cross schedule-out */
     c_p->status=LB_PROCESS_YIELDED; goto stop;
 find_func_info: {
     /* Materialize the native error value, not handle_error/stacktrace/catch.

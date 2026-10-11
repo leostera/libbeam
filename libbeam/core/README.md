@@ -34,7 +34,7 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   Malformed module/function/argument-list inputs retain native badarg; other
   valid MFAs/apply shapes refuse the runtime profile, not a guest exception.
   `spawn/1` remains an unadmitted preloaded Erlang wrapper, not a native alias;
-  spawn monitors, signals and mailboxes remain pending.
+  spawn monitors and broader signals remain pending; local send and selective receive execute on owned mailboxes.
   Spaces retain it through physical release; shutdown refuses live children;
   out-of-order owner drop defers cleanup to the last physical child. No singleton
   or implicit world. The C++ factory owns this C handle.
@@ -44,7 +44,16 @@ lifecycle target passes; the stateful example still refuses unsupported module i
 - `world.c`: C world/call/reclamation ownership, private code-space loading, bounded
   copied transport and once-only completion. Closing cancels pending invocations;
   reclamation physically frees code/atoms/heaps while finite host controls survive.
-  Future spawned processes, mailboxes and timers still need real drain consumers.
+  Spawned and waiting processes and their owned messages drain on stop. Receive
+  deadlines belong to actors rather than external callbacks; broader timer and
+  monitor services remain pending.
+- `message.c`, `receive.c`: selective receive through whole native scan/removal/
+  wait/timeout cases, GC-rooted actor copies, waiting-task exclusion and wakeup
+  after send publication. Compiler-produced persistent request/reply and timeout
+  fixtures execute on the shared worker; copied-closure failure prefixes drain
+  queues and identities. Monotonic deadlines use bounded idle polling, not native
+  timer wheels or a hard latency guarantee. Receive-marker optimization, registered
+  destinations, monitors and broader signals remain unadmitted.
 - `alloc.c`: serialized fallible allocation domains, exact-base release and busy
   destruction. Not a guest quota or a performant carrier allocator.
 - `term.h`, `atoms.c`: selected flat 64-bit BEAM terms and private atom namespaces.

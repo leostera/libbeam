@@ -11,7 +11,7 @@ import re
 PURE = {'distinct', 'equal', 'independent_moves', 'is_offset', 'negation_is_small',
         'never', 'succ', 'succ3', 'succ4'}
 OWNED = {'needs_nif_padding', 'is_heavy_bif', 'smp_already_locked', 'smp_mark_target_label'}
-GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2', 'make_fun3', 'is_function2', 'get', 'element'}
+GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2', 'make_fun3', 'is_function2', 'get', 'element', 'literal_timeout', 'literal_timeout_locked'}
 
 
 def project(text):

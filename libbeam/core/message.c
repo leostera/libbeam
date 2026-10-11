@@ -30,6 +30,7 @@ Eterm lb_erl_send(LbProcess *sender,Eterm destination,Eterm term)
     message->m[2]=from;
     status=lb_message_queue_append(&receiver->messages,message);
     if(status!=LB_PROCESS_READY) { lb_message_destroy(message); sender->status=status; return THE_NON_VALUE; }
+    receiver->waiting=0; /* publication precedes wake; the shared worker owns both */
     return term;
 }
 LbProcessStatus lb_message_import(LbProcess *receiver,const LbMessage *message,size_t live,Eterm *out)

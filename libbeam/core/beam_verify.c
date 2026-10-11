@@ -20,6 +20,7 @@ typedef struct {
     uint64_t x[BITS],y[BITS];
     uint32_t xs[MAX_REG],ys[MAX_REG]; /* representation fact, consumed value, or unknown */
     size_t frame,heap;
+    int matching;
 } Flow;
 typedef struct { BeamOp *op; Flow in; size_t function; int reached,queued; } Node;
 typedef struct {
@@ -98,7 +99,7 @@ static LbCodeStatus propagate(Analysis *w,size_t target,size_t function,const Fl
     if(!node->reached) { node->in=*flow; node->reached=1; changed=1; }
     else {
         Flow *old=&node->in;
-        REQUIRE(old->frame==flow->frame);
+        REQUIRE(old->frame==flow->frame && old->matching==flow->matching);
         for(r=0;r<BITS;++r) {
             uint64_t x=old->x[r]&flow->x[r],y=old->y[r]&flow->y[r];
             changed|=x!=old->x[r] || y!=old->y[r]; old->x[r]=x; old->y[r]=y;
@@ -201,6 +202,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         switch(op->op) {
         case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_label_1:case genop_line_1:
         case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:case genop_send_0:
+        case genop_loop_rec_2:case genop_loop_rec_end_1:case genop_remove_message_0:
+        case genop_wait_1:case genop_wait_timeout_2:case genop_timeout_0:
         case genop_call_2:case genop_call_only_2:case genop_call_last_3:
         case genop_call_fun_1:case genop_call_fun2_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
@@ -350,16 +353,16 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_send_0:
             REQUIRE(source(st,&f,(BeamOpArg){TAG_x,0}) && source(st,&f,(BeamOpArg){TAG_x,1}));
             REQUIRE(destination(&f,(BeamOpArg){TAG_x,0},f.xs[1])); break;
-        case genop_return_0:REQUIRE(f.frame==NO_FRAME && source(st,&f,(BeamOpArg){TAG_x,0})); terminal=1;break;
+        case genop_return_0:REQUIRE(!f.matching && f.frame==NO_FRAME && source(st,&f,(BeamOpArg){TAG_x,0})); terminal=1;break;
         case genop_call_fun_1:case genop_call_fun2_3:
-            r=op->op==genop_call_fun_1?0:1;
+            REQUIRE(!f.matching); r=op->op==genop_call_fun_1?0:1;
             REQUIRE(a[r].type==TAG_u && (Uint)a[r].val<=MAX_ARG && f.frame!=NO_FRAME);
             live=(Uint)a[r].val; REQUIRE(arguments(&f,live));
             REQUIRE(source(st,&f,op->op==genop_call_fun_1?(BeamOpArg){TAG_x,(Sint)live}:a[2]));
             forget_append_facts(&f); memset(f.x,0,sizeof(f.x)); memset(f.xs,0,sizeof(f.xs)); define(f.x,0); f.heap=0; break;
         case genop_call_2:case genop_call_only_2:case genop_call_last_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
-            REQUIRE(a[0].type==TAG_u); live=(Uint)a[0].val;
+            REQUIRE(!f.matching && a[0].type==TAG_u); live=(Uint)a[0].val;
             if(op->op==genop_call_2 || op->op==genop_call_only_2 || op->op==genop_call_last_3) {
                 size_t target;
                 REQUIRE(label(st,a[1])); target=labels[a[1].val];
@@ -407,6 +410,25 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 refine(&f,a[1],TUPLE_SHAPE|(uint32_t)a[2].val);
             }
             break;
+        case genop_wait_1:case genop_wait_timeout_2:
+            REQUIRE(!f.matching && roots(&f,0) && label(st,a[0]));
+            trim_live(&f,0); f.heap=0;
+            if(op->op==genop_wait_1) next=labels[a[0].val];
+            else {
+                REQUIRE(a[1].type==TAG_i || a[1].type==TAG_a);
+                alternate=labels[a[0].val];
+            }
+            break;
+        case genop_timeout_0:REQUIRE(!f.matching); break;
+        case genop_remove_message_0:
+            REQUIRE(f.matching); f.matching=0; break;
+        case genop_loop_rec_2:
+            REQUIRE(!f.matching && roots(&f,0) && label(st,a[0]) && a[1].type==TAG_x && a[1].val==0);
+            trim_live(&f,0); f.heap=0; failed=f; failure=&failed;
+            alternate=labels[a[0].val]; f.matching=1; REQUIRE(destination(&f,a[1],0)); break;
+        case genop_loop_rec_end_1:
+            REQUIRE(f.matching && label(st,a[0])); f.matching=0; trim_live(&f,0); f.heap=0;
+            next=labels[a[0].val]; break;
         case genop_jump_1:REQUIRE(label(st,a[0])); next=labels[a[0].val]; break;
         case genop_badmatch_1:case genop_case_end_1:REQUIRE(source(st,&f,a[0])); terminal=1;break;
         default:return LB_CODE_FORMAT;

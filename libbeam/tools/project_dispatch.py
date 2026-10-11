@@ -9,7 +9,7 @@ import re
 import hashlib
 
 NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c move_shift_cxx '
-         'move_return_c move_return_n move_return_x return put_tuple2_xI test_heap_It '
+         'move_return_c move_return_n move_return_x return put_tuple2_xI put_tuple2_yI test_heap_It '
          'i_call_ext_only_e i_move_call_ext_only_ec jump_f badmatch_x case_end_x '
          'i_allocate_zero_tt i_allocate_heap_zero_tIt allocate_tt allocate_heap_tIt '
          'i_call_ext_e i_move_call_ext_ce deallocate_Q i_is_eq_exact_immed_frc '
@@ -37,7 +37,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx i_trim_t move_trim_yxt move2_par_xxxy move_window2_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt send is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_trim_yxt move2_par_xxxy move_window2_xxy move_shift_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt send i_loop_rec_f loop_rec_end_f remove_message timeout timeout_locked is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx').split()
 
 
 def case(source, name):
@@ -288,9 +288,97 @@ def fallible_binary_build(body):
     return body
 
 
+def owned_receive_wait(body):
+    if 'OpCase(wait_locked_f)' not in body: return body
+    body=re.sub(r'erts_proc_(?:lock|unlock)\(c_p, ERTS_PROC_LOCKS_MSG_RECEIVE\);', '', body)
+    body=body.replace('      const BeamInstr** pi = (const BeamInstr **) c_p->def_arg_reg;\n      *pi = I+3;', '      c_p->receive_timeout_pc=I+3;')
+    body=body.replace('            const BeamInstr** pi = (const BeamInstr **) c_p->def_arg_reg;\n            *pi = I+3;', '            c_p->receive_timeout_pc=I+3;')
+    body=body.replace('erts_set_proc_timer_uword(c_p, I[1]);',
+        'LbProcessStatus lb_timer_status=lb_receive_timer_set(c_p,I[1]);\n'
+        '      if(lb_timer_status==LB_PROCESS_LIMIT) goto resource_limit;\n'
+        '      if(lb_timer_status!=LB_PROCESS_READY) goto environment_failure;')
+    body=body.replace('timeout_value == am_infinity', 'lb_receive_is_infinity(c_p,timeout_value)')
+    body=body.replace('int tres = erts_set_proc_timer_term(c_p, timeout_value);',
+        'int tres=!is_small(timeout_value) || signed_val(timeout_value)<0;\n'
+        '          if(!tres) {\n'
+        '            LbProcessStatus lb_timer_status=lb_receive_timer_set(c_p,(Uint)signed_val(timeout_value));\n'
+        '            if(lb_timer_status==LB_PROCESS_LIMIT) goto resource_limit;\n'
+        '            if(lb_timer_status!=LB_PROCESS_READY) goto environment_failure;\n          }')
+    body=body.replace('EXC_TIMEOUT_VALUE', 'LB_EXC_TIMEOUT_VALUE')
+    body=body.replace('erts_msgq_set_save_first(c_p);', 'c_p->messages.save=&c_p->messages.first;')
+    body=body.replace('c_p->i = I + (I[1]);', 'SET_I(I+(Sint)I[1]);')
+    body=body.replace('ERTS_PTMR_IS_TIMED_OUT(c_p)', 'c_p->receive_timed_out')
+    body=body.replace('erts_atomic32_read_band_relb(&c_p->state,\n      ~ERTS_PSFLG_ACTIVE);', 'c_p->waiting=1;')
+    body=body.replace('ERTS_PROC_IS_EXITING(c_p)', '(c_p->status!=LB_PROCESS_READY && c_p->status!=LB_PROCESS_YIELDED)')
+    body=body.replace('goto do_schedule;', 'goto context_switch3;')
+    return body
+
+
+def owned_receive_timeout(body):
+    if 'OpCase(timeout)' not in body and 'OpCase(timeout_locked)' not in body: return body
+    body=re.sub(r'  if \(ERTS_IS_P_TRACED_FL\(c_p, F_TRACE_RECEIVE\)\) \{.*?\n  \}', '', body, flags=re.S)
+    body=re.sub(r'  if \(ERTS_PROC_GET_SAVED_CALLS_BUF\(c_p\)\) \{.*?\n  \}', '', body, flags=re.S)
+    body=body.replace('erts_proc_unlock(c_p, ERTS_PROC_LOCKS_MSG_RECEIVE);', '')
+    body=body.replace('c_p->flags &= ~F_TIMO;', 'lb_receive_timer_cancel(c_p);')
+    body=body.replace('erts_msgq_set_save_first(c_p);', 'c_p->messages.save=&c_p->messages.first;')
+    return body
+
+
+def owned_receive_remove(body):
+    if 'OpCase(remove_message)' not in body: return body
+    body=body.replace('ErtsMessage*', 'LbMessage*')
+    body=body.replace('erts_msgq_peek_msg(c_p)', '(*c_p->messages.save)')
+    start=body.index('  if (ERTS_PROC_GET_SAVED_CALLS_BUF(c_p))')
+    end=body.index('  erts_msgq_unlink_msg_set_save_first',start)
+    # Saved-call, sequence-trace and probe effects have no admitted producers.
+    # Check the fragment token instead of silently accepting a traced message.
+    body=body[:start]+'  if (msgp->m[1]!=NIL) goto execution_refused;\n'+body[end:]
+    body=body.replace('erts_msgq_unlink_msg_set_save_first(c_p, msgp);',
+        'if(msgp!=c_p->receive_message || lb_message_queue_take(&c_p->messages)!=msgp) goto malformed_code;\n'
+        '  c_p->messages.save=&c_p->messages.first;\n  c_p->receive_message=NULL; c_p->receive_root=NIL;')
+    body=body.replace('CANCEL_TIMER(c_p);', 'lb_receive_timer_cancel(c_p);')
+    body=body.replace('erts_save_message_in_proc(c_p, msgp);', 'lb_message_destroy(msgp);')
+    body=body.replace('ERTS_IS_GC_DESIRED_INTERNAL(c_p, HTOP, E, 0)',
+        '(c_p->off_heap.overhead>=c_p->bin_vheap_sz)')
+    body=body.replace('ERTS_VBUMP_LEAVE_REDS_INTERNAL(c_p, 5, FCALLS);', 'if(FCALLS>5) FCALLS=5;')
+    body=body.replace('ERTS_DBG_CHK_REDS(c_p, FCALLS);', '')
+    body=body.replace('ERTS_CHK_MBUF_SZ(c_p);', '')
+    return body
+
+
+def owned_receive_scan(body):
+    if 'OpCase(i_loop_rec_f)' not in body and 'OpCase(loop_rec_end_f)' not in body:
+        return body
+    body=body.replace('goto do_schedule;', 'goto context_switch3;')
+    body=body.replace('ERTS_PROC_IS_EXITING(c_p)', '(c_p->status!=LB_PROCESS_READY && c_p->status!=LB_PROCESS_YIELDED)')
+    body=body.replace('erts_msgq_peek_msg(c_p)', '(*c_p->messages.save)')
+    body=body.replace('ErtsMessage*', 'LbMessage*')
+    body=body.replace('ERTS_UNREQ_PROC_MAIN_LOCK(c_p);', '')
+    body=body.replace('ERTS_REQ_PROC_MAIN_LOCK(c_p);', '')
+    body=body.replace('FCALLS -= erts_proc_sig_receive_helper(c_p, FCALLS, neg_o_reds,\n    &msgp, &get_out);',
+                      'get_out=0; msgp=*c_p->messages.save;')
+    body=body.replace('ERTS_SIG_IS_MSG(msgp)', '(msgp->queue==&c_p->messages)')
+    body=body.replace('ERTS_SIG_IS_EXTERNAL_MSG(msgp)', 'is_non_value(msgp->m[0])')
+    body=body.replace('ERTS_SIG_IS_INTERNAL_MSG(msgp)', '!is_non_value(msgp->m[0])')
+    start=body.find('    if (!erts_proc_sig_decode_dist(')
+    if start>=0:
+        end=body.index('    SWAPIN;',start)
+        # Distribution has no admitted producer/decoder. Refuse the effect,
+        # rather than dropping a message or manufacturing successful decoding.
+        body=body[:start]+'    goto execution_refused;\n'+body[end:]
+    body=body.replace('  x(0) = ERL_MESSAGE_TERM(msgp);',
+        '  SWAPOUT;\n  Eterm lb_view;\n  LbProcessStatus lb_receive_status=lb_message_peek_owned(c_p,&lb_view);\n  SWAPIN;\n'
+        '  if(lb_receive_status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n'
+        '  if(lb_receive_status==LB_PROCESS_LIMIT) goto resource_limit;\n'
+        '  if(lb_receive_status!=LB_PROCESS_READY || is_non_value(lb_view)) goto malformed_code;\n'
+        '  FCALLS-=(Sint)c_p->last_native_cost;\n  x(0)=lb_view;')
+    body=body.replace('erts_msgq_set_save_next(c_p);', 'lb_message_skip_owned(c_p);')
+    return body
+
+
 def project(source):
     bodies=[]
-    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd','i_bif1_sfbd','i_bif1_body_sbd')]
+    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd','i_bif1_sfbd','i_bif1_body_sbd','wait_locked_f')]
     names=NAMES+[name for shared in groups for name in re.findall(r'OpCase\((\w+)\)',shared)]
     selected=[(name,case(source,name)) for name in NAMES]+[('shared group',shared) for shared in groups]
     for name, body in selected:
@@ -302,6 +390,10 @@ def project(source):
         body=owned_make_fun(body)
         body=owned_predicate_bif(body)
         body=owned_send(body)
+        body=owned_receive_scan(body)
+        body=owned_receive_remove(body)
+        body=owned_receive_wait(body)
+        body=owned_receive_timeout(body)
         body=fallible_binary_build(body)
         # No tracing/saved-call/lock instrumentation capability exists in this
         # serialized interpreter. Remove those paths, not their semantic peers.
@@ -337,10 +429,11 @@ def project(source):
             body=body.replace('*E = NIL;', '*E = NIL;\n    for (unsigned lb_y=1; lb_y<needed; ++lb_y) E[lb_y]=NIL;')
         if name.startswith(('put_list_','update_list_')):
             body=body.replace('{','{\n  if ((Uint)(E-HTOP)<2+S_RESERVED || c_p->heap_reserved<2) goto malformed_code;\n  c_p->heap_reserved-=2;',1)
-        if name=='put_tuple2_xI':
+        if name in {'put_tuple2_xI','put_tuple2_yI'}:
             body=body.replace('ASSERT(arity != 0);',
                 'if (!arity || (Uint)(E-HTOP) < arity+1+S_RESERVED || c_p->heap_reserved < arity+1) goto malformed_code;\n  c_p->heap_reserved -= arity+1;')
-        if 'erts_' in body or 'ERTS_PROC_GET_' in body or 'save_calls(' in body:
+        dependency_code=re.sub(r'/\*.*?\*/|//[^\n]*', '', body, flags=re.S)
+        if 'erts_' in dependency_code or 'ERTS_PROC_GET_' in dependency_code or 'save_calls(' in dependency_code:
             raise RuntimeError('Unadapted execution dependency in '+name)
         bodies.append(body)
     support='\n'.join('case op_'+name+': return 1;' for name in names)

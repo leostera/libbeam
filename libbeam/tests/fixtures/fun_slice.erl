@@ -3,13 +3,36 @@
 -module(fun_slice).
 -export([echo/1, factory/1, closed/1, closed_factory/1, nested/1, badarity/1, reply/1, process_factory/1, process_nested/1, is_fun/1, is_zero/1, is_arity/2, process_loop/1,
          spawn_finite/1, spawn_loop/1, spawn_badarg/1, spawn_refused/1,
-         send_self/1, send_child/1, send_badarg/1]).
+         send_self/1, send_child/1, send_badarg/1, receive_roundtrip/1, receive_timeout/1, receive_self/1]).
 is_fun(F) when is_function(F) -> true;
 is_fun(_) -> false.
 is_zero(F) when is_function(F,0) -> true;
 is_zero(_) -> false.
 is_arity(F,N) when is_function(F,N) -> true;
 is_arity(_,_) -> false.
+receive_self(B) ->
+    self() ! {reply,fun() -> B end},
+    receive {reply,F} -> F() end.
+receive_roundtrip(B) ->
+    P = erlang:spawn(erlang, apply, [fun() -> actor_loop(0) end, []]),
+    self() ! {noise,B},
+    1 = actor_request(P),
+    2 = actor_request(P),
+    receive {noise,B} -> integer_to_binary(2) end.
+actor_request(P) ->
+    Ref = {actor_ref(),P},
+    P ! {self(),Ref},
+    receive {Ref,Count} -> Count after 5000 -> timeout end.
+actor_ref() -> make_ref().
+actor_loop(Count) ->
+    receive
+        {From,Ref} ->
+            Next = Count + 1,
+            From ! {Ref,Next},
+            actor_loop(Next)
+    end.
+receive_timeout(B) ->
+    receive {reply,Reply} -> Reply after 2 -> B end.
 send_self(B) -> self() ! {B,factory(B)}, B.
 send_child(B) ->
     P = erlang:spawn(erlang, apply, [fun() -> spinning(B) end, []]),

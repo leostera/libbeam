@@ -223,7 +223,7 @@ def main():
                 raise RuntimeError('Unexpected legacy runtime dependency in C core')
             admitted_threads = {'pthread_mutex_init', 'pthread_mutex_destroy', 'pthread_mutex_lock',
                                 'pthread_mutex_unlock', 'pthread_cond_init', 'pthread_cond_destroy',
-                                'pthread_cond_signal', 'pthread_cond_wait', 'pthread_create', 'pthread_join'}
+                                'pthread_cond_signal', 'pthread_cond_wait', 'pthread_cond_timedwait', 'pthread_create', 'pthread_join'}
             thread_symbols = set(re.findall(r'\b_?(pthread_[A-Za-z0-9_]+)\b', symbols))
             if thread_symbols != admitted_threads:
                 raise RuntimeError(f'Unexpected POSIX executor surface: {thread_symbols ^ admitted_threads}')
@@ -547,7 +547,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','pid_table','bif_process','fun','message']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','pid_table','bif_process','fun','message','receive']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
