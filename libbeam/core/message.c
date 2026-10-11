@@ -6,6 +6,32 @@
 #include "message.h"
 #include "process_internal.h"
 
+/* Selected native do_send local-PID branch: dead PIDs drop the message and
+ * return it; live receivers own a self-contained copy before queue mutation.
+ * Names/ports/external destinations have no execution admission in this slice. */
+Eterm lb_erl_send(LbProcess *sender,Eterm destination,Eterm term)
+{
+    sender->last_native_cost=1;
+    if(!is_internal_pid(destination)) {
+        if(is_atom(destination) || is_pid(destination)) sender->status=LB_PROCESS_REFUSED;
+        else sender->freason=LB_EXC_BADARG;
+        return THE_NON_VALUE;
+    }
+    LbCodeSpace *space=sender->entry_module->space;
+    if(!sender->world || !sender->running) { sender->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    LbProcess *receiver=lb_pid_lookup(space->pids,destination);
+    if(!receiver) return term;
+    if(receiver->messages.mq_len==INTPTR_MAX) { sender->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    Eterm from; LbProcessStatus status=lb_process_identity(sender,&from);
+    if(status!=LB_PROCESS_READY) { sender->status=status; return THE_NON_VALUE; }
+    Uint identity_cost=sender->last_native_cost,cost; LbMessage *message;
+    status=lb_message_create(space,term,&message,&cost); sender->last_native_cost=identity_cost+cost;
+    if(status!=LB_PROCESS_READY) { sender->status=status; return THE_NON_VALUE; }
+    message->m[2]=from;
+    status=lb_message_queue_append(&receiver->messages,message);
+    if(status!=LB_PROCESS_READY) { lb_message_destroy(message); sender->status=status; return THE_NON_VALUE; }
+    return term;
+}
 void lb_message_queue_init(LbMessageQueue *queue)
 {
     queue->first=NULL; queue->last=queue->save=&queue->first; queue->mq_len=0;

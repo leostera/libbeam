@@ -218,6 +218,11 @@ static void spawned_children(LbBytesView code)
     expect(call,LB_WORLD_OK);
     CHECK(lb_world_call(world,text("fun_slice"),text("spawn_finite"),text("guest"),&call)==LB_WORLD_OK);
     expect(call,LB_WORLD_OK);
+    CHECK(lb_world_call(world,text("fun_slice"),text("send_self"),text("owned message"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_OK);
+    lb_engine_enter(engine); CHECK(!world->space->messages); lb_engine_leave(engine);
+    CHECK(lb_world_call(world,text("fun_slice"),text("send_badarg"),text("not a pid"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_EXCEPTION);
     CHECK(lb_world_call(world,text("fun_slice"),text("spawn_badarg"),text("not an atom"),&call)==LB_WORLD_OK);
     expect(call,LB_WORLD_EXCEPTION);
     CHECK(lb_world_call(world,text("fun_slice"),text("spawn_refused"),text("not a fun"),&call)==LB_WORLD_OK);
@@ -238,6 +243,16 @@ static void spawned_children(LbBytesView code)
             if(!members) break; nanosleep(&delay,NULL);
         }
         CHECK(spins<5000);
+        if(status==LB_WORLD_OK) break;
+    }
+    for(size_t prefix=1;;++prefix) {
+        CHECK(prefix<100);
+        lb_engine_enter(engine); m.fail_worker=m.worker_calls+prefix; lb_engine_leave(engine);
+        CHECK(lb_world_call(world,text("fun_slice"),text("send_self"),text("faulted message"),&call)==LB_WORLD_OK);
+        LbBytesView result; LbWorldStatus status=await_call(call,&result);
+        lb_engine_enter(engine); m.fail_worker=0;
+        CHECK(!world->space->messages && !lb_pid_count(world->space->pids)); lb_engine_leave(engine);
+        CHECK(status==LB_WORLD_NO_MEMORY || status==LB_WORLD_OK); expect(call,status);
         if(status==LB_WORLD_OK) break;
     }
     /* The private task seam below still tests preparation from a retained
@@ -284,6 +299,11 @@ static void spawned_children(LbBytesView code)
     CHECK(lb_world_call(world,text("fun_slice"),text("spawn_loop"),text("guest loop"),&call)==LB_WORLD_OK);
     expect(call,LB_WORLD_OK);
     lb_engine_enter(engine); CHECK(lb_pid_count(world->space->pids)==2); lb_engine_leave(engine);
+    CHECK(lb_world_call(world,text("fun_slice"),text("send_child"),text("child message"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_OK);
+    lb_engine_enter(engine);
+    CHECK(lb_pid_count(world->space->pids)==3 && world->space->messages==1);
+    lb_engine_leave(engine);
     CHECK(lb_world_call(world,text("fun_slice"),text("nested"),text("progress"),&call)==LB_WORLD_OK);
     expect(call,LB_WORLD_OK);
     LbReclamation *r; CHECK(lb_world_stop(world,&r)==LB_WORLD_OK); reclaimed(r);

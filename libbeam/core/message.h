@@ -28,6 +28,7 @@ _Static_assert(offsetof(LbMessage,space)==5*sizeof(Eterm),"native message refere
  * The immutable fragment outlives source GC/process destruction. */
 LbProcessStatus lb_message_create(LbCodeSpace *,Eterm,LbMessage **,Uint *cost);
 void lb_message_destroy(LbMessage *);
+Eterm lb_erl_send(LbProcess *,Eterm destination,Eterm message);
 /* Native inner-queue pointer-to-pointer cursor: unmatched messages stay in
  * arrival order; removal fixes the tail before freeing the selected node. */
 typedef struct LbMessageQueue {

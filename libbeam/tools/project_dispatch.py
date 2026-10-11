@@ -37,7 +37,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_trim_yxt move2_par_xxxy move_window2_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt send is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx').split()
 
 
 def case(source, name):
@@ -125,6 +125,26 @@ def fallible_writable_init(body):
     # or borrowed writer survives the boundary. One bounded operation may overrun.
     return body.replace('  GotoPF(next_pf);',
         '  if (FCALLS<=0) goto context_switch3;\n  GotoPF(next_pf);')
+
+
+def owned_send(body):
+    if 'OpCase(send):' not in body: return body
+    replacements={
+        'PRE_BIF_SWAPOUT(c_p);':'SWAPOUT;',
+        'c_p->fcalls = FCALLS - 1;':'',
+        'ERTS_VERIFY_UNUSED_TEMP_ALLOC(c_p);':'',
+        'ERTS_REQ_PROC_MAIN_LOCK(c_p);':'',
+        'PROCESS_MAIN_CHK_LOCKS(c_p);':'',
+        'HTOP = HEAP_TOP(c_p);':'SWAPIN;',
+        'FCALLS = c_p->fcalls;':'FCALLS-=1+(Sint)c_p->last_native_cost;\n  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;\n  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;\n  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;'
+    }
+    for old,new in replacements.items():
+        if body.count(old)!=1: raise RuntimeError('Changed native send boundary '+old)
+        body=body.replace(old,new)
+    # Complete the local send once, then yield at its successor. The retained
+    # native trap branch has no producer in this positive local-PID slice.
+    body=body.replace('  GotoPF(next_pf);','  if(FCALLS<=0) goto context_switch3;\n  GotoPF(next_pf);')
+    return body
 
 
 def owned_predicate_bif(body):
@@ -281,6 +301,7 @@ def project(source):
         body=owned_call_fun(body)
         body=owned_make_fun(body)
         body=owned_predicate_bif(body)
+        body=owned_send(body)
         body=fallible_binary_build(body)
         # No tracing/saved-call/lock instrumentation capability exists in this
         # serialized interpreter. Remove those paths, not their semantic peers.

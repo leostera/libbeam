@@ -11,6 +11,8 @@
 #include "binary_build.h"
 #include "reference.h"
 #define is_not_ref(term) (!lb_is_reference(term))
+#define erl_send lb_erl_send
+#define TRAP (1u<<LB_EXC_OFFSET)
 #define is_any_fun(term) (lb_fun(term)!=NULL)
 #define is_function2(term,arity) lb_fun_is_arity(term,arity)
 #define erl_is_function(process,term,arity) lb_fun_test_arity(process,term,arity)
@@ -320,6 +322,7 @@ malformed_code:
 stop:
     /* Guest exit removes identity before publishing completion. The retained
      * process/result allocation may outlive that logical death. */
+    if(c_p->status!=LB_PROCESS_YIELDED) lb_message_queue_clear(&c_p->messages);
     if(c_p->status!=LB_PROCESS_YIELDED && c_p->identity.owner &&
        lb_pid_remove(c_p->identity.owner,&c_p->identity)!=LB_PID_OK) abort();
     SWAPOUT; c_p->running=0; return c_p->status;

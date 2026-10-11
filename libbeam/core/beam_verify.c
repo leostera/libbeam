@@ -200,7 +200,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         REQUIRE(op->op<NUM_GENERIC_OPS);
         switch(op->op) {
         case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_label_1:case genop_line_1:
-        case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:
+        case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:case genop_send_0:
         case genop_call_2:case genop_call_only_2:case genop_call_last_3:
         case genop_call_fun_1:case genop_call_fun2_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
@@ -347,6 +347,9 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
             }
             break;
+        case genop_send_0:
+            REQUIRE(source(st,&f,(BeamOpArg){TAG_x,0}) && source(st,&f,(BeamOpArg){TAG_x,1}));
+            REQUIRE(destination(&f,(BeamOpArg){TAG_x,0},f.xs[1])); break;
         case genop_return_0:REQUIRE(f.frame==NO_FRAME && source(st,&f,(BeamOpArg){TAG_x,0})); terminal=1;break;
         case genop_call_fun_1:case genop_call_fun2_3:
             r=op->op==genop_call_fun_1?0:1;
