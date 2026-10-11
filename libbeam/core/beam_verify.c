@@ -206,10 +206,11 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
         case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:case genop_trim_2:
         case genop_jump_1:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:
+        case genop_is_function_2:case genop_is_function2_3:
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:
         case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_get_list_3:
         case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif2_6:
-        case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_make_fun3_3:
+        case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_make_fun3_3:
         case genop_badmatch_1:case genop_case_end_1:break;
         default:p->error.stage=gen_opc[op->op].name; return LB_CODE_UNSUPPORTED;
         }
@@ -316,6 +317,19 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             for(r=0;r<live;++r) REQUIRE(source(st,&f,a[3+r]));
             if(live) { REQUIRE(f.heap>=LB_FUN_WORDS+live); f.heap-=LB_FUN_WORDS+live; }
             REQUIRE(destination(&f,a[1],0)); break;
+        case genop_bif1_4:case genop_bif2_5: {
+            size_t arity=op->op==genop_bif1_4?1:2;
+            REQUIRE(a[1].type==TAG_u && (Uint)a[1].val<st->beam.imports.count);
+            const BifEntry *native=st->bif_imports[a[1].val];
+            unsigned id=arity==1?BIF_is_function_1:BIF_is_function_2;
+            if(native!=&st->space->engine->bifs[id] || native->kind!=BIF_KIND_GUARD) return LB_CODE_UNSUPPORTED;
+            for(r=0;r<arity;++r) REQUIRE(source(st,&f,a[2+r]));
+            if(a[0].type==TAG_f && a[0].val) {
+                REQUIRE(label(st,a[0])); alternate=labels[a[0].val];
+                REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+            } else REQUIRE((a[0].type==TAG_p || a[0].type==TAG_f) && !a[0].val);
+            REQUIRE(destination(&f,a[2+arity],0)); break;
+        }
         case genop_bif0_2:
             REQUIRE(a[0].type==TAG_u && (Uint)a[0].val<st->beam.imports.count);
             if(st->bif_imports[a[0].val]!=&st->space->engine->bifs[BIF_self_0]) return LB_CODE_UNSUPPORTED;
@@ -364,10 +378,22 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_select_tuple_arity_3:
             status=select_arities(st,w,index,&f,op); if(status!=LB_CODE_OK) return status; terminal=1; break;
         case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:
+        case genop_is_function_2:case genop_is_function2_3:
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_is_nonempty_list_2:
             REQUIRE(label(st,a[0]) && source(st,&f,a[1])); alternate=labels[a[0].val];
             REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
-            if(op->op==genop_is_eq_exact_3 || op->op==genop_is_ne_exact_3) REQUIRE(source(st,&f,a[2]));
+            if(op->op==genop_is_function2_3) {
+                REQUIRE(source(st,&f,a[2]));
+                if(!((a[1].type==TAG_x || a[1].type==TAG_y) && a[2].type==TAG_i)) {
+                    /* Native cold lowering uses x1022/x1023 in that order.
+                     * Its arity source must not alias the first overwritten
+                     * temporary. Both branches observe the new scratch slots. */
+                    REQUIRE(a[2].type!=TAG_x || (((Uint)a[2].val&REG_MASK)!=MAX_REG-2));
+                    define(f.x,MAX_REG-2); define(f.x,MAX_REG-1);
+                    f.xs[MAX_REG-2]=f.xs[MAX_REG-1]=0; failed=f; failure=&failed;
+                }
+            }
+            else if(op->op==genop_is_eq_exact_3 || op->op==genop_is_ne_exact_3) REQUIRE(source(st,&f,a[2]));
             else if(op->op==genop_is_nonempty_list_2) refine(&f,a[1],LIST_SHAPE);
             else if(op->op==genop_is_tuple_2) {
                 s=shape(st,&f,a[1]); refine(&f,a[1],(s&TUPLE_SHAPE)?s:TUPLE_SHAPE);

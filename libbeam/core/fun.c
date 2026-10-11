@@ -5,6 +5,35 @@
 #include "process_internal.h"
 #include "fun.h"
 #include "flatmap.h"
+#include "big.h"
+
+/* beam_common.c is_function2 and erl_bif_op.c erl_is_function, restricted to
+ * owned local funs. The cold guard retains native badarg pending flags; it
+ * performs no allocation and cannot conceal an infrastructure failure. */
+int lb_fun_is_arity(Eterm value,Uint arity)
+{
+    const LbFun *fun=lb_fun(value); return fun && lb_fun_arity(fun)==arity;
+}
+Eterm lb_fun_test_arity(LbProcess *p,Eterm value,Eterm argument)
+{
+    Sint arity;
+    if(is_small(argument)) {
+        arity=signed_val(argument);
+        if(arity<0) goto error;
+    } else if(lb_is_big(argument) && (*boxed_val(argument)&_HEADER_SUBTAG_MASK)==POS_BIG_SUBTAG) arity=-1;
+    else goto error;
+    return lb_fun_is_arity(value,(Uint)arity)?am_true:am_false;
+error:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_is_function_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)p; (void)pc; return lb_fun(args[0])?am_true:am_false;
+}
+Eterm lb_bif_is_function_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; return lb_fun_test_arity(p,args[0],args[1]);
+}
 LbAllocStatus lb_fun_retain(LbProcess *p,const LbFunEntry *entry)
 {
     if(!p || !entry || !entry->owner || entry->owner->space!=p->entry_module->space ||

@@ -58,4 +58,8 @@ Uint lb_fun_mark_code(LbProcess *); /* in-flight PC and saved continuations */
 void lb_fun_sweep(LbProcess *);
 const BeamInstr *lb_fun_call(LbProcess *,unsigned arity);
 LbAllocStatus lb_fun_prepare_instruction(LbProcess *,const BeamInstr *,Uint *cost);
+int lb_fun_is_arity(Eterm,Uint);
+Eterm lb_fun_test_arity(LbProcess *,Eterm,Eterm);
+Eterm lb_bif_is_function_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_is_function_2(LbProcess *,Eterm *,const BeamInstr *);
 #endif

@@ -11,6 +11,11 @@
 #include "binary_build.h"
 #include "reference.h"
 #define is_not_ref(term) (!lb_is_reference(term))
+#define is_any_fun(term) (lb_fun(term)!=NULL)
+#define is_function2(term,arity) lb_fun_is_arity(term,arity)
+#define erl_is_function(process,term,arity) lb_fun_test_arity(process,term,arity)
+typedef LbBifFn ErtsBifFunc;
+typedef LbBifFn BifFunction;
 typedef LbFunEntry ErlFunEntry;
 typedef LbFun ErlFunThing;
 #define ERL_FUN_SIZE LB_FUN_WORDS

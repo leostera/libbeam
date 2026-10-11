@@ -222,10 +222,45 @@ static void fun_load_failures(LbCodeSpace *space,const char *path,Memory *m)
         m->fail=m->calls+prefix;
         LbCodeStatus status=lb_code_load(space,bytes,(size_t)size,&module,&error); m->fail=0;
         if(status==LB_CODE_OK) { CHECK(lb_code_unload(module)==LB_CODE_OK); break; }
+        if(status!=LB_CODE_NO_MEMORY) fprintf(stderr,"fun prefix=%zu status=%d stage=%s offset=%zu\n",prefix,status,error.stage,error.offset);
         CHECK(status==LB_CODE_NO_MEMORY && !module && !space->loading);
         CHECK(m->live==live && lb_atoms_count(space->atoms)==atoms);
     }
     free(bytes);
+}
+static void fun_guards(LbCodeSpace *space,LbCodeModule *module)
+{
+    const char *factories[]={"factory","closed_factory"};
+    const char *guards[]={"is_fun","is_zero","is_arity"};
+    for(size_t closed=0;closed<2;++closed) {
+        LbCodeEntry *maker=entry(space,module,factories[closed],1); LbProcess *source;
+        CHECK(lb_process_create_binary(maker,"x",1,64,&source)==LB_PROCESS_READY && finish(source)==LB_PROCESS_DONE);
+        Eterm fun=lb_process_result(source);
+        for(size_t test=0;test<3;++test) for(Sint arity=-1;arity<3;++arity) {
+            LbCodeEntry *e=entry(space,module,guards[test],test==2?2:1);
+            Eterm args[]={NIL,make_small(arity)}; LbProcess *probe;
+            CHECK(lb_process_create(e,args,test==2?2:1,64,&probe)==LB_PROCESS_READY);
+            Uint cost=0; CHECK(lb_fun_retain_term(probe,fun,&cost)==LB_ALLOC_OK);
+            probe->reg[0]=lb_copy_flat(fun,&probe->htop,&probe->off_heap); CHECK(!is_non_value(probe->reg[0]));
+            CHECK(finish(probe)==LB_PROCESS_DONE);
+            int expected=test==0 || (test==1?closed:(arity==(closed?0:1)));
+            CHECK(lb_process_result(probe)==(expected?am_true:am_false));
+            lb_process_destroy(probe); lb_code_entry_release(e);
+        }
+        lb_process_destroy(source); lb_code_entry_release(maker);
+    }
+    /* Native cold positive-big false, negative-big/noninteger badarg flags,
+     * and the unsigned hot literal range all remain distinct. */
+    LbProcess *probe; LbCodeEntry *e=entry(space,module,"is_fun",1);
+    CHECK(lb_process_create_binary(e,"not fun",7,64,&probe)==LB_PROCESS_READY && finish(probe)==LB_PROCESS_DONE);
+    CHECK(lb_process_result(probe)==am_false);
+    CHECK(lb_heap_reserve(probe,4,1));
+    Eterm positive=make_boxed(probe->htop); *probe->htop++=_make_header(1,POS_BIG_SUBTAG); *probe->htop++=UINT64_MAX;
+    Eterm negative=make_boxed(probe->htop); *probe->htop++=_make_header(1,NEG_BIG_SUBTAG); *probe->htop++=UINT64_MAX;
+    CHECK(lb_fun_test_arity(probe,NIL,positive)==am_false);
+    CHECK(is_non_value(lb_fun_test_arity(probe,NIL,negative)) && probe->freason==LB_EXC_BADARG);
+    CHECK(is_non_value(lb_fun_test_arity(probe,NIL,NIL)));
+    lb_process_destroy(probe); lb_code_entry_release(e);
 }
 static void prepared_children(LbCodeSpace *space,LbCodeModule *module,Memory *m)
 {
@@ -339,6 +374,7 @@ int main(int argc,char **argv)
     for(size_t i=0;i<1025;++i) lb_process_destroy(held[i]); free(held); CHECK(!lb_pid_count(a->pids));
     fun_load_failures(a,argv[3],&m);
     LbCodeModule *fun_module=load(a,argv[3]); guest_funs(a,fun_module,&m); prepared_children(a,fun_module,&m);
+    fun_guards(a,fun_module);
     CHECK(lb_code_unload(fun_module)==LB_CODE_OK);
     lb_code_entry_release(ea); lb_code_entry_release(eb);
     CHECK(lb_code_unload(ma)==LB_CODE_OK && lb_code_unload(mb)==LB_CODE_OK);

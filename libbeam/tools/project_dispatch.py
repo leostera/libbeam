@@ -37,7 +37,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx').split()
 
 
 def case(source, name):
@@ -125,6 +125,29 @@ def fallible_writable_init(body):
     # or borrowed writer survives the boundary. One bounded operation may overrun.
     return body.replace('  GotoPF(next_pf);',
         '  if (FCALLS<=0) goto context_switch3;\n  GotoPF(next_pf);')
+
+
+def owned_predicate_bif(body):
+    if 'i_bif__call:' not in body and 'i_bif_body__call:' not in body: return body
+    # Only positively linked nonallocating predicates can reach these entire
+    # native groups. Native source fetching, result publication and guard
+    # failure branches remain intact; no trap/GC effect is silently admitted.
+    body=body.replace('Eterm tmp_reg[3];','Eterm tmp_reg[3]={NIL,NIL,NIL};')
+    body=re.sub(r'#ifdef DEBUG\s*Eterm\* orig_htop = HTOP;\s*Eterm\* orig_stop = E;\s*#endif',
+                'Eterm* orig_htop=HTOP; Eterm* orig_stop=E;',body)
+    body=body.replace('ASSERT(orig_htop == HTOP && orig_stop == E);',
+                      'if(orig_htop!=HTOP || orig_stop!=E) goto malformed_code;')
+    for text in ('c_p->fcalls = FCALLS;','FCALLS = c_p->fcalls;',
+                 'ERTS_DBG_CHK_REDS(c_p, FCALLS);','ASSERT(!ERTS_PROC_IS_EXITING(c_p));',
+                 'ASSERT(!ERTS_PROC_IS_EXITING(c_p) || is_non_value(result));',
+                 'ERTS_CHK_MBUF_SZ(c_p);','ERTS_HOLE_CHECK(c_p);'):
+        body=body.replace(text,'')
+    body=body.replace('DEBUG_SWAPOUT;','SWAPOUT;').replace('DEBUG_SWAPIN;','SWAPIN;')
+    error='I = handle_error(c_p, I, reg, ubif2mfa((void *) bf));\n    goto post_error_handling;'
+    expected=1 if 'i_bif_body__call:' in body else 0
+    if body.count(error)!=expected: raise RuntimeError('Changed predicate error boundary')
+    body=body.replace(error,'goto find_func_info;')
+    return body
 
 
 def owned_make_fun(body):
@@ -247,7 +270,7 @@ def fallible_binary_build(body):
 
 def project(source):
     bodies=[]
-    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd')]
+    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd','i_bif1_sfbd','i_bif1_body_sbd')]
     names=NAMES+[name for shared in groups for name in re.findall(r'OpCase\((\w+)\)',shared)]
     selected=[(name,case(source,name)) for name in NAMES]+[('shared group',shared) for shared in groups]
     for name, body in selected:
@@ -257,6 +280,7 @@ def project(source):
         body=fallible_self(body)
         body=owned_call_fun(body)
         body=owned_make_fun(body)
+        body=owned_predicate_bif(body)
         body=fallible_binary_build(body)
         # No tracing/saved-call/lock instrumentation capability exists in this
         # serialized interpreter. Remove those paths, not their semantic peers.

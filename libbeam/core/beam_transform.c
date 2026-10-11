@@ -183,6 +183,27 @@ static void beam_load_sort_select_vals(BeamOpArg *base,size_t n)
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #endif
+#define ERTS_MAX_TUPLE_SIZE MAX_ARITYVAL
+#define is_value(term) (!is_non_value(term))
+/* Native process-dictionary MAKE_HASH immediate fast paths. Unsupported
+ * composite hashing refuses compilation instead of emitting a guessed hash.
+ * The dictionary effect itself remains outside the positive native catalog. */
+static Eterm beam_load_get_term(LoaderState *st,BeamOpArg source)
+{
+    switch(source.type) {
+    case TAG_i:return make_small(source.val);
+    case TAG_a:return (Eterm)source.val;
+    case TAG_n:return NIL;
+    case TAG_q:return load_literal(st,source.val);
+    default:return THE_NON_VALUE;
+    }
+}
+static int dictionary_hash(LoaderState *st,Eterm key,Sint *out)
+{
+    if(is_small(key)) { *out=(Sint)((Uint)key>>_TAG_IMMED1_SIZE); return 1; }
+    if(is_atom(key)) { *out=(Sint)atom_val(key); return 1; }
+    st->status=LB_CODE_UNSUPPORTED; return 0;
+}
 #include "lb_transform_generated.inc"
 #if defined(__clang__)
 #pragma clang diagnostic pop

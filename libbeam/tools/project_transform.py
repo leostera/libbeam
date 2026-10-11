@@ -11,7 +11,7 @@ import re
 PURE = {'distinct', 'equal', 'independent_moves', 'is_offset', 'negation_is_small',
         'never', 'succ', 'succ3', 'succ4'}
 OWNED = {'needs_nif_padding', 'is_heavy_bif', 'smp_already_locked', 'smp_mark_target_label'}
-GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2', 'make_fun3'}
+GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2', 'make_fun3', 'is_function2', 'get', 'element'}
 
 
 def project(text):
@@ -80,6 +80,14 @@ def project(text):
             body = re.sub(r'\bBSC_(\w+)', r'LB_BSC_\1', body)
             if (assertions, arrays, literals) != (1, 1, 1):
                 raise RuntimeError('Unreviewed create_bin generator boundary')
+        if name == 'get':
+            old='op->a[1].val = (BeamInstr) erts_pd_make_hx(key_term);'
+            if body.count(old)!=1: raise RuntimeError('Changed dictionary hash boundary')
+            body=body.replace(old,'if (!dictionary_hash(S,key_term,&op->a[1].val)) return NULL;')
+        if name == 'is_function2':
+            old='if (Arity.val > MAX_ARG)'
+            if body.count(old)!=1: raise RuntimeError('Changed native unsigned arity boundary')
+            body=body.replace(old,'if ((Uint)Arity.val > MAX_ARG)')
         if name == 'make_fun3':
             for old,new,expected in (
                 ('S->beam.lambdas.count','S->program->lambda_count',1),

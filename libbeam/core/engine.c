@@ -6,6 +6,7 @@
  */
 #include "code_internal.h"
 #include "executor.h"
+#include "fun.h"
 
 static void release_catalog(LbEngine *engine)
 {
@@ -34,7 +35,9 @@ LbEngineStatus lb_engine_create(const LbSystemAllocator *allocator,LbEngine **ou
         {BIF_splus_2,{am_erlang,am_Plus,2,lb_bif_plus_2,BIF_KIND_HEAVY}},
         {BIF_integer_to_binary_1,{am_erlang,am_integer_to_binary,1,lb_bif_integer_to_binary_1,BIF_KIND_HEAVY}},
         {BIF_self_0,{am_erlang,am_self,0,lb_bif_self_0,BIF_KIND_HEAVY}},
-        {BIF_make_ref_0,{am_erlang,am_make_ref,0,lb_bif_make_ref_0,BIF_KIND_HEAVY}}
+        {BIF_make_ref_0,{am_erlang,am_make_ref,0,lb_bif_make_ref_0,BIF_KIND_HEAVY}},
+        {BIF_is_function_1,{am_erlang,am_is_function,1,lb_bif_is_function_1,BIF_KIND_GUARD}},
+        {BIF_is_function_2,{am_erlang,am_is_function,2,lb_bif_is_function_2,BIF_KIND_GUARD}}
     };
     size_t i;
     _Static_assert(sizeof(natives)/sizeof(natives[0])==LB_NATIVE_COUNT,"native catalog size");
