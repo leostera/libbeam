@@ -1,7 +1,9 @@
 {
   "baseline": "92b50536",
-  "scope": "Complete native create_bin loader generator with checked structural descriptors and fallible arena allocation. This does not admit executable bs_create_bin, its emitter/fixups, register/linearity proof or dispatch.",
+  "emission_baseline": "2610d153",
+  "scope": "Complete native create_bin loader generator and word emission/string fixups, with checked structural descriptors, whole string spans and fallible arena allocation. Executable register/linearity proof and dispatch remain unadmitted.",
   "sources": {
+    "beam/erts/emulator/beam/emu/emu_load.c": "f2ece111cd5d8a3ccc467c275b9c01137a91b812a60830be3d05d6469353b378",
     "beam/erts/emulator/beam/emu/generators.tab": "e2980f167ddb6f30a920c1bd9fe5bda682d0e73b8b744a7abfba4723e7965138",
     "beam/erts/emulator/beam/emu/ops.tab": "d204cbdd007a51df81203211675354274b5fcabd67e8fe65e0f4badf4071e234",
     "beam/erts/emulator/beam/beam_transform_helpers.c": "5997b24ba2cd4c143753fb0a8617489573ba27fcfc7ecf36a5aa020e1f0c281c",
@@ -13,6 +15,9 @@
     "Structural preflight bounds count/arity, fixed fields, canonical register operands, segment numbers before packing, unit ranges, literal indices, proper atom flag lists and string spans. Append kinds can occur only first. An empty descriptor sequence is rejected because native allocation reads the first descriptor. Append Live leaves room for its native temporary register. These checks are not must-definition, Y-frame, source-consumption or uniqueness proof.",
     "The native unsigned safe-multiply helper retains wrap-and-quotient overflow detection. Fixed-size conversion keeps its native 56-bit ceiling and falls back to the dynamic size representation on overflow or negative size. Invalid dynamic guest sizes are not silently converted to zero or pre-evaluated into results.",
     "Flag literal lookup uses the retained program and explicit atom namespace. BSF_LITTLE=2 and BSF_NATIVE=16 retain native values; NativeEndian resolves the latter before segment-number packing. Compilation requires an explicitly known host byte order. Other atom flag names retain the native ignored behavior.",
+    "The emission follow-on retains native jIWdW packing, five-word descriptors, source/literal encodings and string relocation. Descriptor count and string field types are checked before emission. String patches retain byte length as well as word index so final relocation validates the complete StrT span, including an empty span at its end. Patches use indices across code-vector growth; no source/image pointer is borrowed from the caller's BEAM buffer.",
+    "The emitter walks the descriptor region after the packed five-word header. Native emu_load's scan also passes over that non-descriptor header before handling strings; starting at the first descriptor avoids relying on the opcode number differing from BSC_STRING. The existing unadmitted string-match emitter records its rounded byte span too; this grants no matching execution capability.",
+    "Raw unpublished emission blocks exercise native selection, packing, both relative-label directions, Y operands, literal/string fixups, growth and 23 allocation-failure prefixes with same-space retry. Selected emitted string/literal data is consumed by checked writers; after destroying its temporary program, the constructed value executes real identity BEAM and moving GC. These are data/ownership witnesses, never execution of the unsupported binary opcode or publication of a fake module.",
     "Components cover kind translation, proper flags/native-endian resolution, the largest bounded descriptor array, malformed descriptors without allocation, two real allocation failure prefixes and same-space retry. Actual compiled BEAM operations exercise the generator and StrT bounds. Independent checks keep executable verification and instruction support refused; unresolved imports remain independently rejected. No new executable bytecode format or native effect is introduced."
   ],
   "other_inputs": ["loader-sources.json", "flatmap-error-sources.json", "opcodes/manifest.json"]

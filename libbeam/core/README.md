@@ -68,8 +68,9 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   decoding and copied byte-input invocation share this constructor.
 - `beam_transform.c`: additionally projects the complete native `create_bin`
   generator after structural descriptor validation and with fallible owned
-  arrays. This is loader IR only: executable verification, emitter/fixups and
-  the whole binary-construction dispatch case remain unadmitted.
+  arrays. `beam_emit.c` packs native words and fixes retained literal/string
+  pointers, checking whole string spans across code growth. These are preparation
+  dependencies only: executable proof and the whole dispatch case remain gated.
 - `writable.c`: fresh heap/refcounted construction spans, process-owned native
   writable backing and non-private append,
   fallible preparation before revocation/publication, volatile-prefix reads,

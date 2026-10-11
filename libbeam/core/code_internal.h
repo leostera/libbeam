@@ -48,6 +48,7 @@ typedef struct { Eterm module, function; Uint arity; } BeamFile_ImportEntry;
 typedef struct { size_t pos; Sint offset; unsigned packed; } LabelPatch;
 typedef struct { size_t value, count, capacity; int looprec_targeted; LabelPatch *patches; } Label;
 typedef struct LbPatch { size_t pos; struct LbPatch *next; } LbPatch;
+typedef struct LbStringPatch { size_t pos,bytes; struct LbStringPatch *next; } LbStringPatch;
 struct LbCodeSpace {
     LbEngine *engine;
     LbAllocDomain *domain; /* borrowed Engine allocation substrate */
@@ -88,7 +89,8 @@ typedef struct LoaderState_ {
     int specific_op;
     Eterm module, function;
     unsigned arity;
-    LbPatch *literal_patches, *string_patches, *import_patches, *lambda_patches;
+    LbPatch *literal_patches, *import_patches, *lambda_patches;
+    LbStringPatch *string_patches;
     LbCodeStatus status;
 } LoaderState;
 static inline void lb_release(LbAllocDomain *d,void *p) { if(p && lb_alloc_domain_release(d,p)!=LB_ALLOC_OK) abort(); }

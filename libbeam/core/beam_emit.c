@@ -6,6 +6,7 @@
  * Checked growth/errors replace fatal ERTS allocation and malformed-input asserts.
  */
 #include "code_internal.h"
+#include "binary_error.h"
 #define VERIFY(x) do { if(!(x)) return LB_CODE_FORMAT; } while(0)
 #define ALLOC(x) do { if(!(x)) return st->program->error.status==LB_BEAM_LIMIT?LB_CODE_LIMIT:LB_CODE_NO_MEMORY; } while(0)
 static int need(LoaderState *st,size_t n)
@@ -24,6 +25,12 @@ static int patch(LoaderState *st,LbPatch **list,size_t pos)
 {
     LbPatch *p=lb_palloc(st->program,1,sizeof(*p)); if(!p) return 0;
     p->pos=pos; p->next=*list; *list=p; return 1;
+}
+static int string_patch(LoaderState *st,size_t pos,size_t bytes)
+{
+    LbStringPatch *p=lb_palloc(st->program,1,sizeof(*p)); if(!p) return 0;
+    *p=(LbStringPatch){pos,bytes,st->string_patches}; st->string_patches=p;
+    return 1;
 }
 static int label_patch(LoaderState *st,size_t label,size_t pos,Sint offset)
 {
@@ -50,6 +57,16 @@ LbCodeStatus lb_emit(LoaderState *st,BeamOp *op)
     const OpEntry *entry=&opc[st->specific_op];
     const char *sign=entry->sign, *prog;
     size_t arg=0, start, trailing=0, before=st->ci;
+    if(st->specific_op==op_i_bs_create_bin_jIWdW) {
+        VERIFY(op->op==genop_i_bs_create_bin_5 && op->arity>=10 && op->a[4].type==TAG_u &&
+               op->a[4].val>=5 && (Uint)op->a[4].val<=5*(65536/6) &&
+               op->a[4].val%5==0 && (Uint)op->a[4].val==op->arity-5);
+        for(size_t i=5;i<op->arity;i+=5) {
+            VERIFY(op->a[i].type==TAG_u && (Uint)op->a[i].val<=LB_BSC_UTF32);
+            if(op->a[i].val==LB_BSC_STRING)
+                VERIFY(op->a[i+3].type==TAG_u && op->a[i+4].type==TAG_u);
+        }
+    }
     ALLOC(need(st,(size_t)entry->sz+16));
     VERIFY(entry->adjust>=0 && (size_t)entry->adjust<16);
     start=st->ci+(size_t)entry->adjust;
@@ -234,10 +251,21 @@ LbCodeStatus lb_emit(LoaderState *st,BeamOp *op)
     case op_nif_start: case op_i_nif_padding: case op_on_load: case op_i_debug_line_IIt:
         return LB_CODE_UNSUPPORTED;
     case op_i_bs_match_string_xfWW: case op_i_bs_match_string_yfWW:
-        ALLOC(patch(st,&st->string_patches,st->ci-1)); break;
-    case op_i_bs_create_bin_jIWdW:
+        ALLOC(string_patch(st,st->ci-1,st->codev[st->ci-2]/8+(st->codev[st->ci-2]%8!=0))); break;
+    case op_i_bs_create_bin_jIWdW: {
+        size_t count=(Uint)op->a[4].val,pos=st->ci-count;
+        VERIFY(st->ci-before==5+count && pos==before+5);
+        /* Native five-word descriptors follow the packed five-word header.
+         * Keep indices, not pointers into a code buffer that can still grow. */
+        for(;pos<st->ci;pos+=5) {
+            VERIFY(st->codev[pos]<=LB_BSC_UTF32);
+            if(st->codev[pos]==LB_BSC_STRING)
+                ALLOC(string_patch(st,pos+3,st->codev[pos+4]));
+        }
+        break;
+    }
     case op_catch_yf:
-        return LB_CODE_UNSUPPORTED; /* require actual binary/catch consumers */
+        return LB_CODE_UNSUPPORTED; /* requires actual catch consumers */
     case op_int_code_end:
         VERIFY(st->function_number==lb_beam_image_info(st->program->image)->function_count);
         break;
@@ -248,7 +276,7 @@ LbCodeStatus lb_emit(LoaderState *st,BeamOp *op)
 LbCodeStatus lb_finish_emit(LoaderState *st)
 {
     size_t i,j,functions=lb_beam_image_info(st->program->image)->function_count;
-    LbPatch *p;
+    LbPatch *p; LbStringPatch *sp;
     LbBeamBytes strings;
     st->codev[functions]=(Uint)(st->codev+st->ci-1);
     for(i=0;i<st->label_count;++i) {
@@ -272,9 +300,10 @@ LbCodeStatus lb_finish_emit(LoaderState *st)
         st->codev[p->pos]=term;
     }
     VERIFY(lb_beam_image_chunk(st->program->image,LB_BEAM_ID('S','t','r','T'),&strings)==LB_BEAM_OK);
-    for(p=st->string_patches;p;p=p->next) {
-        VERIFY(p->pos<st->ci && st->codev[p->pos]<strings.size);
-        st->codev[p->pos]=(Uint)(strings.data+st->codev[p->pos]);
+    for(sp=st->string_patches;sp;sp=sp->next) {
+        VERIFY(sp->pos<st->ci && st->codev[sp->pos]<=strings.size &&
+               sp->bytes<=strings.size-st->codev[sp->pos]);
+        st->codev[sp->pos]=(Uint)(strings.data+st->codev[sp->pos]);
     }
     for(p=st->import_patches;p;p=p->next) {
         VERIFY(p->pos<st->ci && st->codev[p->pos]<st->module_code->import_count);

@@ -622,3 +622,44 @@ selected-profile execution, UBSan and stable source hashes), plus
 Earlier passing integration is retained at
 `/tmp/libbeam-create-bin-generator-integrated-first/summary.json`. Both acceptance
 sources remain unchanged; the stateful example still refuses unsupported code.
+
+## Follow-on: native words and bounded string fixups
+
+Baseline: `2610d153`. The binary-construction emitter now retains native `jIWdW`
+packing, the five-word header/descriptors, relative failure labels, X/Y operand
+encoding and literal/string relocation. It checks descriptor count and string
+field types before emission. This closes a preparation dependency, not the
+executable verifier or generated dispatch gate.
+
+String patches now have an explicit byte length alongside the code-word index.
+Final relocation checks the complete span against retained StrT, using subtraction
+rather than unchecked offset-plus-length. An empty span at the table end is
+valid. The existing unadmitted string-match emitter records rounded byte length
+as well; no matching opcode becomes executable. Code-vector growth cannot stale
+a patch because it stores an index, never a pointer into the old vector.
+
+The native special case scans five-word groups including its instruction header
+before handling string descriptors. The owned emitter begins at the actual first
+descriptor instead, so safety does not depend on the numeric opcode being unlike
+`BSC_STRING`. Other packing and fixup behavior remains the existing native emitter.
+
+Tests build **unpublished instruction blocks**, not a partial executable module:
+real compiled operations pass native transformation/selection/emission, exercise
+code growth, packed Y destinations, both relative-label directions and actual
+literal/string fixups. Twenty-three real allocation-failure prefixes retire with
+exact balance and successful same-space retry. Malformed spans cannot publish
+module words. Zero-length end spans are emitted with their actual length.
+
+A copied-and-poisoned caller image supplies string and integer-literal operands.
+Checked writers consume the relocated operands into an owned process binary;
+the temporary program is then physically destroyed before that value executes
+real identity BEAM with moving GC. This proves data lifetime, not `bs_create_bin`
+execution. Source consumption/uniqueness proof, aggregate sizing, work and virtual
+heap accounting, exception integration and the complete dispatch remain required.
+
+Final evidence: `/tmp/libbeam-binary-emit-commit-reviewed/summary.json` (21 passing
+Debug/Release CTests, compiled-fixture emission/retirement, UBSan, existing selected
+execution and stable source hashes), plus
+`/tmp/libbeam-binary-emit-tooling-final/summary.json` (29 tooling tests).
+The earlier `/tmp/libbeam-binary-emit-integrated-first/summary.json` is retained.
+Neither acceptance source changed; stateful acceptance remains red.

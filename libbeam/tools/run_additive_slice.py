@@ -68,7 +68,8 @@ def main():
                             root / 'libbeam/tests/core_bit_segment_test.c', root / 'libbeam/tests/core_flatmap_test.c',
                             root / 'libbeam/core/otp/flatmap-error-sources.json', root / 'libbeam/tools/check_flatmap_representation.py',
                             root / 'libbeam/tests/fixtures/binary_error_reference.erl',
-                            root / 'libbeam/tests/core_binary_transform_test.c', root / 'libbeam/tests/fixtures/binary_create_slice.erl',
+                            root / 'libbeam/tests/core_binary_transform_test.c', root / 'libbeam/tests/core_binary_emit_test.c',
+                            root / 'libbeam/tests/fixtures/binary_create_slice.erl',
                             root / 'libbeam/core/otp/binary-loader-sources.json',
                             root / 'libbeam/tests/fixtures/bit_writer_reference.erl',
                             root / 'libbeam/tests/core_binary_test.c', root / 'libbeam/tests/fixtures/binary_slice.erl',
@@ -248,6 +249,10 @@ def main():
             if 'CORE_BINARY_TRANSFORM_FIXTURE_OK' not in binary_transform:
                 raise RuntimeError('Missing native binary generator/fixture evidence')
             summary['binary_transform_dependencies_passed'] = True
+            binary_emission = run('binary-emission', [out / 'build/core_binary_emit_test', binary_create_fixture, binary_fixture])
+            if 'CORE_BINARY_EMIT_FIXTURE_OK' not in binary_emission:
+                raise RuntimeError('Missing native binary word/fixup ownership evidence')
+            summary['binary_emission_dependencies_passed'] = True
             summary['binary_create_fixture_sha256'] = hashlib.sha256(binary_create_fixture.read_bytes()).hexdigest()
             binary_execution = run('binary-execution', [out / 'build/core_binary_test', binary_fixture, fixture, peer_fixture])
             if 'CORE_BINARY_EXECUTION_OK' not in binary_execution or 'CORE_BINARY_RETIREMENT_OK' not in binary_execution:
@@ -438,13 +443,14 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
                 raise RuntimeError('UBSan float segments differ from stock-OTP vectors')
             run('flatmap-ubsan', [out / 'engine-ubsan/core_flatmap_test', binary_fixture])
             run('binary-transform-ubsan', [out / 'engine-ubsan/core_binary_transform_test', binary_create_fixture])
+            run('binary-emission-ubsan', [out / 'engine-ubsan/core_binary_emit_test', binary_create_fixture, binary_fixture])
             if run('binary-error-ubsan-vectors', [out / 'engine-ubsan/core_flatmap_test', '--reference', binary_fixture]) != error_reference:
                 raise RuntimeError('UBSan binary error payloads differ from stock-OTP vectors')
             run('bit-writer-fallback-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-DDEBUG',
@@ -477,6 +483,7 @@ def main():
                 raise RuntimeError('Release shared-edge segments differ from stock-OTP vectors')
             run('flatmap-release', [out / 'release/core_flatmap_test', binary_fixture])
             run('binary-transform-release', [out / 'release/core_binary_transform_test', binary_create_fixture])
+            run('binary-emission-release', [out / 'release/core_binary_emit_test', binary_create_fixture, binary_fixture])
             if run('binary-error-release-vectors', [out / 'release/core_flatmap_test', '--reference', binary_fixture]) != error_reference:
                 raise RuntimeError('Release binary error payloads differ from stock-OTP vectors')
             run('release-executor', [out / 'release/core_executor_test', async_fixture])
