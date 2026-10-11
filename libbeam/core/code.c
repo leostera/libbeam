@@ -6,6 +6,7 @@
  */
 #include "code_internal.h"
 #include "md5.h"
+#include "pid_table.h"
 static LbCodeStatus from_beam(LbBeamStatus s)
 {
     switch(s) {
@@ -60,8 +61,9 @@ LbCodeStatus lb_code_space_destroy(LbCodeSpace *space)
     LbAllocDomain *domain;
     LbEngine *engine;
     if(!space) return LB_CODE_INVALID;
-    if(space->modules || space->loading) return LB_CODE_BUSY;
+    if(space->modules || space->loading || lb_pid_count(space->pids)) return LB_CODE_BUSY;
     if(lb_atoms_destroy(space->atoms)!=LB_ATOM_OK) return LB_CODE_BUSY;
+    if(space->pids && lb_pid_table_destroy(space->pids)!=LB_PID_OK) abort();
     domain=space->domain; engine=space->engine;
     lb_release(domain,space); lb_engine_space_released(engine); return LB_CODE_OK;
 }

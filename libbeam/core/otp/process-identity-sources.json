@@ -1,0 +1,16 @@
+{
+  "baseline": "40166b36",
+  "scope": "Native internal PID representation, modern PTAB identity ring/permutation, self/0 and is_pid/1. Not spawn, process snapshots, distribution, signals or stateful acceptance.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_ptab.c": "08743809f78709c07810a678cad30808927b03215c4e2c12ffd4d4b43532629f",
+    "beam/erts/emulator/beam/erl_ptab.h": "a90826c7e6f32c8c7785b6013cf3771b871e07af0aecc35a3b7cb278465a7a09",
+    "beam/erts/emulator/beam/erl_term.h": "8e016126fb7a1bc1db8d31111601c0bea21d72207211bf91e1f3c127e943b5c2",
+    "beam/erts/emulator/beam/emu/instrs.tab": "6191258ed0710adad9cdfd67779a8680461e695487fa5471594e1001a93d9647"
+  },
+  "adaptations": [
+    "Engine serialization replaces PTAB atomics/locks/thread-progress. Embedded entries borrow stable process allocations; logical exit removes directory membership before terminal completion, destruction removes cancelled/yielded processes. Code-space destruction refuses live entries. One exact-base fallible allocation contains aligned arrays; no permanent allocator. Modern native ring, generation increment and cache-line permutation are retained; legacy and process-list snapshots are unadmitted.",
+    "Directories are lazy, namespace-owned, 1024 slots by default and retained when empty to preserve generations. Namespace-relative PID terms are not owner capabilities; explicit table context and process-owner checks prevent cross-owner insertion/removal, and no raw foreign term transport is provided. Exhaustion is infrastructure LIMIT, allocation failure is NO_MEMORY, neither is guest system_limit/badarg. Exhausted generations retire their slots instead of wrapping stale identities.",
+    "Whole generated self_x/self_y cases use a counted owned identity boundary and yield after destination/PC publication. is_pid_fx is whole native dispatch; external header recognition grants no external-PID representation admission. bif0 admission checks the real positive-listed self descriptor, not opcode/import identity alone. Identity allocation never collects the term heap; conservative initialization work is charged.",
+    "Tests execute compiler-produced self/local calls/Y roots/is_pid on real processes, moving GC, native slot permutation and randomized retirement, stale generation and final-generation retirement, ownership refusal, capacity and allocation failure/retry. Existing public worker tests exercise conflicting admissions, copied echoes through self, peer-safe stop and 32 replacements. Persistent spawned processes and stateful acceptance remain pending."
+  ]
+}

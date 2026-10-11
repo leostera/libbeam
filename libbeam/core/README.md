@@ -82,6 +82,13 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   executor owns expanded terminal values as real GC roots; reason flags are
   not terms. Binary failure preparation atomically sets extended payload/code.
   These dependencies do not implement stacktraces, catch/unwind or new effects.
+- `pid_table.c`, `bif_process.c`: native flat64 internal PIDs and modern PTAB
+  free-ID ring/index permutation, owned by each code namespace. Real `self/0`
+  and `is_pid/1` execute; IDs remain stable through calls/GC and are removed on
+  exit before completion. Stale generations refuse lookup; generation exhaustion
+  retires slots. The lazy 1,024-slot directory is fallible and physically released
+  with its world. PID terms are namespace-relative, not cross-world capabilities.
+  Spawn, closures, mailboxes and monitors still require their own implementation.
 - `binary_size.c`: read-only native flat64 aggregate sizing over emitted
   descriptors, with explicit register spans and typed guest/metadata/policy
   failures. Native UTF8/16 deferred validation remains distinct from UTF32.

@@ -49,10 +49,12 @@ typedef struct { size_t pos; Sint offset; unsigned packed; } LabelPatch;
 typedef struct { size_t value, count, capacity; int looprec_targeted; LabelPatch *patches; } Label;
 typedef struct LbPatch { size_t pos; struct LbPatch *next; } LbPatch;
 typedef struct LbStringPatch { size_t pos,bytes; struct LbStringPatch *next; } LbStringPatch;
+typedef struct LbPidTable LbPidTable;
 struct LbCodeSpace {
     LbEngine *engine;
     LbAllocDomain *domain; /* borrowed Engine allocation substrate */
     LbAtomTable *atoms;
+    LbPidTable *pids; /* lazy identity directory; retained empty to prevent ID reuse */
     LbCodeModule *modules;
     Export *exports;
     Export natives[LB_NATIVE_COUNT];
@@ -108,4 +110,5 @@ Eterm lb_bif_module_info_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_mixed_plus(LbProcess *,Eterm,Eterm);
 Eterm lb_bif_plus_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_integer_to_binary_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_self_0(LbProcess *,Eterm *,const BeamInstr *);
 #endif

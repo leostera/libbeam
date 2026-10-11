@@ -39,12 +39,13 @@ static void reclaim(Isolate& isolate) {
     auto again=stopped.wait_until(deadline()); CHECK(again && again->code==ErrorCode::closed);
 }
 int main(int argc,char** argv) {
-    CHECK(argc==8); auto code=image(argv[1]), large_code=image(argv[2]), local_code=image(argv[3]), compare_code=image(argv[4]), shape_code=image(argv[5]), add_code=image(argv[6]), decimal_code=image(argv[7]);
+    CHECK(argc==9); auto code=image(argv[1]), large_code=image(argv[2]), local_code=image(argv[3]), compare_code=image(argv[4]), shape_code=image(argv[5]), add_code=image(argv[6]), decimal_code=image(argv[7]), pid_code=image(argv[8]);
     auto engine=take(Engine::create());
     Bytes kept;
     {
         auto a=take(engine.create_isolate()), b=take(engine.create_isolate());
         CHECK(!a.load_module(view(code)) && !b.load_module(view(code)));
+        CHECK(!a.load_module(view(pid_code)) && !b.load_module(view(pid_code)));
         CHECK(!b.load_module(view(large_code)) && !b.load_module(view(local_code)) && !b.load_module(view(compare_code)) && !b.load_module(view(shape_code)) && !b.load_module(view(add_code)) && !b.load_module(view(decimal_code)));
         Bytes input(65,0x31);
         fail_next_new=true; error(a.start("async_slice","identity",view(input)),ErrorCode::limit);
@@ -58,6 +59,9 @@ int main(int argc,char** argv) {
         error(first.wait_until(deadline()),ErrorCode::limit);
         CHECK(!fail_next_new); kept=take(first.wait_until(deadline()));
         CHECK(kept==Bytes(65,0x31)); error(first.wait_until(deadline()),ErrorCode::closed);
+        auto own_a=take(a.call("pid_slice","echo",view(kept)));
+        auto own_b=take(b.call("pid_slice","echo",view(kept)));
+        CHECK(take(own_a.wait_until(deadline()))==kept && take(own_b.wait_until(deadline()))==kept);
         for(const char* function : {"identity","gc","tail"}) {
             auto call=take(b.call("local_slice",function,view(kept)));
             CHECK(take(call.wait_until(deadline()))==kept);
@@ -120,11 +124,11 @@ int main(int argc,char** argv) {
         reclaim(a); error(loop.wait_until(deadline()),ErrorCode::cancelled);
         error(a.call("async_slice","identity",{nullptr,0}),ErrorCode::closed);
         for(unsigned i=0;i<32;++i) {
-            auto replacement=take(engine.create_isolate()); CHECK(!replacement.load_module(view(code)));
-            auto call=take(replacement.start("async_slice","identity",view(input)));
+            auto replacement=take(engine.create_isolate()); CHECK(!replacement.load_module(view(code)) && !replacement.load_module(view(pid_code)));
+            auto call=take(replacement.start("pid_slice","echo",view(input)));
             CHECK(take(call.wait_until(deadline()))==input); reclaim(replacement);
         }
-        auto during_stop=take(b.call("async_slice","identity",view(input)));
+        auto during_stop=take(b.call("pid_slice","echo",view(input)));
         CHECK(take(during_stop.wait_until(deadline()))==input); reclaim(b);
         auto busy=engine.shutdown(deadline()); CHECK(busy && busy->code==ErrorCode::busy);
     }
@@ -144,6 +148,6 @@ int main(int argc,char** argv) {
         auto call=take(survivor.start("async_slice","identity",view(kept)));
         CHECK(take(call.wait_until(deadline()))==kept); reclaim(survivor);
     }
-    std::puts("API_WORLD_EXECUTION_OK real_worker=true copied_io=true copy_failure_retry=true deadlines=true terminal_once=true exceptions=true reclamation=true local_calls_y_gc=true exact_binary_comparison=true tuple_list_calls=true numeric_calls=true decimal_continuations=true repeat=32 stateful_acceptance=false");
+    std::puts("API_WORLD_EXECUTION_OK real_worker=true copied_io=true copy_failure_retry=true deadlines=true terminal_once=true exceptions=true reclamation=true local_calls_y_gc=true exact_binary_comparison=true tuple_list_calls=true numeric_calls=true decimal_continuations=true owned_self=true repeat=32 stateful_acceptance=false");
     return 0;
 }

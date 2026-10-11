@@ -1,0 +1,132 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright 2026 Leandro Ostera <leandro@ostera.io>
+ */
+#include "process_internal.h"
+#include <stdio.h>
+#define CHECK(x) do { if(!(x)) { fprintf(stderr,"CHECK %s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while(0)
+typedef struct { size_t calls,fail,live; } Memory;
+static void *allocate(void *ctx,size_t size) { Memory *m=ctx; if(++m->calls==m->fail) return NULL; void *p=malloc(size); if(p) ++m->live; return p; }
+static void release(void *ctx,void *p) { Memory *m=ctx; CHECK(m->live); --m->live; free(p); }
+static LbCodeModule *load(LbCodeSpace *space,const char *path)
+{
+    FILE *f=fopen(path,"rb"); CHECK(f && !fseek(f,0,SEEK_END)); long n=ftell(f); CHECK(n>0 && !fseek(f,0,SEEK_SET));
+    unsigned char *bytes=malloc((size_t)n); CHECK(bytes && fread(bytes,1,(size_t)n,f)==(size_t)n && !fclose(f));
+    LbCodeModule *module=NULL; LbBeamError error;
+    LbCodeStatus status=lb_code_load(space,bytes,(size_t)n,&module,&error); free(bytes);
+    if(status!=LB_CODE_OK) fprintf(stderr,"load %d %s %zu\n",status,error.stage,error.offset);
+    CHECK(status==LB_CODE_OK); return module;
+}
+static LbCodeEntry *entry(LbCodeSpace *s,LbCodeModule *m,const char *name,unsigned arity)
+{
+    Eterm atom; LbCodeEntry *e; CHECK(lb_atoms_find(s->atoms,name,strlen(name),&atom)==LB_ATOM_OK);
+    CHECK(lb_code_entry_acquire(s,lb_code_module_name(m),atom,arity,&e)==LB_CODE_OK); return e;
+}
+static LbProcess *create(LbCodeEntry *e)
+{
+    Eterm arg=NIL; LbProcess *p; CHECK(lb_process_create(e,&arg,e->entry->info.mfa.arity,64,&p)==LB_PROCESS_READY); return p;
+}
+static LbProcessStatus finish(LbProcess *p)
+{
+    LbProcessStatus s; do { s=lb_process_run(p,1000,128); } while(s==LB_PROCESS_YIELDED); return s;
+}
+static void table(LbCodeSpace *space,LbCodeEntry *e,Memory *m)
+{
+    LbPidTable *t=NULL; size_t before=m->live;
+    m->fail=m->calls+1; CHECK(lb_pid_table_create(space,8,&t)==LB_PID_NO_MEMORY && !t && m->live==before); m->fail=0;
+    CHECK(lb_pid_table_create(space,8,&t)==LB_PID_OK); LbProcess *p[9]; Eterm old[8];
+    for(size_t round=0;round<100;++round) {
+        for(size_t i=0;i<9;++i) p[i]=create(e);
+        for(size_t i=0;i<8;++i) {
+            CHECK(lb_pid_insert(t,&p[i]->identity,p[i])==LB_PID_OK);
+            CHECK(p[i]->identity.id==(((round*8+i)<<4)|_TAG_IMMED1_PID));
+            if(round) CHECK(!lb_pid_lookup(t,old[i]));
+            old[i]=p[i]->identity.id; CHECK(lb_pid_lookup(t,old[i])==p[i]);
+        }
+        CHECK(lb_pid_count(t)==8 && lb_pid_table_destroy(t)==LB_PID_BUSY);
+        CHECK(lb_pid_insert(t,&p[8]->identity,p[8])==LB_PID_FULL && !p[8]->identity.owner);
+        for(size_t i=0;i<8;++i) {
+            CHECK(lb_pid_remove(t,&p[i]->identity)==LB_PID_OK && !lb_pid_lookup(t,old[i]));
+            CHECK(lb_pid_remove(t,&p[i]->identity)==LB_PID_INVALID);
+        }
+        for(size_t i=0;i<9;++i) lb_process_destroy(p[i]);
+    }
+    /* Reach the final generation without trillions of allocations. Only the
+     * generation bits change: native slot membership/free-ring state remains
+     * valid. Retirement must not recycle this PID's slot at generation zero. */
+    p[0]=create(e); CHECK(lb_pid_insert(t,&p[0]->identity,p[0])==LB_PID_OK);
+    p[0]->identity.id=((((UINT64_MAX>>4)&~(Uint)7)<<4)|(p[0]->identity.id&127));
+    Eterm last=p[0]->identity.id; CHECK(lb_pid_lookup(t,last)==p[0]); lb_process_destroy(p[0]);
+    CHECK(!lb_pid_lookup(t,last));
+    for(size_t i=0;i<8;++i) p[i]=create(e);
+    for(size_t i=0;i<7;++i) CHECK(lb_pid_insert(t,&p[i]->identity,p[i])==LB_PID_OK);
+    CHECK(lb_pid_insert(t,&p[7]->identity,p[7])==LB_PID_FULL);
+    for(size_t i=0;i<8;++i) lb_process_destroy(p[i]);
+    CHECK(lb_pid_table_destroy(t)==LB_PID_OK && m->live==before);
+}
+static void permuted_ring(LbCodeSpace *space,LbCodeEntry *e)
+{
+    LbPidTable *t; CHECK(lb_pid_table_create(space,64,&t)==LB_PID_OK);
+    Eterm stale[64]={0}; uint32_t random=42;
+    for(size_t round=0;round<100;++round) {
+        LbProcess *processes[64];
+        for(size_t i=0;i<64;++i) {
+            processes[i]=create(e); CHECK(lb_pid_insert(t,&processes[i]->identity,processes[i])==LB_PID_OK);
+            Eterm id=processes[i]->identity.id;
+            if(!round) CHECK(id==(((((i&7)<<3)+(i>>3))<<4)|_TAG_IMMED1_PID));
+            CHECK(lb_pid_lookup(t,id)==processes[i]);
+            for(size_t j=0;j<64;++j) CHECK(!lb_pid_lookup(t,stale[j]));
+        }
+        for(size_t left=64;left;--left) {
+            random=random*1664525u+1013904223u; size_t index=random%left;
+            stale[64-left]=processes[index]->identity.id;
+            lb_process_destroy(processes[index]); processes[index]=processes[left-1];
+        }
+        CHECK(!lb_pid_count(t));
+    }
+    CHECK(lb_pid_table_destroy(t)==LB_PID_OK);
+}
+int main(int argc,char **argv)
+{
+    CHECK(lb_instruction_supported(op_self_x) && lb_instruction_supported(op_self_y) && lb_instruction_supported(op_is_pid_fx));
+    if(argc==1) { puts("CORE_PID_GATE_OK"); return 0; } CHECK(argc==2);
+    Memory m={0}; LbSystemAllocator allocator={&m,allocate,release}; LbEngine *engine; LbCodeSpace *a,*b;
+    CHECK(lb_engine_create(&allocator,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&a)==LB_CODE_OK && lb_code_space_create(engine,&b)==LB_CODE_OK);
+    LbCodeModule *ma=load(a,argv[1]),*mb=load(b,argv[1]); LbCodeEntry *ea=entry(a,ma,"identity",0),*eb=entry(b,mb,"identity",0);
+    table(a,ea,&m); permuted_ring(a,ea);
+    LbProcess *failed=create(ea); size_t before=m.live; m.fail=m.calls+1;
+    CHECK(finish(failed)==LB_PROCESS_NO_MEMORY && !a->pids && !failed->identity.owner && m.live==before);
+    m.fail=0; lb_process_destroy(failed);
+    LbProcess *pa=create(ea),*pb=create(eb);
+    CHECK(lb_process_run(pa,1,128)==LB_PROCESS_YIELDED && lb_process_run(pb,1,128)==LB_PROCESS_YIELDED);
+    Eterm pid=pa->reg[0]; CHECK(is_internal_pid(pid) && pid==pa->identity.id);
+    CHECK(a->pids!=b->pids && lb_pid_lookup(a->pids,pid)==pa && lb_pid_lookup(b->pids,pb->identity.id)==pb);
+    CHECK(lb_pid_remove(b->pids,&pa->identity)==LB_PID_INVALID);
+    CHECK(finish(pa)==LB_PROCESS_DONE && finish(pb)==LB_PROCESS_DONE);
+    CHECK(!lb_pid_lookup(a->pids,pid) && !lb_pid_lookup(b->pids,pb->identity.id));
+    CHECK(lb_process_collect(pa,256)==LB_PROCESS_DONE && lb_process_result(pa)==pid);
+    lb_process_destroy(pa); CHECK(!lb_pid_lookup(a->pids,pid) && lb_pid_count(a->pids)==0);
+    pa=create(ea); CHECK(finish(pa)==LB_PROCESS_DONE && lb_process_result(pa)!=pid);
+    CHECK(lb_pid_insert(b->pids,&pa->identity,pa)==LB_PID_INVALID);
+    lb_process_destroy(pa); lb_process_destroy(pb);
+    LbCodeEntry *pair=entry(a,ma,"pair",0); pa=create(pair); CHECK(finish(pa)==LB_PROCESS_DONE);
+    Eterm *tuple=tuple_val(lb_process_result(pa)); CHECK(arityval(tuple[0])==2 && tuple[1]==pa->identity.id && tuple[2]==tuple[1]);
+    CHECK(lb_process_collect(pa,128)==LB_PROCESS_DONE); lb_process_destroy(pa); lb_code_entry_release(pair);
+    LbCodeEntry *classify=entry(a,ma,"classify",1); pa=create(ea); CHECK(finish(pa)==LB_PROCESS_DONE);
+    LbProcess *consumer=create(classify); consumer->reg[0]=pa->identity.id;
+    CHECK(finish(consumer)==LB_PROCESS_DONE); LbBitstringView view; CHECK(lb_bitstring_view(lb_process_result(consumer),&view) && view.bit_size==24 && !memcmp(view.data,"pid",3));
+    lb_process_destroy(consumer); lb_process_destroy(pa); consumer=create(classify);
+    CHECK(finish(consumer)==LB_PROCESS_DONE && lb_bitstring_view(lb_process_result(consumer),&view) && view.bit_size==56 && !memcmp(view.data,"not_pid",7));
+    lb_process_destroy(consumer); lb_code_entry_release(classify);
+    /* The real self instruction, not just the table API, refuses exhaustion
+     * as infrastructure and leaves its destination/exception fields untouched. */
+    LbProcess **held=malloc(1025*sizeof(*held)); CHECK(held);
+    for(size_t i=0;i<1025;++i) held[i]=create(ea);
+    for(size_t i=0;i<1024;++i) CHECK(lb_process_run(held[i],1,128)==LB_PROCESS_YIELDED);
+    CHECK(lb_pid_count(a->pids)==1024 && finish(held[1024])==LB_PROCESS_LIMIT);
+    CHECK(held[1024]->reg[0]==NIL && lb_process_exception(held[1024])==THE_NON_VALUE);
+    for(size_t i=0;i<1025;++i) lb_process_destroy(held[i]); free(held); CHECK(!lb_pid_count(a->pids));
+    lb_code_entry_release(ea); lb_code_entry_release(eb);
+    CHECK(lb_code_unload(ma)==LB_CODE_OK && lb_code_unload(mb)==LB_CODE_OK);
+    CHECK(lb_code_space_destroy(a)==LB_CODE_OK && lb_code_space_destroy(b)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK);
+    lb_engine_release(engine); CHECK(!m.live); puts("CORE_PID_OK self_execution=true real_process_directory=true gc=true stale_pid_rejected=true isolated_directories=true oom_retry=true physical_retirement=true"); return 0;
+}

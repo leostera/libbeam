@@ -32,7 +32,8 @@ LbEngineStatus lb_engine_create(const LbSystemAllocator *allocator,LbEngine **ou
         {BIF_get_module_info_1,{am_erlang,am_get_module_info,1,lb_bif_module_info_1,BIF_KIND_HEAVY}},
         {BIF_get_module_info_2,{am_erlang,am_get_module_info,2,lb_bif_module_info_2,BIF_KIND_HEAVY}},
         {BIF_splus_2,{am_erlang,am_Plus,2,lb_bif_plus_2,BIF_KIND_HEAVY}},
-        {BIF_integer_to_binary_1,{am_erlang,am_integer_to_binary,1,lb_bif_integer_to_binary_1,BIF_KIND_HEAVY}}
+        {BIF_integer_to_binary_1,{am_erlang,am_integer_to_binary,1,lb_bif_integer_to_binary_1,BIF_KIND_HEAVY}},
+        {BIF_self_0,{am_erlang,am_self,0,lb_bif_self_0,BIF_KIND_HEAVY}}
     };
     size_t i;
     _Static_assert(sizeof(natives)/sizeof(natives[0])==LB_NATIVE_COUNT,"native catalog size");

@@ -9,8 +9,10 @@
 #include "code_internal.h"
 #include "decimal.h"
 #include "binary_vheap.h"
+#include "pid_table.h"
 struct LbProcess {
     LbCodeModule *entry_module;
+    LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
     const LbMFA *current;
     LbMFA local_mfa; /* owned copy of a private function's native word header */
     const BeamInstr *i;
@@ -28,6 +30,7 @@ struct LbProcess {
     LbProcessStatus status;
     int running;
 };
+LbProcessStatus lb_process_identity(LbProcess *,Eterm *);
 int lb_process_collect_live(LbProcess *,size_t,size_t);
 int lb_heap_reserve(LbProcess *,size_t,size_t);
 int lb_heap_reserve_binary(LbProcess *,size_t need,size_t incoming_bytes,size_t live);

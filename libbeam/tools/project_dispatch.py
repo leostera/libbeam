@@ -37,7 +37,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy bs_init_writable i_bs_create_bin_jIWdW').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_pid_fx').split()
 
 
 def case(source, name):
@@ -127,6 +127,21 @@ def fallible_writable_init(body):
         '  if (FCALLS<=0) goto context_switch3;\n  GotoPF(next_pf);')
 
 
+def fallible_self(body):
+    if not re.search(r'OpCase\(self_[xy]\):',body): return body
+    if body.count('c_p->common.id')!=1 or body.count('GotoPF(next_pf);')!=1:
+        raise RuntimeError('Unreviewed self instruction boundary')
+    body=body.replace('  BeamInstr next_pf',
+        '  Eterm identity;\n'
+        '  LbProcessStatus identity_status=lb_process_identity(c_p,&identity);\n'
+        '  FCALLS-=(Sint)c_p->last_native_cost;\n'
+        '  if(identity_status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n'
+        '  if(identity_status==LB_PROCESS_LIMIT) goto resource_limit;\n'
+        '  if(identity_status!=LB_PROCESS_READY) goto malformed_code;\n'
+        '  BeamInstr next_pf')
+    return body.replace('c_p->common.id','identity').replace('GotoPF(next_pf);','if(FCALLS<=0) goto context_switch3; GotoPF(next_pf);')
+
+
 def binary_failure_checks():
     return ('if (build.status==LB_BUILD_NO_MEMORY) goto memory_failure;\n'
             'if (build.status==LB_BUILD_LIMIT) goto resource_limit;\n'
@@ -204,6 +219,7 @@ def project(source):
         body=fallible_equality(body)
         body=fallible_addition(body)
         body=fallible_writable_init(body)
+        body=fallible_self(body)
         body=fallible_binary_build(body)
         # No tracing/saved-call/lock instrumentation capability exists in this
         # serialized interpreter. Remove those paths, not their semantic peers.

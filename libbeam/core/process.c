@@ -63,6 +63,7 @@ void lb_process_destroy(LbProcess *p)
     if(!p) return;
     if(p->running) abort(); /* internal serialized API misuse, not a guest path */
     module=p->entry_module; d=module->space->domain;
+    if(p->identity.owner && lb_pid_remove(p->identity.owner,&p->identity)!=LB_PID_OK) abort();
     lb_decimal_destroy(p->decimal);
     lb_offheap_clear(&p->off_heap);
     lb_offheap_clear(&p->writable);
@@ -196,6 +197,7 @@ dispatch:
         }
         if(is_non_value(value)) {
             if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+            if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
             goto find_func_info;
         }
         x(0)=value; SET_I(cp_val(*E)); *E=NIL; Goto(*I);
@@ -237,5 +239,9 @@ memory_failure:
 malformed_code:
     c_p->status=LB_PROCESS_INVALID;
 stop:
+    /* Guest exit removes identity before publishing completion. The retained
+     * process/result allocation may outlive that logical death. */
+    if(c_p->status!=LB_PROCESS_YIELDED && c_p->identity.owner &&
+       lb_pid_remove(c_p->identity.owner,&c_p->identity)!=LB_PID_OK) abort();
     SWAPOUT; c_p->running=0; return c_p->status;
 }

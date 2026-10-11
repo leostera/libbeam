@@ -82,6 +82,8 @@ def main():
                             root / 'libbeam/core/otp/writable-init-sources.json',
                             root / 'libbeam/core/otp/binary-build-sources.json',
                             root / 'libbeam/tests/core_binary_build_test.c', root / 'libbeam/tests/api_binary_build_test.cpp',
+                            root / 'libbeam/tests/core_pid_test.c', root / 'libbeam/tests/fixtures/pid_slice.erl',
+                            root / 'libbeam/core/otp/process-identity-sources.json',
                             root / 'libbeam/tests/fixtures/binary_construct_slice.erl', root / 'libbeam/tests/fixtures/binary_control_slice.S',
                             root / 'libbeam/tests/fixtures/binary_construct_reference.erl',
                             root / 'libbeam/tests/fixtures/bit_writer_reference.erl',
@@ -179,6 +181,10 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError('Unreviewed binary construction reference '+filename)
             summary['binary_build_sources'] = binary_build_sources
+            pid_sources = json.loads((root / 'libbeam/core/otp/process-identity-sources.json').read_text())
+            for filename, expected in pid_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError('Unreviewed process identity reference '+filename)
             exception_sources = json.loads((root / 'libbeam/core/otp/exception-sources.json').read_text())
             for filename, expected in exception_sources['sources'].items():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
@@ -261,7 +267,10 @@ def main():
             run('decimal-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/decimal_slice.erl'])
             decimal_fixture = fixture_dir / 'decimal_slice.beam'
             run('decimal-execution', [out / 'build/core_decimal_test', decimal_fixture])
-            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture])
+            run('pid-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/pid_slice.erl'])
+            pid_fixture = fixture_dir / 'pid_slice.beam'
+            run('pid-execution', [out / 'build/core_pid_test', pid_fixture])
+            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture])
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
             run('peer-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/code_peer.erl'])
@@ -536,7 +545,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','pid_table','bif_process']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -557,9 +566,9 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
                 raise RuntimeError('UBSan float segments differ from stock-OTP vectors')
             run('flatmap-ubsan', [out / 'engine-ubsan/core_flatmap_test', binary_fixture])
@@ -597,7 +606,8 @@ def main():
             run('shape-ubsan', [out / 'engine-ubsan/core_shape_test', shape_fixture])
             run('add-ubsan', [out / 'engine-ubsan/core_add_test', add_fixture])
             run('decimal-ubsan', [out / 'engine-ubsan/core_decimal_test', decimal_fixture])
-            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture])
+            run('pid-ubsan', [out / 'engine-ubsan/core_pid_test', pid_fixture])
+            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
@@ -639,7 +649,8 @@ def main():
             run('shape-release', [out / 'release/core_shape_test', shape_fixture])
             run('add-release', [out / 'release/core_add_test', add_fixture])
             run('decimal-release', [out / 'release/core_decimal_test', decimal_fixture])
-            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture])
+            run('pid-release', [out / 'release/core_pid_test', pid_fixture])
+            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture])
             for filename in ('lb_atoms_generated.h', 'lb_atoms_generated.inc', 'lb_bif_ids_generated.h'):
                 first = (out / 'build/generated/atoms' / filename).read_bytes()
                 second = (out / 'release/generated/atoms' / filename).read_bytes()
@@ -672,7 +683,7 @@ def main():
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, many_fixture, *probes]}
+                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, many_fixture, *probes]}
             # G1 now requires the unchanged acceptance target and real C/adapter
             # failure recovery. Stateful G3 remains separately observed, not green.
             lifecycle = run('engine-lifecycle', [out / 'build/engine_lifecycle'])
