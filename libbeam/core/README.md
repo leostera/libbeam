@@ -9,7 +9,8 @@ See [RFD 0003](../../docs/rfds/0003-additive-runtime-construction.md) and the
 [local calls/Y roots](../../docs/rfds/0003-local-calls.md) and
 [exact comparisons](../../docs/rfds/0003-exact-comparison.md) and
 [tuple/list consumers and shape proofs](../../docs/rfds/0003-tuple-list-shapes.md) and
-[native numeric addition](../../docs/rfds/0003-numeric-addition.md).
+[native numeric addition](../../docs/rfds/0003-numeric-addition.md) and
+[decimal continuations](../../docs/rfds/0003-decimal-continuations.md).
 
 This is the C runtime construction boundary, not a whole-ERTS link. It now loads
 and executes ordinary `first_slice.erl` through generated BEAM transformations,
@@ -71,6 +72,10 @@ lifecycle target passes; the stateful example still refuses unsupported module i
 - `big.c`, `bif_numeric.c`: native small/bignum/float addition and positive-listed
   `+/2`, fallible independent scratch, collection-safe X/Y publication, native
   size errors and scoped IEEE arithmetic. OOM is never a false arithmetic guard.
+- `decimal.c`, `bif_decimal.c`: native schoolbook `integer_to_binary/1`, with
+  independent process-owned scratch and worker continuations between division
+  passes. Completion produces ordinary heap/offheap binaries; stop/cancellation
+  destroys partial state. D&C/dirty schedulers and other bases are not admitted.
 - `bif_info.c`, `md5.c`: the two positive-listed `get_module_info` BIFs and actual
   metadata/checksum behavior, not placeholders for compiler-generated imports.
 
@@ -98,7 +103,7 @@ admission; ordinary line/debug/feature metadata is passive, while executable
 `DbgB` and record `Recs` metadata is refused. Source-line instrumentation is absent.
 
 Only the explicit generated dispatch profile is admitted, including unused
-functions. Integer formatting, other arithmetic, full transform helpers,
+functions. Other arithmetic/bases, full transform helpers,
 catch/fun/string/binary instruction consumers,
 broader exception handling, scheduling and the stateful example remain outstanding.
 Retained preparation arenas include temporary operations/backing; density is not

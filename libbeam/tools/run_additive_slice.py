@@ -61,6 +61,8 @@ def main():
                             root / 'libbeam/tests/fixtures/shape_slice.erl',
                             root / 'libbeam/tests/core_add_test.c', root / 'libbeam/tests/core_big_test.c',
                             root / 'libbeam/tests/fixtures/add_slice.erl',
+                            root / 'libbeam/tests/core_decimal_test.c', root / 'libbeam/tests/fixtures/decimal_slice.erl',
+                            root / 'libbeam/core/otp/decimal-sources.json',
                             root / 'libbeam/tests/core_binary_test.c', root / 'libbeam/tests/fixtures/binary_slice.erl',
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
@@ -105,6 +107,11 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError(f'Numeric reference changed: {filename}')
             summary['numeric_sources'] = numeric_sources
+            decimal_sources = json.loads((root / 'libbeam/core/otp/decimal-sources.json').read_text())
+            for filename, expected in decimal_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Decimal reference changed: {filename}')
+            summary['decimal_sources'] = decimal_sources
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
@@ -166,7 +173,10 @@ def main():
             run('add-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/add_slice.erl'])
             add_fixture = fixture_dir / 'add_slice.beam'
             run('add-execution', [out / 'build/core_add_test', add_fixture])
-            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture])
+            run('decimal-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/decimal_slice.erl'])
+            decimal_fixture = fixture_dir / 'decimal_slice.beam'
+            run('decimal-execution', [out / 'build/core_decimal_test', decimal_fixture])
+            run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture])
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
             run('peer-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/code_peer.erl'])
@@ -234,6 +244,11 @@ def main():
                 <<"different">> = compare_slice:same(0.0,-0.0),
                 <<"different">> = compare_slice:same(0,0.0),
                 <<"equal">> = compare_slice:different(<<5:3>>,<<5:3>>),
+                <<"42">> = decimal_slice:small(ignored),
+                <<"-18446744073709551617">> = decimal_slice:negative(ignored),
+                Decimal = integer_to_binary(1 bsl 8192), Decimal = decimal_slice:large(ignored),
+                2467 = byte_size(Decimal),
+                78914 = byte_size(decimal_slice:too_large(ignored)),
                 42 = add_slice:add(40,2),
                 2305843009213693950 = add_slice:big(ignored),
                 1152921504606847232.0 = add_slice:float(ignored),
@@ -319,7 +334,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -338,16 +353,17 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
             run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture])
             run('local-ubsan', [out / 'engine-ubsan/core_local_test', local_fixture])
             run('compare-ubsan', [out / 'engine-ubsan/core_compare_test', compare_fixture])
             run('shape-ubsan', [out / 'engine-ubsan/core_shape_test', shape_fixture])
             run('add-ubsan', [out / 'engine-ubsan/core_add_test', add_fixture])
-            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture])
+            run('decimal-ubsan', [out / 'engine-ubsan/core_decimal_test', decimal_fixture])
+            run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
@@ -363,7 +379,8 @@ def main():
             run('compare-release', [out / 'release/core_compare_test', compare_fixture])
             run('shape-release', [out / 'release/core_shape_test', shape_fixture])
             run('add-release', [out / 'release/core_add_test', add_fixture])
-            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture])
+            run('decimal-release', [out / 'release/core_decimal_test', decimal_fixture])
+            run('api-world-release', [out / 'release/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture])
             for filename in ('lb_atoms_generated.h', 'lb_atoms_generated.inc', 'lb_bif_ids_generated.h'):
                 first = (out / 'build/generated/atoms' / filename).read_bytes()
                 second = (out / 'release/generated/atoms' / filename).read_bytes()
@@ -389,10 +406,11 @@ def main():
             summary['exact_comparison_execution_passed'] = True
             summary['tuple_list_shape_execution_passed'] = True
             summary['numeric_addition_execution_passed'] = True
+            summary['decimal_continuation_execution_passed'] = True
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, many_fixture, *probes]}
+                                                for p in [fixture, peer_fixture, binary_fixture, async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, many_fixture, *probes]}
             # G1 now requires the unchanged acceptance target and real C/adapter
             # failure recovery. Stateful G3 remains separately observed, not green.
             lifecycle = run('engine-lifecycle', [out / 'build/engine_lifecycle'])

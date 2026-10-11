@@ -34,7 +34,9 @@ create/shutdown/recreate target. [Public Isolates and calls](../docs/rfds/0003-p
 now execute the selected profile on the worker, with copied transport and physical
 reclamation. [Native numeric addition](../docs/rfds/0003-numeric-addition.md) now
 executes small/bignum/float semantics with fallible scratch and collection-safe Y
-destinations. Full A03–A07 breadth and stateful process machinery remain unfinished. Native archive work below is diagnostic/reference evidence,
+destinations. [Decimal formatting](../docs/rfds/0003-decimal-continuations.md)
+uses owned worker continuations with peer progress and cancellation cleanup.
+Full A03–A07 breadth and stateful process machinery remain unfinished. Native archive work below is diagnostic/reference evidence,
 not a fallback runtime for the new core.
 
 This directory contains build/link probes and an

@@ -5,6 +5,8 @@
 
 Status: **Implemented selected-profile growth toward M3, not stateful acceptance.**
 Baseline: `f94dcefd`, after [tuple/list consumers](0003-tuple-list-shapes.md).
+This records `1d1a7241`; the subsequent [decimal continuation slice](0003-decimal-continuations.md)
+adds integer formatting and a fourth native implementation.
 
 The stateful counter needs arithmetic, not a hardcoded counter command. This slice
 admits ordinary `erlang:'+'/2`, including small integers, signed bignums and finite

@@ -27,6 +27,8 @@ semantics and fallible scratch handling to its generated branch cases.
 cons construction and native tuple-arity dispatch without trusting compiler hints.
 [Native numeric addition](0003-numeric-addition.md) adds small/bignum/float semantics,
 fallible scratch, collection-safe arithmetic destinations and a real `+/2` BIF.
+[Decimal formatting](0003-decimal-continuations.md) adds `integer_to_binary/1` with
+owned native continuations, peer progress and partial-conversion retirement.
 
 See the [A01/A02 term-and-atom admission record](0003-terms-and-atoms.md) for the
 selected BEAM representation, namespace identities, transactional image bindings

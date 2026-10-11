@@ -61,6 +61,7 @@ void lb_process_destroy(LbProcess *p)
     if(!p) return;
     if(p->running) abort(); /* internal serialized API misuse, not a guest path */
     module=p->entry_module; d=module->space->domain;
+    lb_decimal_destroy(p->decimal);
     lb_offheap_clear(&p->off_heap);
     lb_release(d,p->heap); lb_release(d,p);
     if(!module->users) abort(); --module->users;
@@ -162,21 +163,29 @@ LbProcessStatus lb_process_run(LbProcess *c_p,size_t budget,unsigned reductions)
     c_p->running=1; reg=c_p->reg; I=c_p->i; E=c_p->stop; HTOP=c_p->htop; FCALLS=reductions;
     next_op=*I;
 dispatch:
-    if(!pc_valid(c_p,I) || !VALID_INSTR(next_op)) goto malformed_code;
+    if(!pc_valid(c_p,I) || !VALID_INSTR(next_op) || (c_p->decimal && next_op!=op_call_bif_W)) goto malformed_code;
     if(!budget--) goto context_switch3;
     switch(next_op) {
 #include "lb_dispatch_generated.inc"
     OpCase(call_bif_W): {
         /* Owned adaptation of generated call_bif_W and nif_bif__epilogue. The
-         * closed positive catalog has heavy allocating, nontrapping BIFs only. */
+         * closed positive catalog has heavy allocating BIFs. Only decimal
+         * formatting owns a resumable native continuation in this profile. */
         const LbMFA *mfa=entry_mfa(c_p,I);
         LbBifFn function; Eterm value;
         if(!mfa) goto malformed_code;
         if(FCALLS<=1) goto context_switch;
         c_p->current=mfa; c_p->arity=mfa->arity; c_p->heap_reserved=0;
         SWAPOUT; memcpy(&function,&I[1],sizeof(function));
+        if(c_p->decimal && function!=lb_bif_integer_to_binary_1) goto malformed_code;
         c_p->last_native_cost=0;
         value=function(c_p,reg,I); SWAPIN; FCALLS-=1+(Sint)c_p->last_native_cost;
+        if(c_p->decimal) {
+            /* Reenter this actual native trampoline on the next worker slice.
+             * Heap collection cannot invalidate the independent continuation. */
+            if(!is_non_value(value) || c_p->status==LB_PROCESS_NO_MEMORY || c_p->status==LB_PROCESS_EXCEPTION) goto malformed_code;
+            goto context_switch;
+        }
         if(is_non_value(value)) {
             if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
             goto find_func_info;

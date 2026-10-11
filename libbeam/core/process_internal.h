@@ -6,6 +6,7 @@
 #define LIBBEAM_CORE_PROCESS_INTERNAL_H
 #include "process.h"
 #include "code_internal.h"
+#include "decimal.h"
 struct LbProcess {
     LbCodeModule *entry_module;
     const LbMFA *current;
@@ -14,6 +15,7 @@ struct LbProcess {
     Eterm reg[MAX_REG];
     Eterm *heap, *htop, *stop, *hend;
     LbOffHeap off_heap;
+    LbDecimal *decimal; /* sole pending native continuation; independent scratch */
     Eterm fvalue, freason;
     Uint arity, last_gc_cost, last_native_cost;
     size_t collections, heap_reserved;
