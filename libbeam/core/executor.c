@@ -143,6 +143,7 @@ static LbEngineStatus create_locked(LbEngine *engine,const LbCodeEntry *entry,
         engine->worker_started=1;
     }
     /* No fallible work after publication; the worker cannot see partial state. */
+    task->process->world=task->world;
     task->next=engine->tasks; engine->tasks=task;
     checked(pthread_cond_signal(&engine->wake)); *out=task; return LB_ENGINE_OK;
 }
@@ -177,6 +178,7 @@ LbProcessStatus lb_task_spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm 
     LbProcessStatus status=lb_process_create_fun(parent,fun,64,&task->process);
     if(status!=LB_PROCESS_READY) { lb_release(engine->domain,task); return status; }
     *out=task->process->identity.id;
+    task->process->world=world;
     task->next=engine->tasks; engine->tasks=task;
     checked(pthread_cond_signal(&engine->wake)); return LB_PROCESS_READY;
 }

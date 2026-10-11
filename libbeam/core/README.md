@@ -29,7 +29,12 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   children retire physically, and serialized world stop drains persistent
   children before code-space retirement. Worker-produced closure tests cover
   allocation-prefix rollback, source destruction, peer progress and stop.
-  This scheduling seam does not yet admit guest spawn imports or monitors.
+  Native `spawn/3` now executes unmonitored `erlang:apply(F,[])` startup for
+  owned local fun/0, with copied environments and worker-only execution.
+  Malformed module/function/argument-list inputs retain native badarg; other
+  valid MFAs/apply shapes refuse the runtime profile, not a guest exception.
+  `spawn/1` remains an unadmitted preloaded Erlang wrapper, not a native alias;
+  spawn monitors, signals and mailboxes remain pending.
   Spaces retain it through physical release; shutdown refuses live children;
   out-of-order owner drop defers cleanup to the last physical child. No singleton
   or implicit world. The C++ factory owns this C handle.

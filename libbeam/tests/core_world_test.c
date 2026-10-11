@@ -216,6 +216,32 @@ static void spawned_children(LbBytesView code)
     CHECK(lb_world_create(engine,&world)==LB_WORLD_OK && lb_world_load(world,code)==LB_WORLD_OK);
     CHECK(lb_world_start(world,text("fun_slice"),text("echo"),text("worker"),&call)==LB_WORLD_OK);
     expect(call,LB_WORLD_OK);
+    CHECK(lb_world_call(world,text("fun_slice"),text("spawn_finite"),text("guest"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_OK);
+    CHECK(lb_world_call(world,text("fun_slice"),text("spawn_badarg"),text("not an atom"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_EXCEPTION);
+    CHECK(lb_world_call(world,text("fun_slice"),text("spawn_refused"),text("not a fun"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_EXECUTION_REFUSED);
+    /* Fault every worker allocation before the first successful complete
+     * spawn. The parent reports infrastructure OOM, never a guest badarg;
+     * neither failed child preparation nor parent exit leaves PID membership. */
+    for(size_t prefix=1;;++prefix) {
+        CHECK(prefix<100);
+        lb_engine_enter(engine); m.fail_worker=m.worker_calls+prefix; lb_engine_leave(engine);
+        CHECK(lb_world_call(world,text("fun_slice"),text("spawn_finite"),text("faulted guest"),&call)==LB_WORLD_OK);
+        LbBytesView result; LbWorldStatus status=await_call(call,&result);
+        lb_engine_enter(engine); m.fail_worker=0; lb_engine_leave(engine);
+        CHECK(status==LB_WORLD_NO_MEMORY || status==LB_WORLD_OK); expect(call,status);
+        const struct timespec delay={0,1000000}; size_t spins;
+        for(spins=0;spins<5000;++spins) {
+            lb_engine_enter(engine); size_t members=lb_pid_count(world->space->pids); lb_engine_leave(engine);
+            if(!members) break; nanosleep(&delay,NULL);
+        }
+        CHECK(spins<5000);
+        if(status==LB_WORLD_OK) break;
+    }
+    /* The private task seam below still tests preparation from a retained
+     * worker-produced result. Actual guest spawn above uses the owning world. */
     const char *factories[]={"process_factory","process_nested","process_loop"};
     for(size_t kind=0;kind<3;++kind) {
         LbCodeEntry *entry; LbTask *source;
@@ -255,6 +281,11 @@ static void spawned_children(LbBytesView code)
             expect(call,LB_WORLD_OK); // persistent child does not prevent another runnable process
         }
     }
+    CHECK(lb_world_call(world,text("fun_slice"),text("spawn_loop"),text("guest loop"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_OK);
+    lb_engine_enter(engine); CHECK(lb_pid_count(world->space->pids)==2); lb_engine_leave(engine);
+    CHECK(lb_world_call(world,text("fun_slice"),text("nested"),text("progress"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_OK);
     LbReclamation *r; CHECK(lb_world_stop(world,&r)==LB_WORLD_OK); reclaimed(r);
     lb_reclamation_release(r); lb_world_release(world); lb_engine_release(engine);
     CHECK(!m.live && !m.bytes && m.worker_calls);

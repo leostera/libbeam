@@ -4,6 +4,7 @@
  */
 #include "process_internal.h"
 #include "reference.h"
+#include "world_internal.h"
 /* Identity is allocated on first observation, with no moving-heap allocation.
  * The directory is owned by the world/code namespace and keeps its generations
  * after the last process exits. Spawn must obtain identity before publication;
@@ -34,6 +35,37 @@ Eterm lb_bif_self_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     LbProcessStatus status=lb_process_identity(p,&result);
     if(status==LB_PROCESS_READY) return result;
     p->status=status; return THE_NON_VALUE;
+}
+/* Native spawn_3/erl_create_process boundary: atoms and a proper argument
+ * list are required. This executable slice owns the erlang:apply(F,[]) startup
+ * for local fun/0 only; other valid MFAs/apply shapes refuse infrastructure
+ * admission rather than pretending to be badarg or silently changing spawn/1
+ * (which remains an Erlang wrapper, not a native BIF identity). */
+Eterm lb_bif_spawn_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction;
+    p->last_native_cost=1;
+    if(!is_atom(args[0]) || !is_atom(args[1])) goto badarg;
+    Eterm tail=args[2]; size_t length=0;
+    while(is_list(tail)) {
+        if(++length>LB_MAX_BINARY_BYTES/sizeof(Eterm)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost; tail=list_val(tail)[1];
+    }
+    if(!is_nil(tail)) goto badarg;
+    if(args[0]!=am_erlang || args[1]!=am_apply || length!=2) goto refused;
+    Eterm *first=list_val(args[2]),*second=list_val(first[1]);
+    const LbFun *fun=lb_fun(first[0]);
+    if(!is_nil(second[0]) || !fun || lb_fun_arity(fun)!=0 || !p->world || !p->running) goto refused;
+    Eterm pid; Uint validation_cost=p->last_native_cost;
+    p->last_native_cost=1; /* task preparation plus any child-copy work */
+    LbProcessStatus status=lb_task_spawn_fun_locked(p->world,p,first[0],&pid);
+    p->last_native_cost+=validation_cost;
+    if(status==LB_PROCESS_READY) return pid;
+    p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status; return THE_NON_VALUE;
+badarg:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+refused:
+    p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
 }
 Eterm lb_bif_make_ref_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {

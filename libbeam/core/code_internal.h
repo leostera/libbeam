@@ -118,4 +118,5 @@ Eterm lb_bif_plus_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_integer_to_binary_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_self_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_make_ref_0(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_spawn_3(LbProcess *,Eterm *,const BeamInstr *);
 #endif

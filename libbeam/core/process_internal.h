@@ -13,6 +13,7 @@
 #include "fun.h"
 struct LbProcess {
     LbCodeModule *entry_module;
+    LbWorld *world; /* borrowed C task owner; task retirement precedes world destruction */
     LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
     LbFunLease *fun_leases; /* one lease per defining module, represented by a stable entry */
     const LbMFA *current;

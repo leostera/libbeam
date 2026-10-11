@@ -273,6 +273,8 @@ dispatch:
         if(is_non_value(value)) {
             if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
             if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+            if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+            if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
             goto find_func_info;
         }
         x(0)=value; SET_I(cp_val(*E)); *E=NIL; Goto(*I);

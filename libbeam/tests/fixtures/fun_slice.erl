@@ -1,13 +1,18 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% Copyright 2026 Leandro Ostera <leandro@ostera.io>
 -module(fun_slice).
--export([echo/1, factory/1, closed/1, closed_factory/1, nested/1, badarity/1, reply/1, process_factory/1, process_nested/1, is_fun/1, is_zero/1, is_arity/2, process_loop/1]).
+-export([echo/1, factory/1, closed/1, closed_factory/1, nested/1, badarity/1, reply/1, process_factory/1, process_nested/1, is_fun/1, is_zero/1, is_arity/2, process_loop/1,
+         spawn_finite/1, spawn_loop/1, spawn_badarg/1, spawn_refused/1]).
 is_fun(F) when is_function(F) -> true;
 is_fun(_) -> false.
 is_zero(F) when is_function(F,0) -> true;
 is_zero(_) -> false.
 is_arity(F,N) when is_function(F,N) -> true;
 is_arity(_,_) -> false.
+spawn_finite(B) -> erlang:spawn(erlang, apply, [fun() -> {B,self()} end, []]), B.
+spawn_loop(B) -> erlang:spawn(erlang, apply, [fun() -> spinning(B) end, []]), B.
+spawn_badarg(B) -> erlang:spawn(B, apply, []), B.
+spawn_refused(B) -> erlang:spawn(erlang, apply, [B, []]), B.
 process_loop(B) -> fun() -> spinning(B) end.
 spinning(B) -> spinning(B).
 process_factory(B) ->
