@@ -14,7 +14,8 @@ struct LbProcess {
     const BeamInstr *i;
     Eterm reg[MAX_REG];
     Eterm *heap, *htop, *stop, *hend;
-    LbOffHeap off_heap;
+    LbOffHeap off_heap, writable;
+    Eterm construction_root; /* explicit temporary root during fallible append */
     LbDecimal *decimal; /* sole pending native continuation; independent scratch */
     Eterm fvalue, freason;
     Uint arity, last_gc_cost, last_native_cost;

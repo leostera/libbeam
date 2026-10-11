@@ -36,6 +36,9 @@ reclamation. [Native numeric addition](../docs/rfds/0003-numeric-addition.md) no
 executes small/bignum/float semantics with fallible scratch and collection-safe Y
 destinations. [Decimal formatting](../docs/rfds/0003-decimal-continuations.md)
 uses owned worker continuations with peer progress and cancellation cleanup.
+[Binary construction dependencies](../docs/rfds/0003-owned-binaries.md) now include
+checked segment writers and C-owned writable append/GC lifetimes; guest binary
+construction is still unadmitted.
 Full A03–A07 breadth and stateful process machinery remain unfinished. Native archive work below is diagnostic/reference evidence,
 not a fallback runtime for the new core.
 

@@ -308,3 +308,90 @@ Append/private-append ownership, aggregate sizing, loader fixups, error contexts
 and complete transform/dispatch integration remain ahead of `bs_create_bin`
 admission. Neither helper availability nor opcode identity grants that admission;
 stateful acceptance and the M3/M4 contracts remain incomplete.
+
+## Follow-on: process-owned writable backing and normal append
+
+Baseline: `877207fd`. This snapshot adds the native writable representations and
+non-private append ownership path in `core/writable.c`, not guest instruction
+admission. Provenance is recorded in `core/otp/writable-sources.json`.
+
+A process now owns two native BinRef chains: ordinary immutable references and
+writable references. A writable backing has exactly one BinRef/reference-count
+owner, but multiple prefix views may point to that same BinRef. Normal append
+clears the previous view's mutable bit, preserves its length, and returns a new
+writable SubBits. An older view remains volatile: it follows its BinRef instead
+of dereferencing a cached pointer after the backing moves. Appending to a revoked
+prefix or a pinned backing takes the native copying branch. There is no inferred
+uniqueness of heap headers and no private append implementation in this slice.
+
+### Fallible preparation and commit
+
+Capacity allocation, initialization and prefix copying happen before the final
+heap reservation. Replacement uses a fresh owned allocation rather than a fatal
+allocator realloc. An explicit temporary process root preserves incoming terms
+that are not in X registers across moving GC. After the last fallible step, the
+helper reacquires heap pointers, revokes the old view, changes the BinRef when
+necessary, publishes the new view, and releases replaced backing. Allocation or
+collection failure preserves source bytes/flags/ownership, output slots and heap
+credit; retry uses the same process. No borrowed heap pointer crosses collection.
+
+The returned checked writer borrows initialized bytes. Callers must finish its
+exact requested bit count before publishing the term to guest code; at most
+seven tail-padding bits lie within its byte capacity. Output slots must not live
+in the moving heap. Source terms belong to this process or its retained literals;
+these are not hostile-word or foreign-pointer validation APIs. Zero-size append
+returns the actual source and an empty writer instead of native crash-poison
+pointers. Init accepts a decoded capacity; it does not implement the language
+argument/default rules of `bs_init_writable`.
+
+Growth retains native doubling below the 16-MiB threshold and 20-percent growth
+above it, using integer arithmetic and a 64-MiB payload-capacity ceiling. The
+immutable-source path retains the 256-byte minimum. This is a per-backing profile
+bound, not an aggregate memory quota or a low-peak-allocation claim.
+
+### Pinning, collection and physical release
+
+Read-only views and exact comparison resolve volatile data without modifying
+source headers. Explicit pinning revokes backing write permission and normalizes
+the chosen view before immutable flat-copy/sharing. Direct reference retention
+refuses writable backing; existing flat-copy still requires immutable inputs.
+Other volatile views keep resolving correctly after one view is pinned.
+
+Copying GC moves SubBits origins and transfers forwarded writable BinRefs without
+incrementing their counters. It releases dead references, clears active-writer
+state, and migrates frozen references into the normal offheap chain. Both chains
+account actual allocated capacity per reference. Destruction releases both before
+freeing the heap. A copied pinned payload remains valid after its source process
+is physically destroyed and is freed on its own final release.
+
+Pin and GC deliberately do not shrink allocations. Native shrinking would need
+new fallible host allocations, incompatible with the collector's allocation-free
+commit after forwarding and with infallible pin. Retaining spare capacity is an
+explicit policy, not an ignored shrink failure. It costs retained memory until
+final release; no density claim accompanies this choice.
+
+### Evidence and remaining admission work
+
+The focused binary suite tests eight real allocation-failure prefixes across
+init, immutable-source copy, backing growth, in-capacity append and zero append,
+with exact balance/unchanged ownership and same-process retry. It checks 4,128
+unaligned source windows, heap/refcounted sources, old prefixes through growth
+and collection, branching from revoked/frozen views, pin/copy/source destruction,
+dead writable release, units, zero lengths, growth thresholds and 64-MiB capacity.
+C-created writable arguments execute actual compiled identity and exact-comparison
+functions with moving collection, including unequal results. These are C producers
+consumed by real BEAM code, **not guest binary construction**.
+
+Private append and its uniqueness proof, aggregate sizing, native loader fixups,
+error contexts, work/reduction accounting and full transform/dispatch integration
+still precede `bs_create_bin` admission. Stateful acceptance and M3/M4 remain
+incomplete; neither acceptance example source is changed.
+
+Final validation: `/tmp/libbeam-writable-commit-reviewed/summary.json`, with 18
+Debug/Release CTests, actual fixture/public execution, native flag/layout oracle,
+UBSan, and all 99 expanded binary-module loader-failure prefixes. The 29 tooling
+tests are recorded at `/tmp/libbeam-writable-tooling-final/summary.json`. Source
+hashes remain unchanged during each locked run. Earlier passing integration is
+retained at `/tmp/libbeam-writable-integrated-first/summary.json`. The unchanged
+stateful example still reports unsupported BEAM profile/import; no M3/M4 pass is
+inferred from these dependency and selected-profile execution witnesses.

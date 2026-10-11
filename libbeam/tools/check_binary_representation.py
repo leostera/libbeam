@@ -47,6 +47,8 @@ int main(void) {
     printf("subbits=%zu:%zu:%zu:%zu:%zu:%zu\n", sizeof(S),offsetof(S,thing_word),
            offsetof(S,base_flags),offsetof(S,start),offsetof(S,end),offsetof(S,orig));
     printf("headers=%" PRIuPTR ":%" PRIuPTR " threshold=%zu\n",(uintptr_t)REF_HEADER,(uintptr_t)SUB_HEADER,(size_t)LIMIT);
+    printf("flags=%" PRIuPTR ":%" PRIuPTR ":%" PRIuPTR ":%" PRIuPTR "\n",
+           (uintptr_t)WRITABLE,(uintptr_t)ACTIVE,(uintptr_t)MUTABLE,(uintptr_t)VOLATILE);
     for(i=0;i<sizeof(sizes)/sizeof(sizes[0]);++i) printf("words=%zu:%zu\n",sizes[i],(size_t)WORDS(sizes[i]));
     return 0;
 }
@@ -75,6 +77,7 @@ typedef uint64_t Uint64; typedef _Atomic Uint erts_refc_t;
 '''
     reference += macros(term, '''_TAG_PRIMARY_SIZE TAG_PRIMARY_HEADER _TAG_HEADER_MASK _HEADER_ARITY_OFFS
         __MAKE_SUBTAG SUB_BITS_SUBTAG BIN_REF_SUBTAG _TAG_HEADER_SUB_BITS _TAG_HEADER_BIN_REF _make_header''')
+    reference += declaration(binary, r'enum binary_flags \{.*?\n\};')
     reference += declaration(binary, r'struct binary_internals \{.*?\n\};')
     reference += declaration(binary, r'typedef struct binary \{.*?\n\} Binary;')
     reference += declaration(bits, r'typedef struct erl_sub_bits \{.*?\n\} ErlSubBits;')
@@ -82,10 +85,14 @@ typedef uint64_t Uint64; typedef _Atomic Uint erts_refc_t;
     reference += declaration(bits, r'typedef struct erl_heap_bits \{.*?\n\} ErlHeapBits;')
     reference += macros(bits, '''ERL_BIN_REF_SIZE ERL_SUB_BITS_SIZE ERL_REFC_BITS_SIZE
         HEADER_SUB_BITS HEADER_BIN_REF ERL_ONHEAP_BINARY_LIMIT ERL_ONHEAP_BITS_LIMIT
-        NBYTES heap_bin_size__ heap_bits_size''')
+        NBYTES heap_bin_size__ heap_bits_size ERL_SUB_BITS_FLAG_MUTABLE ERL_SUB_BITS_FLAG_VOLATILE''')
     reference += '''typedef Binary B; typedef BinRef R; typedef ErlSubBits S;
 #define REF_HEADER HEADER_BIN_REF
 #define SUB_HEADER HEADER_SUB_BITS
+#define WRITABLE BIN_FLAG_WRITABLE
+#define ACTIVE BIN_FLAG_ACTIVE_WRITER
+#define MUTABLE ERL_SUB_BITS_FLAG_MUTABLE
+#define VOLATILE ERL_SUB_BITS_FLAG_VOLATILE
 #define LIMIT ERL_ONHEAP_BINARY_LIMIT
 #define WORDS(bits) ((bits)<=ERL_ONHEAP_BITS_LIMIT ? heap_bits_size(bits) : ERL_REFC_BITS_SIZE)
 '''
@@ -93,6 +100,10 @@ typedef uint64_t Uint64; typedef _Atomic Uint erts_refc_t;
 typedef LbBinary B; typedef LbBinRef R; typedef LbSubBits S;
 #define REF_HEADER LB_HEADER_BIN_REF
 #define SUB_HEADER LB_HEADER_SUB_BITS
+#define WRITABLE LB_BINARY_WRITABLE
+#define ACTIVE LB_BINARY_ACTIVE_WRITER
+#define MUTABLE LB_SUB_MUTABLE
+#define VOLATILE LB_SUB_VOLATILE
 #define LIMIT LB_ONHEAP_BINARY_LIMIT
 #define WORDS(bits) lb_bitstring_heap_words(bits)
 '''
@@ -119,7 +130,7 @@ typedef LbBinary B; typedef LbBinRef R; typedef LbSubBits S;
             results.append(result.stdout)
         if results[0] != results[1]:
             raise RuntimeError(f'{mode}: binary layouts differ from the declared upstream profile')
-    print('BINARY_REPRESENTATION_MATCH debug=true release=true scope=flat_64_ordinary_binary_layouts')
+    print('BINARY_REPRESENTATION_MATCH debug=true release=true scope=flat_64_binary_layouts_and_writable_flags')
 
 
 if __name__ == '__main__':

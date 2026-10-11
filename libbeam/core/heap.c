@@ -3,10 +3,11 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  * Full-copy collector adapted from erl_gc.h move_cons/move_boxed and erl_gc.c
  * sweep. Explicit heap/stack/X/result/exception roots replace global Process
- * machinery. Ordinary immutable binary references join tuple/list/big/float
- * layouts. No generational collector, writable binaries, funs or maps yet.
+ * machinery. Immutable and process-owned writable binary references join
+ * tuple/list/big/float layouts. No generational collector, funs or maps yet.
  */
 #include "process_internal.h"
+#include "binary_internal.h"
 #define MAX_HEAP_WORDS (64u*1024u*1024u/sizeof(Eterm))
 static size_t boxed_words(Eterm header)
 {
@@ -56,6 +57,7 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
     for(i=0;i<live;++i) move_root(&p->reg[i],&top);
     for(i=live;i<MAX_REG;++i) p->reg[i]=NIL;
     move_root(&p->fvalue,&top); move_root(&p->freason,&top);
+    move_root(&p->construction_root,&top);
     for(i=0;i<stack;++i) move_root(&stop[i],&top); /* CP words are primary headers */
     scan=heap;
     while(scan<top) {
@@ -65,9 +67,9 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
             else {
                 if(value==LB_HEADER_SUB_BITS) {
                     LbSubBits *sub=(LbSubBits *)scan;
-                    /* Ordinary immutable binaries keep their data address;
-                     * only the heap BinRef moves. No match context is admitted. */
-                    ASSERT(!(sub->base_flags&3));
+                    /* Volatile views follow their BinRef after backing growth.
+                     * Match contexts still require additional representations. */
+                    ASSERT((sub->base_flags&3)!=LB_SUB_MUTABLE);
                     move_root(&sub->orig,&top);
                     ASSERT(*boxed_val(sub->orig)==LB_HEADER_BIN_REF);
                 }
@@ -76,6 +78,7 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
         } else { move_root(scan,&top); ++scan; }
     }
     lb_offheap_sweep(&p->off_heap);
+    lb_writable_sweep(&p->writable,&p->off_heap);
     ASSERT(top<=stop && (size_t)(stop-top)>=need+S_RESERVED);
     p->heap=heap; p->htop=top; p->stop=stop; p->hend=heap+size;
     p->last_gc_cost=1+(Uint)(top-heap)/16; ++p->collections;

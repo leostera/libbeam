@@ -33,7 +33,7 @@ LbProcessStatus lb_process_create(const LbCodeEntry *entry,const Eterm *args,siz
     p->entry_module=module; p->heap=p->htop=memory; p->hend=p->heap+words; p->stop=p->hend-1;
     *p->stop=(Eterm)lb_host_return;
     for(i=0;i<MAX_REG;++i) p->reg[i]=i<arity?args[i]:NIL;
-    p->fvalue=p->freason=NIL; p->arity=arity; p->current=&entry->entry->info.mfa;
+    p->fvalue=p->freason=p->construction_root=NIL; p->arity=arity; p->current=&entry->entry->info.mfa;
     p->i=entry->entry->dispatch.addresses[0]; p->status=LB_PROCESS_READY;
     ++module->users; *out=p; return LB_PROCESS_READY;
 }
@@ -63,6 +63,7 @@ void lb_process_destroy(LbProcess *p)
     module=p->entry_module; d=module->space->domain;
     lb_decimal_destroy(p->decimal);
     lb_offheap_clear(&p->off_heap);
+    lb_offheap_clear(&p->writable);
     lb_release(d,p->heap); lb_release(d,p);
     if(!module->users) abort(); --module->users;
 }

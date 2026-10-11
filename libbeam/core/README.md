@@ -66,6 +66,12 @@ lifecycle target passes; the stateful example still refuses unsupported module i
 - `binary.c`: real immutable refcounted payloads, native BinRef/SubBits layouts,
   owner-local offheap chains, GC sweep and physical release. Literal/metadata
   decoding and copied byte-input invocation share this constructor.
+- `writable.c`: process-owned native writable backing and non-private append,
+  fallible preparation before revocation/publication, volatile-prefix reads,
+  explicit pin before sharing, and copying-GC chain transfer/dead release.
+  Pin/GC retain capacity rather than performing fallible shrink operations.
+  C-created values execute identity/comparison functions; private append and
+  all guest construction instructions remain unadmitted.
 - `bit_copy.c`: native forward bit copying behind checked span/overlap bounds.
   Copied public results use it; arbitrary offsets retain outside bits and need
   no terminal padding. No bit-syntax instruction is admitted by this helper.
@@ -105,7 +111,9 @@ C++ copies ready outputs into independently host-owned vectors before consumptio
 
 The current literal/GC profile includes smalls, bignums, atoms, tuples, lists,
 finite binary64 floats, heap bitstrings up to 64 bytes and ordinary immutable
-refcounted binaries above that threshold. Maps, writable/magic/resource binaries,
+refcounted binaries above that threshold. C-created process-owned writable
+binaries also survive copying GC, read-only consumers, pinning and retirement;
+literal admission remains immutable-only. Maps, magic/resource binaries,
 fun objects, PIDs, ports and refs remain unsupported. Lambda declarations
 are not closure objects. Attributes/compile ETF is decoded for executable
 admission; ordinary line/debug/feature metadata is passive, while executable

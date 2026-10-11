@@ -1,10 +1,12 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% Copyright 2026 Leandro Ostera <leandro@ostera.io>
 -module(binary_slice).
--export([identity/1, wrap/1, drop/1, literal/0, bits/0, attributes/1, all_info/1]).
+-export([identity/1, wrap/1, drop/1, literal/0, bits/0, attributes/1, all_info/1, same/2]).
 -payload(<<0:2048, 16#7F>>).
 
 identity(Binary) -> Binary.
+same(A, B) when A =:= B -> <<"equal">>;
+same(_, _) -> <<"different">>.
 wrap(Binary) -> {Binary, Binary}.
 drop(_) -> discarded.
 attributes(_) -> erlang:get_module_info(?MODULE, attributes).

@@ -62,7 +62,7 @@ def main():
                             root / 'libbeam/tests/core_add_test.c', root / 'libbeam/tests/core_big_test.c',
                             root / 'libbeam/tests/fixtures/add_slice.erl',
                             root / 'libbeam/tests/core_decimal_test.c', root / 'libbeam/tests/fixtures/decimal_slice.erl',
-                            root / 'libbeam/core/otp/decimal-sources.json',
+                            root / 'libbeam/core/otp/decimal-sources.json', root / 'libbeam/core/otp/writable-sources.json',
                             root / 'libbeam/tests/core_bit_copy_test.c', root / 'libbeam/core/otp/bit-copy-sources.json',
                             root / 'libbeam/tests/core_bit_writer_test.c', root / 'libbeam/core/otp/bit-writer-sources.json',
                             root / 'libbeam/tests/core_bit_segment_test.c',
@@ -126,6 +126,11 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError(f'Bit-writer reference changed: {filename}')
             summary['bit_writer_sources'] = bit_writer_sources
+            writable_sources = json.loads((root / 'libbeam/core/otp/writable-sources.json').read_text())
+            for filename, expected in writable_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Writable-binary reference changed: {filename}')
+            summary['writable_sources'] = writable_sources
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
@@ -213,6 +218,9 @@ def main():
             binary_execution = run('binary-execution', [out / 'build/core_binary_test', binary_fixture, fixture, peer_fixture])
             if 'CORE_BINARY_EXECUTION_OK' not in binary_execution or 'CORE_BINARY_RETIREMENT_OK' not in binary_execution:
                 raise RuntimeError('Missing binary execution/retirement evidence')
+            if 'CORE_WRITABLE_OK' not in binary_execution:
+                raise RuntimeError('Missing writable binary ownership/execution evidence')
+            summary['writable_binary_dependencies_passed'] = True
             many_source = fixture_dir / 'code_many.erl'
             many_source.write_text('-module(code_many).\n-export(['+','.join(f'f{i}/0' for i in range(128))+']).\n'+
                                    '\n'.join(f'f{i}() -> {i}.' for i in range(128))+'\n')
@@ -361,7 +369,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
