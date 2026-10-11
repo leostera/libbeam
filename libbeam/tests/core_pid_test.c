@@ -333,18 +333,23 @@ static void message_fragments(LbCodeSpace *space,LbCodeModule *module,Memory *m)
         LbCodeEntry *consumer_entry=entry(space,module,"echo",1); LbProcess *consumer,*child;
         CHECK(lb_process_create_binary(consumer_entry,bytes,65,32,&consumer)==LB_PROCESS_READY);
         CHECK(lb_heap_reserve(consumer,2048,1)); // isolate fallible copy/lease prefixes from moving GC
+        CHECK(lb_message_queue_append(&consumer->messages,message)==LB_PROCESS_READY);
         Eterm imported; Eterm *before=consumer->htop; size_t current=m->live,used=module->users;
         LbFunLease *leases=consumer->fun_leases; LbBinRef *offheap=consumer->off_heap.first;
         for(size_t prefix=1;;++prefix) {
             CHECK(prefix<100); m->fail=m->calls+prefix;
-            LbProcessStatus status=lb_message_import(consumer,message,1,&imported); m->fail=0;
+            LbProcessStatus status=lb_message_peek_owned(consumer,&imported); m->fail=0;
             if(status==LB_PROCESS_READY) break;
             CHECK(status==LB_PROCESS_NO_MEMORY && is_non_value(imported));
             CHECK(consumer->htop==before && consumer->fun_leases==leases && consumer->off_heap.first==offheap);
             CHECK(m->live==current && module->users==used);
         }
+        size_t calls=m->calls; Eterm cached;
+        CHECK(lb_message_peek_owned(consumer,&cached)==LB_PROCESS_READY && cached==imported && m->calls==calls);
+        CHECK(lb_process_collect_live(consumer,4096,0)); // the matching view is an explicit non-X root
+        CHECK(lb_message_peek_owned(consumer,&imported)==LB_PROCESS_READY && imported==consumer->receive_root);
         consumer->reg[0]=imported;
-        lb_message_destroy(message); CHECK(space->messages==owners);
+        lb_message_consume_owned(consumer); CHECK(space->messages==owners && !consumer->receive_message && consumer->receive_root==NIL);
         CHECK(lb_process_collect(consumer,4096)==LB_PROCESS_READY); // immutable source is gone
         CHECK(lb_process_create_fun(consumer,consumer->reg[0],16,&child)==LB_PROCESS_READY);
         lb_process_destroy(consumer); lb_code_entry_release(consumer_entry);
@@ -370,11 +375,19 @@ static void message_fragments(LbCodeSpace *space,LbCodeModule *module,Memory *m)
     queue.save=&queue.first; CHECK(lb_message_queue_take(&queue)==nodes[0]); lb_message_destroy(nodes[0]);
     CHECK(queue.mq_len==1 && queue.first==message);
     lb_message_queue_clear(&queue); CHECK(!queue.mq_len && !space->messages && queue.last==&queue.first);
-    LbCodeEntry *e=entry(space,module,"echo",1); LbProcess *receiver;
+    LbCodeEntry *e=entry(space,module,"echo",1); LbProcess *receiver; Eterm cached;
     CHECK(lb_process_create_binary(e,bytes,65,32,&receiver)==LB_PROCESS_READY);
     CHECK(lb_message_create(space,receiver->reg[0],&message,&cost)==LB_PROCESS_READY);
     CHECK(lb_message_queue_append(&receiver->messages,message)==LB_PROCESS_READY);
     CHECK(lb_process_collect(receiver,1024)==LB_PROCESS_READY);
+    CHECK(lb_message_peek_owned(receiver,&cached)==LB_PROCESS_READY && !is_non_value(cached));
+    lb_message_skip_owned(receiver);
+    CHECK(lb_message_peek_owned(receiver,&cached)==LB_PROCESS_READY && is_non_value(cached));
+    CHECK(lb_message_create(space,make_small(42),&message,&cost)==LB_PROCESS_READY);
+    CHECK(lb_message_queue_append(&receiver->messages,message)==LB_PROCESS_READY);
+    CHECK(lb_message_peek_owned(receiver,&cached)==LB_PROCESS_READY && cached==make_small(42));
+    lb_message_consume_owned(receiver); CHECK(receiver->messages.mq_len==1);
+    CHECK(lb_message_peek_owned(receiver,&cached)==LB_PROCESS_READY && !is_non_value(cached));
     lb_process_destroy(receiver); lb_code_entry_release(e); CHECK(!space->messages);
     puts("CORE_MESSAGE_FRAGMENT_OK native_layout=true source_gc_destroy=true independent_fun_code=true allocation_prefix_rollback=true native_queue_cursor=true process_drains_queue=true");
 }

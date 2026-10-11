@@ -70,6 +70,40 @@ rollback_copy:
 rollback_leases:
     lb_fun_release_prefix(space,&receiver->fun_leases,previous); return status;
 }
+LbProcessStatus lb_message_peek_owned(LbProcess *receiver,Eterm *out)
+{
+    if(!receiver || !out) return LB_PROCESS_INVALID;
+    *out=THE_NON_VALUE; receiver->last_native_cost=1;
+    LbMessage *selected=*receiver->messages.save;
+    if(!selected) {
+        receiver->receive_message=NULL; receiver->receive_root=NIL;
+        return LB_PROCESS_READY;
+    }
+    if(selected!=receiver->receive_message) {
+        Eterm copied;
+        receiver->receive_message=NULL; receiver->receive_root=NIL;
+        LbProcessStatus status=lb_message_import(receiver,selected,0,&copied);
+        if(status!=LB_PROCESS_READY) return status;
+        receiver->receive_root=copied; receiver->receive_message=selected;
+    }
+    *out=receiver->receive_root; return LB_PROCESS_READY;
+}
+void lb_message_skip_owned(LbProcess *receiver)
+{
+    LbMessage *selected=*receiver->messages.save;
+    if(!selected || selected!=receiver->receive_message) abort();
+    receiver->receive_message=NULL; receiver->receive_root=NIL;
+    receiver->messages.save=&selected->next;
+}
+void lb_message_consume_owned(LbProcess *receiver)
+{
+    LbMessage *selected=*receiver->messages.save;
+    if(!selected || selected!=receiver->receive_message) abort();
+    receiver->receive_message=NULL; receiver->receive_root=NIL;
+    if(lb_message_queue_take(&receiver->messages)!=selected) abort();
+    receiver->messages.save=&receiver->messages.first;
+    lb_message_destroy(selected);
+}
 void lb_message_queue_init(LbMessageQueue *queue)
 {
     queue->first=NULL; queue->last=queue->save=&queue->first; queue->mq_len=0;

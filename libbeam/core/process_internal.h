@@ -18,6 +18,8 @@ struct LbProcess {
     LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
     LbFunLease *fun_leases; /* one lease per defining module, represented by a stable entry */
     LbMessageQueue messages; /* native inner queue; immutable fragments own their code/offheap roots */
+    LbMessage *receive_message; /* borrowed selected node; cleared before unlink/advance */
+    Eterm receive_root; /* actor-owned matching view; registered even across scheduler yields */
     const LbMFA *current;
     LbMFA local_mfa; /* owned copy of a private function's native word header */
     const BeamInstr *i;

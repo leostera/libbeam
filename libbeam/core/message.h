@@ -33,6 +33,11 @@ Eterm lb_erl_send(LbProcess *,Eterm destination,Eterm message);
  * live is the proven X-root span at the receiving instruction. No destination
  * or offheap chain is published until copying and code retention complete. */
 LbProcessStatus lb_message_import(LbProcess *,const LbMessage *,size_t live,Eterm *out);
+/* Selective-receive cursors, serialized by the owning Engine. An empty peek
+ * returns READY/THE_NON_VALUE; infrastructure failure never means no message. */
+LbProcessStatus lb_message_peek_owned(LbProcess *,Eterm *out);
+void lb_message_skip_owned(LbProcess *);
+void lb_message_consume_owned(LbProcess *);
 /* Native inner-queue pointer-to-pointer cursor: unmatched messages stay in
  * arrival order; removal fixes the tail before freeing the selected node. */
 typedef struct LbMessageQueue {

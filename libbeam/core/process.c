@@ -41,7 +41,7 @@ static LbProcessStatus create_owned(LbCodeModule *module,const BeamInstr *pc,con
     if(lb_alloc_domain_allocate(domain,sizeof(*p),&memory)!=LB_ALLOC_OK) return LB_PROCESS_NO_MEMORY;
     p=memory; memset(p,0,sizeof(*p));
     if(lb_alloc_domain_allocate(domain,words*sizeof(Eterm),&memory)!=LB_ALLOC_OK) { lb_release(domain,p); return LB_PROCESS_NO_MEMORY; }
-    lb_message_queue_init(&p->messages);
+    lb_message_queue_init(&p->messages); p->receive_root=NIL;
     p->entry_module=module; p->heap=p->htop=memory; p->hend=p->heap+words; p->stop=p->hend-1;
     *p->stop=(Eterm)lb_host_return; p->bin_vheap_sz=LB_BINARY_VHEAP_MIN_WORDS;
     for(i=0;i<MAX_REG;++i) p->reg[i]=NIL;
@@ -322,7 +322,10 @@ malformed_code:
 stop:
     /* Guest exit removes identity before publishing completion. The retained
      * process/result allocation may outlive that logical death. */
-    if(c_p->status!=LB_PROCESS_YIELDED) lb_message_queue_clear(&c_p->messages);
+    if(c_p->status!=LB_PROCESS_YIELDED) {
+        c_p->receive_message=NULL; c_p->receive_root=NIL;
+        lb_message_queue_clear(&c_p->messages);
+    }
     if(c_p->status!=LB_PROCESS_YIELDED && c_p->identity.owner &&
        lb_pid_remove(c_p->identity.owner,&c_p->identity)!=LB_PID_OK) abort();
     SWAPOUT; c_p->running=0; return c_p->status;

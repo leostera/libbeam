@@ -76,6 +76,7 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
     for(i=live;i<MAX_REG;++i) p->reg[i]=NIL;
     move_root(p,&p->fvalue,&top); move_root(p,&p->exception_value,&top);
     move_root(p,&p->construction_root,&top);
+    move_root(p,&p->receive_root,&top);
     for(i=0;i<stack;++i) move_root(p,&stop[i],&top); /* CP words are primary headers */
     scan=heap;
     while(scan<top) {
