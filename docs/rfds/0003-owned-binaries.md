@@ -256,3 +256,55 @@ warnings corrected before execution validation.
 Float segments, binary/string assembly, append/writable ownership, size analysis,
 fixups and error-context dependencies still precede whole-case admission. The
 unchanged stateful acceptance remains red; M3/M4 are not completed by these helpers.
+
+## Follow-on: binary/string and floating segment dependencies
+
+Baseline `e9099c29`. The writer now includes native binary-window copying,
+`binary-all` unit checks and string copying. Type, short-source, unit and capacity
+checks precede writes; units are restricted to the language's 1–256 range.
+Touched-byte overlap refuses rather than corrupting an input. These pure helpers
+retain no source terms and do not charge a process: native bit-copy reductions
+remain an explicit responsibility of the future instruction consumer.
+
+`bit_float.c` implements the native 16/32/64-bit conversion paths. Small integers
+convert **directly** to binary32; routing through binary64 can double-round them.
+Bignums preserve the native conversion through `big_to_double`. Binary16 uses the
+complete native software `f64_to_f16` algorithm directly, with one ties-to-even
+rounding step, rather than narrowing via binary32 or requiring a compiler half
+extension. Narrowing a finite value to binary16/32 may produce infinity **bytes**,
+as native bit syntax permits; no nonfinite Erlang float term is produced.
+
+Conversions save the caller's floating environment, install the default IEEE
+environment, compute into independent storage, and restore before copying into
+the destination. Save/setup/restore failure is a separate infrastructure status,
+not badarg or false guard, and cannot publish bytes or advance the cursor. A
+failed restoration cannot promise a restored environment. Invalid width, wrong
+type and unconvertible integer retain distinct native error categories.
+Binary32 overflow is spelled out around the exact midpoint `0x1.ffffffp127`,
+avoiding out-of-range ISO C casts while retaining native nearest-even results.
+Endian emission and unaligned publication use the existing checked bit copier.
+
+Coverage includes binary source/destination offsets 0–15 and lengths 0–257,
+heap/offheap inputs, unit boundaries, source immutability and unchanged refusal
+state. Floating tests cover every adjacent finite positive half midpoint and
+its binary64 neighbors, both signs, binary32 midpoint samples across all finite
+exponents, signed zero, underflow, overflow, direct-small versus native-bignum
+rounding, default-environment scoping, three real fenv failure injections and
+exact-end destination guard pages. An additional **840 stock-OTP-only vectors**
+match Debug, Release and UBSan output, separately from the earlier 1,070 integer
+and Unicode vectors. The reference module is still never loaded into libbeam.
+
+C-built argument witnesses now mix integer, UTF, binary, string and all three
+float widths, then exercise the real heap/offheap constructors, compiled identity
+execution, moving collection, detached source bytes and balanced destruction.
+This still does **not** execute a guest construction instruction. Final evidence
+is `/tmp/libbeam-bit-segments-commit-reviewed/summary.json`: 18 passing
+Debug/Release CTests, reference comparisons, selected public execution and UBSan.
+All 29 tooling tests pass under the lock at
+`/tmp/libbeam-bit-segments-tooling/summary.json`. Earlier evidence remains at
+`/tmp/libbeam-bit-segments-integrated-first/summary.json`.
+
+Append/private-append ownership, aggregate sizing, loader fixups, error contexts
+and complete transform/dispatch integration remain ahead of `bs_create_bin`
+admission. Neither helper availability nor opcode identity grants that admission;
+stateful acceptance and the M3/M4 contracts remain incomplete.

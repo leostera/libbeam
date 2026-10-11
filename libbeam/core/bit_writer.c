@@ -15,7 +15,8 @@
  * Native integer/Unicode segment writers from erl_bits.c.
  * See otp/bit-writer-sources.json for bounds and C-language adaptations.
  */
-#include "bit_writer.h"
+#include "bit_writer_internal.h"
+#include "binary.h"
 #include "bit_copy.h"
 #include "big.h"
 #include <assert.h>
@@ -666,14 +667,18 @@ static int overlaps(const void *a,size_t an,const void *b,size_t bn)
     if(left>UINTPTR_MAX-an || right>UINTPTR_MAX-bn) return 1;
     return left<right+bn && right<left+an;
 }
-static int valid_writer(const LbBitWriter *w)
+int lb_bit_writer_valid(const LbBitWriter *w)
 {
     return w && w->capacity<=SIZE_MAX/8 && (w->data || !w->capacity) &&
            w->offset<=w->capacity*8 && !overlaps(w,sizeof(*w),w->data,w->capacity);
 }
-static int valid_order(LbBitEndian order)
+int lb_bit_order_valid(LbBitEndian order)
 {
     return order==LB_BITS_BIG_ENDIAN || order==LB_BITS_LITTLE_ENDIAN;
+}
+int lb_bit_writer_overlaps_source(const LbBitWriter *w,const void *source,size_t size)
+{
+    return overlaps(w->data,w->capacity,source,size);
 }
 static int room(const LbBitWriter *w,size_t bits) { return bits<=w->capacity*8-w->offset; }
 static int scalar(Eterm value,Uint *number)
@@ -692,7 +697,7 @@ LbBitWriteStatus lb_bit_writer_init(LbBitWriter *w,unsigned char *data,size_t si
 LbBitWriteStatus lb_bits_put_integer(LbBitWriter *w,Eterm value,size_t bits,LbBitEndian order)
 {
     size_t end; unsigned tail; byte saved=0; int success;
-    if(!valid_writer(w) || !valid_order(order)) return LB_BITS_INVALID;
+    if(!lb_bit_writer_valid(w) || !lb_bit_order_valid(order)) return LB_BITS_INVALID;
     if(!is_small(value) && !is_big(value)) return LB_BITS_BADARG;
     if(!room(w,bits)) return LB_BITS_NO_SPACE;
     if(bits && is_big(value) && overlaps(w->data,w->capacity,boxed_val(value),
@@ -709,7 +714,7 @@ LbBitWriteStatus lb_bits_put_integer(LbBitWriter *w,Eterm value,size_t bits,LbBi
 LbBitWriteStatus lb_bits_put_utf8(LbBitWriter *w,Eterm value)
 {
     Uint n; size_t bits;
-    if(!valid_writer(w)) return LB_BITS_INVALID;
+    if(!lb_bit_writer_valid(w)) return LB_BITS_INVALID;
     if(!scalar(value,&n)) return LB_BITS_BADARG;
     bits=n<0x80?8:n<0x800?16:n<0x10000?24:32;
     if(!room(w,bits)) return LB_BITS_NO_SPACE;
@@ -719,7 +724,7 @@ LbBitWriteStatus lb_bits_put_utf8(LbBitWriter *w,Eterm value)
 LbBitWriteStatus lb_bits_put_utf16(LbBitWriter *w,Eterm value,LbBitEndian order)
 {
     Uint n; size_t bits;
-    if(!valid_writer(w) || !valid_order(order)) return LB_BITS_INVALID;
+    if(!lb_bit_writer_valid(w) || !lb_bit_order_valid(order)) return LB_BITS_INVALID;
     if(!scalar(value,&n)) return LB_BITS_BADARG;
     bits=n<0x10000?16:32;
     if(!room(w,bits)) return LB_BITS_NO_SPACE;
@@ -729,9 +734,45 @@ LbBitWriteStatus lb_bits_put_utf16(LbBitWriter *w,Eterm value,LbBitEndian order)
 LbBitWriteStatus lb_bits_put_utf32(LbBitWriter *w,Eterm value,LbBitEndian order)
 {
     Uint n;
-    if(!valid_writer(w) || !valid_order(order)) return LB_BITS_INVALID;
+    if(!lb_bit_writer_valid(w) || !lb_bit_order_valid(order)) return LB_BITS_INVALID;
     if(!scalar(value,&n)) return LB_BITS_BADARG;
     /* The native construction instruction validates the scalar, then delegates
      * UTF-32 to its fixed-size integer segment writer. */
     return lb_bits_put_integer(w,value,32,order);
+}
+
+/* erts_bs_put_binary/all/string and copy_binary_to_buffer, with explicit
+ * checked spans. Argument type/size/unit failures remain distinct from broken
+ * caller state or exhausted destination capacity. No write precedes refusal. */
+static LbBitWriteStatus put_view(LbBitWriter *w,LbBitstringView view,size_t bits)
+{
+    size_t source_end;
+    if(bits>view.bit_size) return LB_BITS_BADARG;
+    if(!room(w,bits)) return LB_BITS_NO_SPACE;
+    if(!lb_size_add(view.bit_offset,bits,&source_end) || source_end>SIZE_MAX-7 ||
+       !lb_bits_copy(view.data,(source_end+7)/8,view.bit_offset,w->data,w->capacity,w->offset,bits)) return LB_BITS_INVALID;
+    w->offset+=bits; return LB_BITS_OK;
+}
+LbBitWriteStatus lb_bits_put_binary(LbBitWriter *w,Eterm value,size_t bits)
+{
+    LbBitstringView view;
+    if(!lb_bit_writer_valid(w)) return LB_BITS_INVALID;
+    if(!lb_bitstring_view(value,&view)) return LB_BITS_BADARG;
+    return put_view(w,view,bits);
+}
+LbBitWriteStatus lb_bits_put_binary_all(LbBitWriter *w,Eterm value,unsigned unit)
+{
+    LbBitstringView view;
+    if(!lb_bit_writer_valid(w) || !unit || unit>256) return LB_BITS_INVALID;
+    if(!lb_bitstring_view(value,&view) || (unit!=1 && view.bit_size%unit)) return LB_BITS_BADARG;
+    return put_view(w,view,view.bit_size);
+}
+LbBitWriteStatus lb_bits_put_string(LbBitWriter *w,const unsigned char *source,size_t bytes)
+{
+    size_t bits;
+    if(!lb_bit_writer_valid(w) || (!source && bytes) || bytes>SIZE_MAX/8) return LB_BITS_INVALID;
+    bits=bytes*8;
+    if(!room(w,bits)) return LB_BITS_NO_SPACE;
+    if(!lb_bits_copy(source,bytes,0,w->data,w->capacity,w->offset,bits)) return LB_BITS_INVALID;
+    w->offset+=bits; return LB_BITS_OK;
 }

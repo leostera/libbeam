@@ -212,8 +212,13 @@ static void constructed_arguments(Memory *memory,LbCodeSpace *space,LbCodeModule
 {
     const size_t widths[]={169,4099}; unsigned char data[600],copied[600];
     Eterm number[3]={_make_header(2,NEG_BIG_SUBTAG),1,1},argument=NIL;
+    Eterm source_storage[4],*source_top=source_storage,source_term,fp_words[2]={_make_header(1,FLOAT_SUBTAG),0};
+    LbOffHeap source_chain={0}; double fp=0x1.0020000000001p0;
     LbCodeEntry *identity=entry(space,module,"identity",1); size_t i;
     size_t live=memory->live,bytes=memory->bytes;
+    memcpy(fp_words+1,&fp,sizeof(fp));
+    CHECK(lb_bitstring_build(space->domain,&source_chain,&source_top,(const unsigned char *)"native",48,0,&source_term)==LB_ALLOC_OK);
+    CHECK(!source_chain.first);
     for(i=0;i<sizeof(widths)/sizeof(*widths);++i) {
         LbBitWriter w; LbProcess *p; LbBitstringView view; size_t words,bit_size;
         memset(data,0,sizeof(data)); CHECK(lb_bit_writer_init(&w,data,sizeof(data))==LB_BITS_OK);
@@ -223,6 +228,12 @@ static void constructed_arguments(Memory *memory,LbCodeSpace *space,LbCodeModule
         CHECK(lb_bits_put_utf16(&w,make_small(0x1d11e),LB_BITS_LITTLE_ENDIAN)==LB_BITS_OK);
         CHECK(lb_bits_put_utf32(&w,make_small(0x10ffff),LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
         CHECK(lb_bits_put_integer(&w,make_small(-7),15,LB_BITS_BIG_ENDIAN)==LB_BITS_OK);
+        CHECK(lb_bits_put_string(&w,(const unsigned char *)"value:",6)==LB_BITS_OK);
+        CHECK(lb_bits_put_binary(&w,source_term,13)==LB_BITS_OK);
+        CHECK(lb_bits_put_binary_all(&w,source_term,8)==LB_BITS_OK);
+        CHECK(lb_bits_put_float(&w,make_boxed(fp_words),16,LB_BITS_BIG_ENDIAN).status==LB_BITS_OK);
+        CHECK(lb_bits_put_float(&w,make_small(((Sint)1<<58)+((Sint)1<<34)+1),32,LB_BITS_LITTLE_ENDIAN).status==LB_BITS_OK);
+        CHECK(lb_bits_put_float(&w,make_boxed(number),64,LB_BITS_BIG_ENDIAN).status==LB_BITS_OK);
         bit_size=w.offset; words=lb_bitstring_heap_words(bit_size);
         CHECK(lb_process_create(identity,&argument,1,5,&p)==LB_PROCESS_READY);
         CHECK(lb_heap_reserve(p,words,1));
@@ -236,7 +247,7 @@ static void constructed_arguments(Memory *memory,LbCodeSpace *space,LbCodeModule
         lb_process_destroy(p); CHECK(memory->live==live && memory->bytes==bytes);
     }
     lb_code_entry_release(identity);
-    puts("CORE_BINARY_WRITER_OK c_constructed_arguments=true heap_offheap=true identity_execution=true moving_gc=true copied_lifetime=true exact_retirement=true guest_construction=false");
+    puts("CORE_BINARY_WRITER_OK c_constructed_arguments=true float_binary_string=true heap_offheap=true identity_execution=true moving_gc=true copied_lifetime=true exact_retirement=true guest_construction=false");
 }
 static void metadata_copy_failure(Memory *memory,LbCodeSpace *space,LbCodeModule *module)
 {

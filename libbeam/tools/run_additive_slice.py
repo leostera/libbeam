@@ -65,6 +65,7 @@ def main():
                             root / 'libbeam/core/otp/decimal-sources.json',
                             root / 'libbeam/tests/core_bit_copy_test.c', root / 'libbeam/core/otp/bit-copy-sources.json',
                             root / 'libbeam/tests/core_bit_writer_test.c', root / 'libbeam/core/otp/bit-writer-sources.json',
+                            root / 'libbeam/tests/core_bit_segment_test.c',
                             root / 'libbeam/tests/fixtures/bit_writer_reference.erl',
                             root / 'libbeam/tests/core_binary_test.c', root / 'libbeam/tests/fixtures/binary_slice.erl',
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
@@ -171,6 +172,11 @@ def main():
             writer_actual = run('bit-writer-vectors', [out / 'build/core_bit_writer_test', '--reference'])
             if writer_reference != writer_actual or len(writer_reference.splitlines()) != 1070:
                 raise RuntimeError('Native bit writers differ from stock-OTP vectors')
+            segment_reference = run('bit-segment-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-eval', 'bit_writer_reference:segments(),halt().'])
+            if run('bit-segment-vectors', [out / 'build/core_bit_segment_test', '--reference']) != segment_reference or len(segment_reference.splitlines()) != 840:
+                raise RuntimeError('Native float segments differ from stock-OTP vectors')
+            summary['bit_segment_reference_vectors'] = 840
             summary['bit_writer_reference_vectors'] = 1070
             summary['bit_writer_reference_sha256'] = hashlib.sha256((fixture_dir / 'bit_writer_reference.beam').read_bytes()).hexdigest()
             run('async-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/async_slice.erl'])
@@ -355,7 +361,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -374,12 +380,14 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+            if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
+                raise RuntimeError('UBSan float segments differ from stock-OTP vectors')
             run('bit-writer-fallback-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-DDEBUG',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
-                'libbeam/core/bit_writer.c', 'libbeam/core/bit_copy.c', 'libbeam/tests/core_bit_writer_test.c',
+                'libbeam/core/bit_writer.c', 'libbeam/core/bit_copy.c', 'libbeam/core/binary.c', 'libbeam/core/alloc.c', 'libbeam/tests/core_bit_writer_test.c',
                 '-o', out / 'bit-writer-fallback'])
             run('bit-writer-fallback', [out / 'bit-writer-fallback'])
             if run('bit-writer-fallback-vectors', [out / 'bit-writer-fallback', '--reference']) != writer_reference:
@@ -396,6 +404,8 @@ def main():
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
             run('release-ctest', ['ctest', '--test-dir', out / 'release', '--output-on-failure'])
+            if run('bit-segment-release-vectors', [out / 'release/core_bit_segment_test', '--reference']) != segment_reference:
+                raise RuntimeError('Release float segments differ from stock-OTP vectors')
             run('release-fixture', [out / 'release/core_beam_image_test', fixture])
             run('release-atom-binding', [out / 'release/core_terms_atoms_test', fixture])
             run('release-execution', [out / 'release/core_code_test', fixture, peer_fixture])
@@ -437,6 +447,7 @@ def main():
             summary['decimal_continuation_execution_passed'] = True
             summary['native_bit_copy_passed'] = True
             summary['native_bit_writer_dependencies_passed'] = True
+            summary['native_binary_float_segment_dependencies_passed'] = True
             summary['opcode_generation_outputs'] = first_outputs
             summary['opcode_generation_reproducible'] = True
             summary['program_fixture_hashes'] = {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()

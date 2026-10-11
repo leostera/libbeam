@@ -11,8 +11,10 @@ typedef struct {
     size_t offset;   /* Next bit, MSB-first within each byte. */
 } LbBitWriter;
 typedef enum { LB_BITS_BIG_ENDIAN, LB_BITS_LITTLE_ENDIAN } LbBitEndian;
-typedef enum { LB_BITS_OK, LB_BITS_BADARG, LB_BITS_NO_SPACE, LB_BITS_INVALID } LbBitWriteStatus;
-/* Pure native segment writers. Valid owned input terms; the output span must
+typedef enum { LB_BITS_OK, LB_BITS_BADARG, LB_BITS_NO_SPACE, LB_BITS_INVALID, LB_BITS_ENVIRONMENT } LbBitWriteStatus;
+typedef enum { LB_FLOAT_NONE, LB_FLOAT_TYPE, LB_FLOAT_NO_FLOAT, LB_FLOAT_SIZE } LbBitFloatError;
+typedef struct { LbBitWriteStatus status; LbBitFloatError error; } LbBitFloatResult;
+/* Native segment writers. Valid owned input terms; the output span must
  * not overlap their storage during nonempty writes. No allocation, collection
  * or input-term retention; the caller's writer borrows the output span. No
  * instruction/BIF admission. Every refusal preserves the cursor and bytes;
@@ -23,4 +25,15 @@ LbBitWriteStatus lb_bits_put_integer(LbBitWriter *,Eterm,size_t,LbBitEndian);
 LbBitWriteStatus lb_bits_put_utf8(LbBitWriter *,Eterm);
 LbBitWriteStatus lb_bits_put_utf16(LbBitWriter *,Eterm,LbBitEndian);
 LbBitWriteStatus lb_bits_put_utf32(LbBitWriter *,Eterm,LbBitEndian);
+/* Byte strings and binary windows must not overlap touched destination bytes.
+ * binary_all accepts native language units 1..256, requiring exact divisibility.
+ * No process reductions are charged here: future dispatch owns that accounting. */
+LbBitWriteStatus lb_bits_put_string(LbBitWriter *,const unsigned char *,size_t);
+LbBitWriteStatus lb_bits_put_binary(LbBitWriter *,Eterm,size_t);
+LbBitWriteStatus lb_bits_put_binary_all(LbBitWriter *,Eterm,unsigned);
+/* Native 16/32/64-bit float fields. Narrowing overflow encodes infinity (it is
+ * not an Erlang float result). Input floats must be finite. Scoped default IEEE
+ * environment is restored before publication; environment failure never writes
+ * and is distinct from badarg. Failed restoration cannot promise restored fenv. */
+LbBitFloatResult lb_bits_put_float(LbBitWriter *,Eterm,size_t,LbBitEndian);
 #endif
