@@ -2,6 +2,7 @@
 // Copyright 2026 Leandro Ostera <leandro@ostera.io>
 #include <libbeam/engine.hpp>
 #include <atomic>
+#include <cfenv>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -38,15 +39,17 @@ static void reclaim(Isolate& isolate) {
     auto again=stopped.wait_until(deadline()); CHECK(again && again->code==ErrorCode::closed);
 }
 int main(int argc,char** argv) {
-    CHECK(argc==6); auto code=image(argv[1]), large_code=image(argv[2]), local_code=image(argv[3]), compare_code=image(argv[4]), shape_code=image(argv[5]);
+    CHECK(argc==7); auto code=image(argv[1]), large_code=image(argv[2]), local_code=image(argv[3]), compare_code=image(argv[4]), shape_code=image(argv[5]), add_code=image(argv[6]);
     auto engine=take(Engine::create());
     Bytes kept;
     {
         auto a=take(engine.create_isolate()), b=take(engine.create_isolate());
         CHECK(!a.load_module(view(code)) && !b.load_module(view(code)));
-        CHECK(!b.load_module(view(large_code)) && !b.load_module(view(local_code)) && !b.load_module(view(compare_code)) && !b.load_module(view(shape_code)));
+        CHECK(!b.load_module(view(large_code)) && !b.load_module(view(local_code)) && !b.load_module(view(compare_code)) && !b.load_module(view(shape_code)) && !b.load_module(view(add_code)));
         Bytes input(65,0x31);
         fail_next_new=true; error(a.start("async_slice","identity",view(input)),ErrorCode::limit);
+        std::fenv_t environment;
+        CHECK(!std::fegetenv(&environment) && !std::fesetround(FE_UPWARD));
         auto first=take(a.start("async_slice","identity",view(input)));
         auto second=take(b.start("async_slice","identity",{nullptr,0}));
         input.assign(input.size(),0);
@@ -69,6 +72,11 @@ int main(int argc,char** argv) {
             auto shaped=take(b.call("shape_slice",function,view(kept)));
             CHECK(take(shaped.wait_until(deadline()))==kept);
         }
+        for(const char* function : {"copied","rounded"}) {
+            auto numeric=take(b.call("add_slice",function,view(kept)));
+            CHECK(take(numeric.wait_until(deadline()))==kept);
+        }
+        CHECK(std::fegetround()==FE_UPWARD && !std::fesetenv(&environment));
         for(const char* function : {"command","not_command"}) {
             Bytes next={'n','e','x','t'}, other={'r','e','a','d'};
             auto accepted=take(b.call("compare_slice",function,view(next)));
@@ -123,6 +131,6 @@ int main(int argc,char** argv) {
         auto call=take(survivor.start("async_slice","identity",view(kept)));
         CHECK(take(call.wait_until(deadline()))==kept); reclaim(survivor);
     }
-    std::puts("API_WORLD_EXECUTION_OK real_worker=true copied_io=true copy_failure_retry=true deadlines=true terminal_once=true exceptions=true reclamation=true local_calls_y_gc=true exact_binary_comparison=true tuple_list_calls=true repeat=32 stateful_acceptance=false");
+    std::puts("API_WORLD_EXECUTION_OK real_worker=true copied_io=true copy_failure_retry=true deadlines=true terminal_once=true exceptions=true reclamation=true local_calls_y_gc=true exact_binary_comparison=true tuple_list_calls=true numeric_calls=true repeat=32 stateful_acceptance=false");
     return 0;
 }

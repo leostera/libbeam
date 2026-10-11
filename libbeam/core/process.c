@@ -132,6 +132,10 @@ static int32_t lb_packed_label(const BeamInstr *table,size_t index)
 #define Ib(word) (word)
 #define tb(word) (word)
 #define fb(word) ((Sint)(int32_t)(word))
+#define jb(word) fb(word)
+#define db(word) (word)
+#define is_both_small(a,b) (is_small(a) && is_small(b))
+#define is_value(value) (!is_non_value(value))
 #define cp_val(word) ((const BeamInstr *)(word))
 #define make_blank(slot) ((slot)=NIL)
 #define ADD_BYTE_OFFSET(pointer,offset) ((Eterm *)((unsigned char *)(pointer)+(offset)))
@@ -171,7 +175,8 @@ dispatch:
         if(FCALLS<=1) goto context_switch;
         c_p->current=mfa; c_p->arity=mfa->arity; c_p->heap_reserved=0;
         SWAPOUT; memcpy(&function,&I[1],sizeof(function));
-        value=function(c_p,reg,I); SWAPIN; --FCALLS;
+        c_p->last_native_cost=0;
+        value=function(c_p,reg,I); SWAPIN; FCALLS-=1+(Sint)c_p->last_native_cost;
         if(is_non_value(value)) {
             if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
             goto find_func_info;

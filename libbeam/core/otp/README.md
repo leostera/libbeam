@@ -11,4 +11,6 @@ there is no independently maintained atom-number list.
 
 These declarations do **not** admit any builtin implementation or native effect.
 Generated BIF source files are not compiled. Outputs stay in the build tree.
-The next opcode-generation cluster is separate and remains outstanding.
+Opcode generation and selected whole execution cases are recorded separately in
+`opcodes/` and `execution-sources.json`. `numeric-sources.json` records native
+addition; its real catalog entry is distinct from the generated BIF identity.

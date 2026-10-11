@@ -1,0 +1,27 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright Ericsson AB 1996-2026. All Rights Reserved.
+ * Copyright 2026 Leandro Ostera <leandro@ostera.io>
+ */
+#ifndef LIBBEAM_CORE_BIG_H
+#define LIBBEAM_CORE_BIG_H
+#include "term.h"
+/* Selected native flat-64 bignum primitives. Valid owned integer terms only.
+ * These functions neither allocate nor collect. Callers own the output words;
+ * no new BIF/instruction admission follows merely from linking these helpers. */
+#define LB_BIG_ARITY_MAX ((1u<<16)-1)
+static inline int lb_is_big(Eterm value)
+{
+    return is_boxed(value) && ((*boxed_val(value)&_TAG_HEADER_MASK)==POS_BIG_SUBTAG || (*boxed_val(value)&_TAG_HEADER_MASK)==NEG_BIG_SUBTAG);
+}
+static inline size_t lb_big_size(Eterm value) { return (size_t)(*boxed_val(value)>>_HEADER_ARITY_OFFS); }
+/* Two output words. Also used for temporary conversion of small operands. */
+Eterm lb_small_to_big(Sint value,Eterm *output);
+/* Both operands are bignums (including temporary small_to_big values). Output
+ * capacity >= max(operand arities)+2; separate from both input buffers.
+ * Result may normalize to a small. NIL means native bignum size overflow. */
+Eterm lb_big_plus(Eterm left,Eterm right,Eterm *output);
+/* Canonical non-small bignum; default nearest/ties-even IEEE environment
+ * required. -1 for nonfinite
+ * conversion, leaving *output untouched; native nearest/ties-even rounding. */
+int lb_big_to_double(Eterm value,double *output);
+#endif

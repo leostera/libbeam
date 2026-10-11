@@ -25,6 +25,8 @@ execution path with private-entry yields and live continuations across collectio
 semantics and fallible scratch handling to its generated branch cases.
 [Tuple/list consumers](0003-tuple-list-shapes.md) add shape-verified extraction,
 cons construction and native tuple-arity dispatch without trusting compiler hints.
+[Native numeric addition](0003-numeric-addition.md) adds small/bignum/float semantics,
+fallible scratch, collection-safe arithmetic destinations and a real `+/2` BIF.
 
 See the [A01/A02 term-and-atom admission record](0003-terms-and-atoms.md) for the
 selected BEAM representation, namespace identities, transactional image bindings

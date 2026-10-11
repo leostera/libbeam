@@ -32,7 +32,10 @@ static void begin(Program *p)
 static void verify(LbCodeSpace *space,Program *input,LbCodeStatus expected)
 {
     LbBeamProgram program={0}; LoaderState st={0}; LbCodeStatus status;
+    BeamFile_ImportEntry import={am_erlang,am_Plus,2};
+    const BifEntry *bif=&space->engine->bifs[BIF_splus_2];
     program.ops=input->ops; st.program=&program; st.space=space; st.label_count=10;
+    st.beam.imports.count=1; st.beam.imports.entries=&import; st.bif_imports=&bif;
     status=lb_verify_program(&st);
     if(status!=expected) fprintf(stderr,"status=%d expected=%d stage=%s\n",status,expected,program.error.stage);
     CHECK(status==expected);
@@ -86,6 +89,10 @@ static void transfers(LbCodeSpace *space)
     }
     begin(&p); ADD(&p,test_heap_2,U(2),U(2)); ADD(&p,put_list_3,X(0),X(1),X(0));
     ADD(&p,get_tl_2,X(0),X(0)); ret(&p); verify(space,&p,LB_CODE_OK);
+    begin(&p); ADD(&p,is_nonempty_list_2,F(1),X(0)); ADD(&p,allocate_2,U(2),U(2));
+    ADD(&p,move_2,X(0),Y(1)); ADD(&p,trim_2,U(1),U(1)); ADD(&p,get_hd_2,Y(0),X(0));
+    ADD(&p,deallocate_1,U(1)); ret(&p); verify(space,&p,LB_CODE_OK);
+    p.ops[5].a[1].val=2; verify(space,&p,LB_CODE_FORMAT);
     /* Without hint removal, native succ() could fuse these destinations into
      * x1023 and the out-of-bounds x1024, instead of distinct x1023 and x0. */
     begin(&p); ADD(&p,test_heap_2,U(3),U(2)); ADD(&p,put_tuple2_2,X(1),U(2),X(0),X(0));
@@ -101,12 +108,30 @@ static void transfers(LbCodeSpace *space)
         ADD(&p,move_2,N,X(0)); ret(&p); verify(space,&p,mode?LB_CODE_FORMAT:LB_CODE_OK);
     }
 }
+static void arithmetic_edges(LbCodeSpace *space)
+{
+    Program p;
+    /* A successful arithmetic destination loses its old list fact. The
+     * failure edge retains that fact, but not registers beyond Live. */
+    begin(&p); ADD(&p,is_nonempty_list_2,F(1),X(0));
+    ADD(&p,gc_bif2_6,F(3),U(2),U(0),X(0),X(1),X(0));
+    ADD(&p,get_hd_2,X(0),X(0)); ret(&p); ADD(&p,label_1,U(3)); ret(&p);
+    verify(space,&p,LB_CODE_FORMAT);
+    begin(&p); ADD(&p,is_nonempty_list_2,F(1),X(0));
+    ADD(&p,gc_bif2_6,F(3),U(2),U(0),X(0),X(1),X(0));
+    ret(&p); ADD(&p,label_1,U(3)); ADD(&p,get_hd_2,X(0),X(0)); ret(&p);
+    verify(space,&p,LB_CODE_OK);
+    begin(&p); ADD(&p,is_nonempty_list_2,F(1),X(1));
+    ADD(&p,gc_bif2_6,F(3),U(1),U(0),X(0),X(1),X(0));
+    ret(&p); ADD(&p,label_1,U(3)); ADD(&p,get_hd_2,X(1),X(0)); ret(&p);
+    verify(space,&p,LB_CODE_FORMAT);
+}
 int main(void)
 {
     LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    joins(space); transfers(space);
+    joins(space); transfers(space); arithmetic_edges(space);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
-    puts("CORE_SHAPE_PROOF_OK failure_edges=true late_joins=true backedges=true bounds=true alias_moves=true call_clobbers=true y_facts=true hints_not_authority=true execution=false");
+    puts("CORE_SHAPE_PROOF_OK failure_edges=true late_joins=true backedges=true bounds=true alias_moves=true call_clobbers=true y_facts=true hints_not_authority=true arithmetic_edges=true trim_facts=true execution=false");
     return 0;
 }

@@ -140,11 +140,11 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:
         case genop_call_2:case genop_call_only_2:case genop_call_last_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
-        case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:
+        case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:case genop_trim_2:
         case genop_jump_1:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:
         case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_get_list_3:
-        case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:
+        case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif2_6:
         case genop_badmatch_1:case genop_case_end_1:break;
         default:p->error.stage=gen_opc[op->op].name; return LB_CODE_UNSUPPORTED;
         }
@@ -164,7 +164,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
     w->tail%=n;
     while(w->pending) {
         size_t index=w->queue[w->head],next=index+1,alternate=SIZE_MAX,r,live,imp;
-        Flow f=nodes[index].in;
+        Flow f=nodes[index].in,failed;
+        const Flow *failure=&nodes[index].in;
         BeamOpArg *a; LbCodeStatus status; uint32_t s,t;
         int terminal=0;
         w->head=(w->head+1)%n; --w->pending; nodes[index].queued=0;
@@ -194,6 +195,16 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_deallocate_1:
             REQUIRE(a[0].type==TAG_u && f.frame==(Uint)a[0].val);
             f.frame=NO_FRAME; memset(f.y,0,sizeof(f.y)); memset(f.ys,0,sizeof(f.ys)); break;
+        case genop_trim_2:
+            REQUIRE(f.frame!=NO_FRAME && a[0].type==TAG_u && a[1].type==TAG_u && (Uint)a[0].val<=f.frame);
+            REQUIRE((Uint)a[1].val==f.frame-(Uint)a[0].val);
+            f.frame=(Uint)a[1].val;
+            for(r=0;r<MAX_REG;++r) {
+                if(r<f.frame && defined(f.y,r+(Uint)a[0].val)) define(f.y,r);
+                else f.y[r/64]&=~(UINT64_C(1)<<(r%64));
+                f.ys[r]=r<f.frame?f.ys[r+(Uint)a[0].val]:0;
+            }
+            break;
         case genop_put_tuple2_2:
             REQUIRE(a[1].type==TAG_u && a[1].val>0 && (Uint)a[1].val<=MAX_ARITYVAL && (Uint)a[1].val==op->arity-2);
             REQUIRE(f.heap>=(Uint)a[1].val+1);
@@ -212,6 +223,18 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             REQUIRE(shape(st,&f,a[0])==LIST_SHAPE);
             REQUIRE(destination(&f,a[1],0));
             if(op->op==genop_get_list_3) REQUIRE(destination(&f,a[2],0));
+            break;
+        case genop_gc_bif2_6:
+            REQUIRE(a[1].type==TAG_u && a[2].type==TAG_u && (Uint)a[2].val<st->beam.imports.count);
+            if(st->bif_imports[a[2].val]!=&st->space->engine->bifs[BIF_splus_2]) return LB_CODE_UNSUPPORTED;
+            REQUIRE(roots(&f,(Uint)a[1].val) && source(st,&f,a[3]) && source(st,&f,a[4]));
+            trim_live(&f,(Uint)a[1].val); failed=f; failure=&failed;
+            REQUIRE(destination(&f,a[5],0));
+            if(a[0].type==TAG_p) REQUIRE(!a[0].val);
+            else {
+                REQUIRE(label(st,a[0])); alternate=labels[a[0].val];
+                REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+            }
             break;
         case genop_return_0:REQUIRE(f.frame==NO_FRAME && defined(f.x,0)); terminal=1;break;
         case genop_call_2:case genop_call_only_2:case genop_call_last_3:
@@ -260,7 +283,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         status=propagate(w,next,nodes[index].function,&f); if(status!=LB_CODE_OK) return status;
         if(alternate!=SIZE_MAX) {
             /* Failed tests carry their incoming facts, never success refinements. */
-            status=propagate(w,alternate,nodes[index].function,&nodes[index].in);
+            status=propagate(w,alternate,nodes[index].function,failure);
             if(status!=LB_CODE_OK) return status;
         }
     }

@@ -36,7 +36,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy').split()
 
 
 def case(source, name):
@@ -86,13 +86,35 @@ def fallible_equality(body):
     return body[:branch]+prefix+body[branch:call.start()]+'lb_equal'+body[end:]
 
 
+def fallible_addition(body):
+    """Adapt native fragments to owned collection without stale destinations."""
+    if 'erts_mixed_plus' not in body: return body
+    body=re.sub(r'#ifdef DEBUG\s*Eterm\* orig_htop = HTOP;\s*Eterm\* orig_stop = E;\s*#endif','',body)
+    for text in ('DEBUG_SWAPOUT;','DEBUG_SWAPIN;','c_p->fcalls = FCALLS;',
+                 'FCALLS = c_p->fcalls;','ASSERT(orig_htop == HTOP && orig_stop == E);','ERTS_HOLE_CHECK(c_p);'):
+        body=body.replace(text,'')
+    body,count=re.subn(r'result = erts_mixed_plus\s*\(c_p, ([^;]+)\);',
+        r'SWAPOUT; result = lb_mixed_plus(c_p, \1); SWAPIN;\n'
+        r'      dst_ptr = REG_TARGET_PTR(dst); FCALLS -= (Sint)c_p->last_native_cost;\n'
+        r'      if (c_p->status == LB_PROCESS_NO_MEMORY) goto memory_failure;\n'
+        r'      if (c_p->status == LB_PROCESS_EXCEPTION) goto find_func_info;',body)
+    error='I = handle_error(c_p, I, reg, &BIF_TRAP_EXPORT(BIF_splus_2)->info.mfa);\n      goto post_error_handling;'
+    expected_errors=1 if 'OpCase(i_plus_xxjd)' in body else 0
+    if count!=1 or body.count(error)!=expected_errors: raise RuntimeError('Unreviewed arithmetic boundary')
+    # Preserve native tagged arithmetic without shifting a negative signed
+    # increment when the compiler-overflow fast path is enabled.
+    body=body.replace('(Sint)increment_val << _TAG_IMMED1_SIZE', '(Sint)((Uint)increment_val << _TAG_IMMED1_SIZE)')
+    return body.replace(error,'goto find_func_info;')
+
+
 def project(source):
     bodies=[]
-    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI')]
+    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd')]
     names=NAMES+[name for shared in groups for name in re.findall(r'OpCase\((\w+)\)',shared)]
     selected=[(name,case(source,name)) for name in NAMES]+[('shared group',shared) for shared in groups]
     for name, body in selected:
         body=fallible_equality(body)
+        body=fallible_addition(body)
         # No tracing/saved-call/lock instrumentation capability exists in this
         # serialized interpreter. Remove those paths, not their semantic peers.
         body=re.sub(r'^\s*DTRACE_\w+\([^;]+;', '', body, flags=re.M)

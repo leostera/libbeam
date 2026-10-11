@@ -1,0 +1,24 @@
+{
+  "baseline": "f94dcefd",
+  "scope": "Selected flat-64 signed digit addition/subtraction/normalization, big_to_double, and mixed addition. Not whole-file or other arithmetic admission.",
+  "sources": {
+    "beam/erts/emulator/beam/big.c": "370b63b16cea64901d1974a72f049cac0954dbf52896adf737665fe2188ef7e4",
+    "beam/erts/emulator/beam/big.h": "07133b1fb09864bcf905f94335f5cde2600dfef644cffad99c3d1d6b6ba97f47",
+    "beam/erts/emulator/beam/erl_arith.c": "c4a4b1aa7c8a7c387d80df6c33b35ec50c943a309ad7e404cca0f4c53d499ef4",
+    "beam/erts/emulator/beam/erl_term.h": "8e016126fb7a1bc1db8d31111601c0bea21d72207211bf91e1f3c127e943b5c2",
+    "beam/erts/emulator/beam/global.h": "7c4adc8ca6e697d1884fa562265bb01f93193ca1c962caf5ed6eba2690300183"
+  },
+  "adaptations": [
+    "Native unsigned double-digit carry arithmetic requires compiler 128-bit integers; native 65535-digit result ceiling is retained.",
+    "Most-significant digit comparison uses bounded indices instead of forming a pointer before the input allocation on equality.",
+    "Fallible independent domain scratch replaces ERTS heap fragments. Arithmetic finishes before possible copying collection; publication preserves heap credit and physically initialized X/Y roots.",
+    "The native compiler-overflow increment fast path shifts unsigned bits before signed conversion, avoiding negative signed-shift UB; binary64 is compile-time checked and fast-math is refused.",
+    "Generated whole plus/increment cases restore heap/stack pointers and recompute Y destinations after collection. OOM is checked before guard branching; badarith/system_limit retain native body/guard behavior.",
+    "Native big_to_double mantissa extraction and nearest/ties-even rounding; early overflow check before narrowing a large bit count.",
+    "Floating arithmetic saves the worker floating environment, installs the default IEEE environment and restores the prior environment before allocation. Environment API failure is terminal notsup, not a false guard.",
+    "Native linear digit cost at 16 words per reduction, plus actual copying collection cost, feeds the existing bounded scheduler. No hard fairness claim.",
+    "Positive catalog addition of erlang:+/2; gc_bif2 admission checks the actual catalog entry, not merely a numeric BIF identity.",
+    "Frame trim proves dropped/remaining counts and shifts Y definitions and shape facts. The original generated trim and two-register move-window cases execute unchanged."
+  ],
+  "other_inputs": ["execution-sources.json", "opcodes/manifest.json"]
+}

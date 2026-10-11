@@ -103,4 +103,6 @@ LbCodeStatus lb_verify_program(LoaderState *);
 int lb_instruction_supported(unsigned);
 Eterm lb_bif_module_info_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_module_info_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_mixed_plus(LbProcess *,Eterm,Eterm);
+Eterm lb_bif_plus_2(LbProcess *,Eterm *,const BeamInstr *);
 #endif

@@ -28,12 +28,14 @@ LbEngineStatus lb_engine_create(const LbSystemAllocator *allocator,LbEngine **ou
     BifEntry *catalog;
     void *memory;
     LbAllocStatus status;
-    const unsigned ids[]={BIF_get_module_info_1,BIF_get_module_info_2};
-    const LbBifFn functions[]={lb_bif_module_info_1,lb_bif_module_info_2};
+    const struct { unsigned id; BifEntry entry; } natives[]={
+        {BIF_get_module_info_1,{am_erlang,am_get_module_info,1,lb_bif_module_info_1,BIF_KIND_HEAVY}},
+        {BIF_get_module_info_2,{am_erlang,am_get_module_info,2,lb_bif_module_info_2,BIF_KIND_HEAVY}},
+        {BIF_splus_2,{am_erlang,am_Plus,2,lb_bif_plus_2,BIF_KIND_HEAVY}}
+    };
     size_t i;
-    _Static_assert(sizeof(ids)/sizeof(ids[0])==LB_NATIVE_COUNT,"native catalog size");
-    _Static_assert(sizeof(functions)/sizeof(functions[0])==LB_NATIVE_COUNT,"native implementations");
-    _Static_assert(BIF_get_module_info_1<BIF_SIZE && BIF_get_module_info_2<BIF_SIZE,"native identities");
+    _Static_assert(sizeof(natives)/sizeof(natives[0])==LB_NATIVE_COUNT,"native catalog size");
+    _Static_assert(BIF_get_module_info_1<BIF_SIZE && BIF_get_module_info_2<BIF_SIZE && BIF_splus_2<BIF_SIZE,"native identities");
     if(!out) return LB_ENGINE_INVALID;
     *out=NULL;
     status=lb_alloc_domain_create(allocator,&domain);
@@ -50,8 +52,8 @@ LbEngineStatus lb_engine_create(const LbSystemAllocator *allocator,LbEngine **ou
     for(i=0;i<LB_NATIVE_COUNT;++i) {
         /* These real implementations may collect. Generated numeric identities
          * are not permissions: only these populated descriptors are admitted. */
-        engine->native_ids[i]=ids[i];
-        catalog[ids[i]]=(BifEntry){am_erlang,am_get_module_info,(int)i+1,functions[i],BIF_KIND_HEAVY};
+        engine->native_ids[i]=natives[i].id;
+        catalog[natives[i].id]=natives[i].entry;
     }
     if(lb_executor_init(engine)!=LB_ENGINE_OK) {
         release_control(engine); return LB_ENGINE_NO_MEMORY;
