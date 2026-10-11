@@ -88,6 +88,9 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   exit before completion. Stale generations refuse lookup; generation exhaustion
   retires slots. The lazy 1,024-slot directory is fallible and physically released
   with its world. PID terms are namespace-relative, not cross-world capabilities.
+  `make_ref/0` also executes: native ordinary references use an Engine-owned
+  serialized counter, survive moving GC/copying, and support native equality
+  and reference tests. Exhaustion refuses before allocation or counter wrap.
   Spawn, closures, mailboxes and monitors still require their own implementation.
 - `binary_size.c`: read-only native flat64 aggregate sizing over emitted
   descriptors, with explicit register spans and typed guest/metadata/policy

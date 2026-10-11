@@ -10,6 +10,7 @@
 #include "process_internal.h"
 #include "binary_internal.h"
 #include "flatmap.h"
+#include "reference.h"
 #define MAX_HEAP_WORDS (64u*1024u*1024u/sizeof(Eterm))
 static size_t boxed_words(const Eterm *pointer)
 {
@@ -22,6 +23,7 @@ static size_t boxed_words(const Eterm *pointer)
     case BIN_REF_SUBTAG:ASSERT(header==LB_HEADER_BIN_REF); return LB_BIN_REF_WORDS;
     case SUB_BITS_SUBTAG:ASSERT(header==LB_HEADER_SUB_BITS); return LB_SUB_BITS_WORDS;
     case MAP_SUBTAG:return lb_flatmap_words(pointer);
+    case REF_SUBTAG:(void)lb_reference(make_boxed(pointer)); return LB_REF_WORDS;
     default:abort(); /* internal invariant: these representations are not admitted */
     }
 }
@@ -126,7 +128,7 @@ int lb_process_has_other_reference(const LbProcess *p,Eterm value,const Eterm *e
             scan+=boxed_words(scan); break;
         case MAP_SUBTAG:(void)lb_flatmap_words(scan); scan+=2; break;
         case POS_BIG_SUBTAG:case NEG_BIG_SUBTAG:case FLOAT_SUBTAG:
-        case HEAP_BITS_SUBTAG:case BIN_REF_SUBTAG:
+        case HEAP_BITS_SUBTAG:case BIN_REF_SUBTAG:case REF_SUBTAG:
             scan+=boxed_words(scan); break;
         default:abort();
         }

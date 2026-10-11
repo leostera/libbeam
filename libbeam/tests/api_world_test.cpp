@@ -62,6 +62,9 @@ int main(int argc,char** argv) {
         auto own_a=take(a.call("pid_slice","echo",view(kept)));
         auto own_b=take(b.call("pid_slice","echo",view(kept)));
         CHECK(take(own_a.wait_until(deadline()))==kept && take(own_b.wait_until(deadline()))==kept);
+        auto fresh_ref_a=take(a.call("pid_slice","reference_echo",view(kept)));
+        auto fresh_ref_b=take(b.call("pid_slice","reference_echo",view(kept)));
+        CHECK(take(fresh_ref_a.wait_until(deadline()))==kept && take(fresh_ref_b.wait_until(deadline()))==kept);
         for(const char* function : {"identity","gc","tail"}) {
             auto call=take(b.call("local_slice",function,view(kept)));
             CHECK(take(call.wait_until(deadline()))==kept);
@@ -126,7 +129,9 @@ int main(int argc,char** argv) {
         for(unsigned i=0;i<32;++i) {
             auto replacement=take(engine.create_isolate()); CHECK(!replacement.load_module(view(code)) && !replacement.load_module(view(pid_code)));
             auto call=take(replacement.start("pid_slice","echo",view(input)));
-            CHECK(take(call.wait_until(deadline()))==input); reclaim(replacement);
+            CHECK(take(call.wait_until(deadline()))==input);
+            auto ref=take(replacement.call("pid_slice","reference_echo",view(input)));
+            CHECK(take(ref.wait_until(deadline()))==input); reclaim(replacement);
         }
         auto during_stop=take(b.call("pid_slice","echo",view(input)));
         CHECK(take(during_stop.wait_until(deadline()))==input); reclaim(b);
@@ -148,6 +153,6 @@ int main(int argc,char** argv) {
         auto call=take(survivor.start("async_slice","identity",view(kept)));
         CHECK(take(call.wait_until(deadline()))==kept); reclaim(survivor);
     }
-    std::puts("API_WORLD_EXECUTION_OK real_worker=true copied_io=true copy_failure_retry=true deadlines=true terminal_once=true exceptions=true reclamation=true local_calls_y_gc=true exact_binary_comparison=true tuple_list_calls=true numeric_calls=true decimal_continuations=true owned_self=true repeat=32 stateful_acceptance=false");
+    std::puts("API_WORLD_EXECUTION_OK real_worker=true copied_io=true copy_failure_retry=true deadlines=true terminal_once=true exceptions=true reclamation=true local_calls_y_gc=true exact_binary_comparison=true tuple_list_calls=true numeric_calls=true decimal_continuations=true owned_self=true ordinary_references=true repeat=32 stateful_acceptance=false");
     return 0;
 }

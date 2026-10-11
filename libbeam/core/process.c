@@ -9,6 +9,8 @@
 #include "term_compare.h"
 #include "writable.h"
 #include "binary_build.h"
+#include "reference.h"
+#define is_not_ref(term) (!lb_is_reference(term))
 const BeamInstr lb_host_return[1]={op_normal_exit};
 int lb_instruction_supported(unsigned op)
 {

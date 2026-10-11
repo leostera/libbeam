@@ -7,6 +7,7 @@
  */
 #include "term_compare.h"
 #include "flatmap.h"
+#include "reference.h"
 #include <stdlib.h>
 
 typedef unsigned char byte;
@@ -111,6 +112,11 @@ tailrecur_ne:
             bb=tuple_val(b); sz=(Sint)arityval(*aa);
             if(!sz) goto pop_next;
             ++aa; ++bb; goto term_array;
+        case REF_SUBTAG: {
+            const LbOrdinaryRef *ar=lb_reference(a),*br=lb_reference(b);
+            if(br && ar->num[0]==br->num[0] && ar->num[1]==br->num[1] && ar->num[2]==br->num[2]) goto pop_next;
+            break;
+        }
         case MAP_SUBTAG:
             aa=boxed_val(a); (void)lb_flatmap_words(aa);
             if(!is_boxed(b) || *boxed_val(b)!=*aa) goto not_equal;

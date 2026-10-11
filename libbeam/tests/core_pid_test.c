@@ -2,6 +2,8 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  */
 #include "process_internal.h"
+#include "reference.h"
+#include "term_compare.h"
 #include <stdio.h>
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"CHECK %s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while(0)
 typedef struct { size_t calls,fail,live; } Memory;
@@ -23,7 +25,8 @@ static LbCodeEntry *entry(LbCodeSpace *s,LbCodeModule *m,const char *name,unsign
 }
 static LbProcess *create(LbCodeEntry *e)
 {
-    Eterm arg=NIL; LbProcess *p; CHECK(lb_process_create(e,&arg,e->entry->info.mfa.arity,64,&p)==LB_PROCESS_READY); return p;
+    Eterm args[]={NIL,NIL}; LbProcess *p; CHECK(e->entry->info.mfa.arity<=2);
+    CHECK(lb_process_create(e,args,e->entry->info.mfa.arity,64,&p)==LB_PROCESS_READY); return p;
 }
 static LbProcessStatus finish(LbProcess *p)
 {
@@ -85,6 +88,64 @@ static void permuted_ring(LbCodeSpace *space,LbCodeEntry *e)
     }
     CHECK(lb_pid_table_destroy(t)==LB_PID_OK);
 }
+static void references(LbCodeSpace *space,LbCodeModule *module,Memory *m)
+{
+    LbEngine *engine=space->engine;
+    LbCodeEntry *ref=entry(space,module,"reference",0),*pair=entry(space,module,"reference_pair",0);
+    LbProcess *p=create(pair); uint64_t first=engine->reference_counter;
+    CHECK(finish(p)==LB_PROCESS_DONE); Eterm *tuple=tuple_val(lb_process_result(p));
+    CHECK(arityval(tuple[0])==2); const LbOrdinaryRef *a=lb_reference(tuple[1]),*b=lb_reference(tuple[2]);
+    CHECK(a && b && a->num[0]==(first&0x3ffff) && b->num[0]==((first+1)&0x3ffff));
+    int equal=-1; CHECK(lb_term_equal(space->domain,tuple[1],tuple[2],&equal)==LB_ALLOC_OK && !equal);
+    size_t words=0; CHECK(lb_flat_size(space->domain,lb_process_result(p),&words) && words==9);
+    LbCodeEntry *classify=entry(space,module,"reference_classify",1); LbProcess *consumer=create(classify);
+    CHECK(lb_heap_reserve(consumer,words,0)); consumer->reg[0]=lb_copy_flat(tuple[1],&consumer->htop,&consumer->off_heap);
+    CHECK(lb_term_equal(space->domain,tuple[1],consumer->reg[0],&equal)==LB_ALLOC_OK && equal);
+    CHECK(lb_process_collect(p,512)==LB_PROCESS_DONE); tuple=tuple_val(lb_process_result(p));
+    CHECK(lb_term_equal(space->domain,tuple[1],consumer->reg[0],&equal)==LB_ALLOC_OK && equal);
+    LbCodeEntry *compare=entry(space,module,"reference_equal",2);
+    for(size_t different=0;different<2;++different) {
+        LbProcess *c=create(compare); CHECK(lb_heap_reserve(c,2*LB_REF_WORDS,0));
+        c->reg[0]=lb_copy_flat(tuple[1],&c->htop,&c->off_heap);
+        c->reg[1]=lb_copy_flat(tuple[1+different],&c->htop,&c->off_heap);
+        CHECK(lb_process_collect(c,128)==LB_PROCESS_READY && finish(c)==LB_PROCESS_DONE);
+        LbBitstringView result; CHECK(lb_bitstring_view(lb_process_result(c),&result));
+        const char *expected=different?"different":"equal";
+        CHECK(result.bit_size==8*strlen(expected) && !memcmp(result.data,expected,strlen(expected)));
+        lb_process_destroy(c);
+    }
+    lb_code_entry_release(compare);
+    CHECK(finish(consumer)==LB_PROCESS_DONE); LbBitstringView view;
+    CHECK(lb_bitstring_view(lb_process_result(consumer),&view) && view.bit_size==24 && !memcmp(view.data,"ref",3));
+    lb_process_destroy(consumer); lb_process_destroy(p);
+    consumer=create(classify); CHECK(finish(consumer)==LB_PROCESS_DONE);
+    CHECK(lb_bitstring_view(lb_process_result(consumer),&view) && view.bit_size==56);
+    lb_process_destroy(consumer); lb_code_entry_release(classify);
+    /* Force a moving collection in the actual make_ref trampoline. Failed
+     * tospace allocation must not consume the Engine's reference number. */
+    for(size_t fail=0;fail<2;++fail) {
+        p=create(ref);
+        while(p->htop<p->stop-S_RESERVED-2) *p->htop++=NIL;
+        uint64_t before=engine->reference_counter;
+        if(fail) m->fail=m->calls+1;
+        CHECK(finish(p)==(fail?LB_PROCESS_NO_MEMORY:LB_PROCESS_DONE));
+        CHECK(engine->reference_counter==before+(fail?0:1));
+        if(!fail) CHECK(p->collections && lb_reference(lb_process_result(p)));
+        m->fail=0; lb_process_destroy(p);
+    }
+    const uint64_t boundaries[]={UINT64_C(0x3ffff),UINT64_C(0x40000),UINT64_C(0xffffffff),UINT64_C(0x100000000),UINT64_MAX-1};
+    uint64_t saved=engine->reference_counter;
+    for(size_t i=0;i<5;++i) {
+        engine->reference_counter=boundaries[i]; p=create(ref); CHECK(finish(p)==LB_PROCESS_DONE);
+        a=lb_reference(lb_process_result(p));
+        CHECK(a->num[0]==(boundaries[i]&0x3ffff) && a->num[1]==((boundaries[i]&0xfffc0000)|1) && a->num[2]==(boundaries[i]>>32));
+        lb_process_destroy(p);
+    }
+    p=create(ref); size_t calls=m->calls; CHECK(finish(p)==LB_PROCESS_LIMIT && m->calls==calls);
+    CHECK(engine->reference_counter==UINT64_MAX && lb_process_exception(p)==THE_NON_VALUE); lb_process_destroy(p);
+    engine->reference_counter=saved; /* test-only injection; all generated refs destroyed */
+    lb_code_entry_release(ref); lb_code_entry_release(pair);
+}
 int main(int argc,char **argv)
 {
     CHECK(lb_instruction_supported(op_self_x) && lb_instruction_supported(op_self_y) && lb_instruction_supported(op_is_pid_fx));
@@ -92,7 +153,7 @@ int main(int argc,char **argv)
     Memory m={0}; LbSystemAllocator allocator={&m,allocate,release}; LbEngine *engine; LbCodeSpace *a,*b;
     CHECK(lb_engine_create(&allocator,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&a)==LB_CODE_OK && lb_code_space_create(engine,&b)==LB_CODE_OK);
     LbCodeModule *ma=load(a,argv[1]),*mb=load(b,argv[1]); LbCodeEntry *ea=entry(a,ma,"identity",0),*eb=entry(b,mb,"identity",0);
-    table(a,ea,&m); permuted_ring(a,ea);
+    table(a,ea,&m); permuted_ring(a,ea); references(a,ma,&m);
     LbProcess *failed=create(ea); size_t before=m.live; m.fail=m.calls+1;
     CHECK(finish(failed)==LB_PROCESS_NO_MEMORY && !a->pids && !failed->identity.owner && m.live==before);
     m.fail=0; lb_process_destroy(failed);
