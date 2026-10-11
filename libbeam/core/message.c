@@ -32,6 +32,44 @@ Eterm lb_erl_send(LbProcess *sender,Eterm destination,Eterm term)
     if(status!=LB_PROCESS_READY) { lb_message_destroy(message); sender->status=status; return THE_NON_VALUE; }
     return term;
 }
+LbProcessStatus lb_message_import(LbProcess *receiver,const LbMessage *message,size_t live,Eterm *out)
+{
+    if(!out) return LB_PROCESS_INVALID;
+    *out=THE_NON_VALUE;
+    if(!receiver || !message || live>MAX_REG ||
+       receiver->entry_module->space!=message->space) return LB_PROCESS_REFUSED;
+    receiver->last_native_cost=1;
+    size_t words=message->data.heap_frag?message->data.heap_frag->used_size:0,need;
+    if(!lb_size_add(words,receiver->heap_reserved,&need) || need>LB_MAX_BINARY_BYTES/sizeof(Eterm)) return LB_PROCESS_LIMIT;
+    size_t collections=receiver->collections;
+    if(!lb_heap_reserve(receiver,need,live)) return LB_PROCESS_NO_MEMORY;
+    if(receiver->collections!=collections) receiver->last_native_cost+=receiver->last_gc_cost;
+    LbCodeSpace *space=message->space; LbFunLease *previous=receiver->fun_leases;
+    LbAllocStatus held=lb_fun_retain_term(receiver,message->m[0],&receiver->last_native_cost);
+    LbProcessStatus status=held==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_REFUSED;
+    if(held!=LB_ALLOC_OK) goto rollback_leases;
+    Eterm *top=receiver->htop; LbOffHeap prepared={0};
+    Eterm term=lb_copy_flat(message->m[0],&top,&prepared);
+    status=LB_PROCESS_NO_MEMORY;
+    if(is_non_value(term)) goto rollback_copy;
+    if(top!=receiver->htop+words) abort();
+    status=LB_PROCESS_LIMIT;
+    if(prepared.overhead>UINT64_MAX-receiver->off_heap.overhead) goto rollback_copy;
+    /* All fallible copying is complete. Chain ownership and the heap span
+     * become visible together; no borrowed writer/temporary C alias survives. */
+    if(prepared.first) {
+        LbBinRef *tail=prepared.first;
+        while(tail->next) { ++receiver->last_native_cost; tail=tail->next; }
+        tail->next=receiver->off_heap.first; receiver->off_heap.first=prepared.first;
+    }
+    receiver->off_heap.overhead+=prepared.overhead;
+    receiver->htop=top; receiver->last_native_cost+=words;
+    *out=term; return LB_PROCESS_READY;
+rollback_copy:
+    lb_offheap_clear(&prepared);
+rollback_leases:
+    lb_fun_release_prefix(space,&receiver->fun_leases,previous); return status;
+}
 void lb_message_queue_init(LbMessageQueue *queue)
 {
     queue->first=NULL; queue->last=queue->save=&queue->first; queue->mq_len=0;

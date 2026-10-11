@@ -29,6 +29,10 @@ _Static_assert(offsetof(LbMessage,space)==5*sizeof(Eterm),"native message refere
 LbProcessStatus lb_message_create(LbCodeSpace *,Eterm,LbMessage **,Uint *cost);
 void lb_message_destroy(LbMessage *);
 Eterm lb_erl_send(LbProcess *,Eterm destination,Eterm message);
+/* Prepare an actor-heap message view without freeing its immutable source.
+ * live is the proven X-root span at the receiving instruction. No destination
+ * or offheap chain is published until copying and code retention complete. */
+LbProcessStatus lb_message_import(LbProcess *,const LbMessage *,size_t live,Eterm *out);
 /* Native inner-queue pointer-to-pointer cursor: unmatched messages stay in
  * arrival order; removal fixes the tail before freeing the selected node. */
 typedef struct LbMessageQueue {

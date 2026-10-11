@@ -330,7 +330,25 @@ static void message_fragments(LbCodeSpace *space,LbCodeModule *module,Memory *m)
             if(lb_bitstring_view(payload,&view)) { CHECK(view.bit_size==520 && !memcmp(view.data,bytes,65)); ++found; }
         }
         CHECK(found==1);
+        LbCodeEntry *consumer_entry=entry(space,module,"echo",1); LbProcess *consumer,*child;
+        CHECK(lb_process_create_binary(consumer_entry,bytes,65,32,&consumer)==LB_PROCESS_READY);
+        CHECK(lb_heap_reserve(consumer,2048,1)); // isolate fallible copy/lease prefixes from moving GC
+        Eterm imported; Eterm *before=consumer->htop; size_t current=m->live,used=module->users;
+        LbFunLease *leases=consumer->fun_leases; LbBinRef *offheap=consumer->off_heap.first;
+        for(size_t prefix=1;;++prefix) {
+            CHECK(prefix<100); m->fail=m->calls+prefix;
+            LbProcessStatus status=lb_message_import(consumer,message,1,&imported); m->fail=0;
+            if(status==LB_PROCESS_READY) break;
+            CHECK(status==LB_PROCESS_NO_MEMORY && is_non_value(imported));
+            CHECK(consumer->htop==before && consumer->fun_leases==leases && consumer->off_heap.first==offheap);
+            CHECK(m->live==current && module->users==used);
+        }
+        consumer->reg[0]=imported;
         lb_message_destroy(message); CHECK(space->messages==owners);
+        CHECK(lb_process_collect(consumer,4096)==LB_PROCESS_READY); // immutable source is gone
+        CHECK(lb_process_create_fun(consumer,consumer->reg[0],16,&child)==LB_PROCESS_READY);
+        lb_process_destroy(consumer); lb_code_entry_release(consumer_entry);
+        CHECK(finish(child)==LB_PROCESS_DONE); lb_process_destroy(child);
     }
     LbMessage *message; Uint cost;
     CHECK(lb_message_create(space,am_true,&message,&cost)==LB_PROCESS_READY && !message->data.heap_frag);

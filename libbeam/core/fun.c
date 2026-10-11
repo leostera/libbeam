@@ -101,11 +101,17 @@ static void release(LbCodeSpace *space,LbFunLease *lease)
     if(!owner->users) abort();
     --owner->users; lb_release(space->domain,lease);
 }
+void lb_fun_release_prefix(LbCodeSpace *space,LbFunLease **leases,LbFunLease *stop)
+{
+    while(*leases!=stop) {
+        LbFunLease *lease=*leases;
+        if(!lease) abort(); /* the saved prefix boundary belongs to this list */
+        *leases=lease->next; release(space,lease);
+    }
+}
 void lb_fun_release_roots(LbCodeSpace *space,LbFunLease **leases)
 {
-    while(*leases) {
-        LbFunLease *lease=*leases; *leases=lease->next; release(space,lease);
-    }
+    lb_fun_release_prefix(space,leases,NULL);
 }
 void lb_fun_leases_clear(LbProcess *p)
 {

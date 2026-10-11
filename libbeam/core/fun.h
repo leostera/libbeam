@@ -54,6 +54,7 @@ LbAllocStatus lb_fun_retain_term(LbProcess *,Eterm,Uint *cost);
  * for exact rollback through release_roots. */
 LbAllocStatus lb_fun_retain_roots(LbCodeSpace *,LbFunLease **,Eterm,Uint *cost);
 void lb_fun_release_roots(LbCodeSpace *,LbFunLease **);
+void lb_fun_release_prefix(LbCodeSpace *,LbFunLease **,LbFunLease *stop);
 void lb_fun_leases_clear(LbProcess *);
 /* Infallible GC commit: reset marks, mark each copied live fun, sweep afterward.
  * Every live entry must already have a lease. Missing leases are invariants. */
