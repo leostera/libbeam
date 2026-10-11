@@ -24,6 +24,7 @@ struct LbProcess {
     Eterm fvalue,exception_value; /* Pending payload and expanded terminal value. */
     Uint arity, last_gc_cost, last_native_cost;
     size_t collections, heap_reserved;
+    size_t last_binary_bytes; /* zero/copy work reported by one storage operation */
     LbProcessStatus status;
     int running;
 };

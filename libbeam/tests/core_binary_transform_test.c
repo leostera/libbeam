@@ -200,10 +200,10 @@ int main(int argc,char **argv)
     CHECK(lb_engine_create(&callbacks,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
     size_t live=m.live,bytes=m.bytes;
     branches(space); flags(space); refusals(&m,space); largest_descriptor(space); failures(&m,space);
-    CHECK(m.live==live && m.bytes==bytes && !lb_instruction_supported(op_i_bs_create_bin_jIWdW));
+    CHECK(m.live==live && m.bytes==bytes && lb_instruction_supported(op_i_bs_create_bin_jIWdW));
     if(argc==2) fixture(&m,space,argv[1]); else CHECK(argc==1);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK);
     lb_engine_release(engine); CHECK(!m.live && !m.bytes);
-    puts("CORE_BINARY_TRANSFORM_OK whole_native_generator=true checked_descriptors=true flags=true fixed_size_overflow_fallback=true maximum_descriptor=true failure_prefixes=2 same_space_retry=true physical_retirement=true opcode_admitted=false");
+    puts("CORE_BINARY_TRANSFORM_OK whole_native_generator=true checked_descriptors=true flags=true fixed_size_overflow_fallback=true maximum_descriptor=true failure_prefixes=2 same_space_retry=true physical_retirement=true opcode_admitted=true");
     return 0;
 }

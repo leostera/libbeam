@@ -96,8 +96,13 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   Source-slot consumption is statically checked, separately from runtime
   uniqueness. The complete `bs_init_writable` case now executes with native
   capacity defaults, allocation-failure rollback, work charging and explicit
-  infrastructure limits through the worker/public API. `bs_create_bin` remains
-  unadmitted; C-created compound values still exercise identity/comparison.
+  infrastructure limits through the worker/public API.
+- `binary_build.c`: owned boundaries for the complete generated `bs_create_bin`
+  case. Native sizing precedes allocation, moving operands are reloaded, private
+  source consumption is enforced, and the destination is published only after
+  exact writer completion. Guard and success exits yield at their next real PC.
+  OOM, runtime limits, ownership refusal and floating-environment failure stay
+  distinct from guest errors. See [construction evidence](../../docs/rfds/0003-binary-construction.md).
 - `bit_copy.c`: native forward bit copying behind checked span/overlap bounds.
   Disjoint bit intervals may share a boundary byte; exact self-copy is a no-op.
   Other overlapping bit ranges remain refused before mutation.
@@ -108,12 +113,13 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   pre-write refusals, and no allocation or GC. Float conversion scopes/restores
   the IEEE environment; infrastructure failure is distinct from badarg.
   C-built heap/offheap arguments survive actual identity execution and collection;
-  guest construction remains refused until the whole instruction is supported.
+  the complete construction instruction now uses these dependencies.
 - `flatmap.h`, `binary_error.c`: native MAP3 binary-construction error payload,
   with explicit temporary value rooting and fallible heap reservation. Flatmap
   keys/values participate in GC, copying, equality and writable alias checking.
-  Only the 0..3 representation profile is consumed; general maps, error flags,
-  stacktrace integration and guest construction remain unadmitted.
+  Only the 0..3 representation profile is consumed. Construction publishes native
+  extended-error flags/payloads; general maps, trace capture and catch/unwind
+  remain unadmitted. Pending native action flags are not completed actions.
 - `term_compare.c`: native-derived nonrecursive exact equality for admitted terms
   and aligned/unaligned bitstrings. Explicit scratch OOM is checked before a
   generated comparison branch; failure is never an equality/inequality answer.

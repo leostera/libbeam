@@ -176,8 +176,9 @@ static void fixture(LbCodeSpace *space,const char *path)
     saved=op->a[4]; op->a[4]=Y(0); CHECK(lb_verify_program(&st)==LB_CODE_FORMAT); op->a[4]=saved;
     saved=op->a[6]; op->a[6]=A(am_private_append); CHECK(lb_verify_program(&st)==LB_CODE_FORMAT); op->a[6]=saved;
     CHECK(lb_verify_program(&st)==LB_CODE_OK); lb_beam_program_destroy(p);
-    CHECK(lb_code_load(space,data,(size_t)size,&module,&error)==LB_CODE_UNSUPPORTED && !module && !space->modules); free(data);
-    puts("CORE_BINARY_FLOW_FIXTURE_OK compiler_input=true proof_passes=true mutations=3 same_space_retry=true execution_still_refused=true");
+    CHECK(lb_code_load(space,data,(size_t)size,&module,&error)==LB_CODE_OK && module);
+    CHECK(lb_code_unload(module)==LB_CODE_OK && !space->modules); free(data);
+    puts("CORE_BINARY_FLOW_FIXTURE_OK compiler_input=true proof_passes=true mutations=3 same_space_retry=true executable_admission=true");
 }
 int main(int argc,char **argv)
 {
@@ -190,7 +191,7 @@ int main(int argc,char **argv)
     size_t live=m.live; m.fail=m.calls+1; verify(space,&p,LB_CODE_NO_MEMORY); CHECK(m.live==live);
     m.fail=0; verify(space,&p,LB_CODE_OK); CHECK(m.live==live);
     if(argc==2) fixture(space,argv[1]); else CHECK(argc==1);
-    CHECK(!lb_instruction_supported(op_i_bs_create_bin_jIWdW) && lb_instruction_supported(op_bs_init_writable));
+    CHECK(lb_instruction_supported(op_i_bs_create_bin_jIWdW) && lb_instruction_supported(op_bs_init_writable));
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!m.live);
     puts("CORE_BINARY_FLOW_OK live_roots=true late_destination=true private_representation=true consumed_slots=true failure_edges=true poisoned_joins=true backedges=true call_arguments=true revocation=true physical_y_roots=true runtime_uniqueness_still_required=true execution=false");
     return 0;

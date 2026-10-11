@@ -6,6 +6,7 @@ This is an explicit single interpreter capability profile, not an alternate
 bytecode, a fixture opcode parser, or dummy handlers for the remaining cases.
 """
 import re
+import hashlib
 
 NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c move_shift_cxx '
          'move_return_c move_return_n move_return_x return put_tuple2_xI test_heap_It '
@@ -36,7 +37,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy bs_init_writable').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_window2_xxy bs_init_writable i_bs_create_bin_jIWdW').split()
 
 
 def case(source, name):
@@ -126,6 +127,74 @@ def fallible_writable_init(body):
         '  if (FCALLS<=0) goto context_switch3;\n  GotoPF(next_pf);')
 
 
+def binary_failure_checks():
+    return ('if (build.status==LB_BUILD_NO_MEMORY) goto memory_failure;\n'
+            'if (build.status==LB_BUILD_LIMIT) goto resource_limit;\n'
+            'if (build.status==LB_BUILD_REFUSED) goto execution_refused;\n'
+            'if (build.status==LB_BUILD_ENVIRONMENT) goto environment_failure;\n'
+            'if (build.status!=LB_BUILD_GUEST_ERROR) goto malformed_code;\n')
+
+
+def fallible_binary_build(body):
+    if 'OpCase(i_bs_create_bin_jIWdW):' not in body: return body
+    if hashlib.sha256(body.encode()).hexdigest()!='92f19e31911500eb3b33a5f5ebeadbb3cff106d66abcf9984e5839176cd28c42':
+        raise RuntimeError('Unreviewed complete binary construction case')
+    start=body.index('  /* We count the total number of bits')
+    end=body.index('  /* Construct the segments. */')
+    phase=body[start:end]
+    # Delegate the COMPLETE sizing/allocation phases to their owned native
+    # transplants. No kind or allocation branch is an optimization omission.
+    for token in ('case BSC_UTF32:', 'if (p[0] == BSC_APPEND)',
+                  'else if (p[0] == BSC_PRIVATE_APPEND)', 'erts_wrap_refc_bitstring'):
+        if token not in phase: raise RuntimeError('Changed binary construction phase '+token)
+    replacement=('  LbBinaryBuild build; LbBinaryBuild *EBS=&build;\n'
+        '  SWAPOUT;\n  lb_binary_build_begin(c_p,p_start,n,alloc,I[3],&build);\n'
+        '  if (build.status!=LB_BUILD_OK) lb_binary_build_raise(c_p,&build);\n  SWAPIN;\n'
+        '  if (build.status!=LB_BUILD_OK) {\n'
+        '    FCALLS-=(Sint)build.cost; build.cost=0;\n'+binary_failure_checks()+
+        '    if (I[1]) { I+=(Sint)I[1]; if (FCALLS<=0) goto context_switch3; Goto(*I); }\n'
+        '    goto find_func_info;\n  }\n'
+        '  if (p_start[0]==BSC_APPEND || p_start[0]==BSC_PRIVATE_APPEND) p_start+=BSC_NUM_ARGS;\n\n')
+    body=body[:start]+replacement+body[end:]
+    for declaration in ('  Eterm new_binary;\n', '  ErlBitsState* EBS = ERL_BITS_EBS_FROM_REG(reg);\n'):
+        if body.count(declaration)!=1: raise RuntimeError('Changed binary construction local')
+        body=body.replace(declaration,'')
+    error=re.compile(r'erts_prepare_bs_construct_fail_info\(c_p, p, ([^,]+), ([^,]+), ([^)]+)\);')
+    body,count=error.subn(lambda m: 'SWAPOUT; lb_binary_build_error(c_p,&build,p,'+
+        m[1]+','+m[2]+','+m[3]+'); SWAPIN;\n'
+        'FCALLS-=(Sint)build.cost; build.cost=0;\n'+binary_failure_checks(),body)
+    if count!=9: raise RuntimeError('Changed binary writer failure branches')
+    replacements={
+        'erts_bs_put_binary_all(EBS, c_p,':'lb_build_binary_all(EBS,',
+        'erts_bs_put_binary(EBS, c_p,':'lb_build_binary(EBS,',
+        'erts_bs_put_float(EBS, c_p,':'lb_build_float(EBS,',
+        'erts_bs_put_integer_le(':'lb_build_integer_le(',
+        'erts_bs_put_integer_be(':'lb_build_integer_be(',
+        'erts_bs_put_utf8(':'lb_build_utf8(', 'erts_bs_put_utf16(':'lb_build_utf16(',
+        'erts_bs_put_string(':'lb_build_string(',
+        'is_bitstring(Src)':'lb_build_is_bitstring(Src)',
+        'c_p->fvalue':'build.float_info', 'byte* string;':'const unsigned char* string;',
+        '(byte *) p[3]':'(const unsigned char *) p[3]',
+        'FCALLS = c_p->fcalls;':'FCALLS-=(Sint)build.cost; build.cost=0;',
+        '*dst_ptr = new_binary;':'if (build.status!=LB_BUILD_OK || build.writer.offset!=build.expected) goto malformed_code;\n  *dst_ptr = build.result;',
+    }
+    counts=(1,2,2,2,2,1,1,1,2,2,1,1,1,1)
+    if len(replacements)!=len(counts): raise RuntimeError('Incomplete binary substitution counts')
+    for (old,new),expected in zip(replacements.items(),counts):
+        if body.count(old)!=expected: raise RuntimeError('Changed binary dependency '+old)
+        body=body.replace(old,new)
+    old='      lb_build_string(EBS, string, Size);'
+    if body.count(old)!=1: raise RuntimeError('Changed string writer boundary')
+    body=body.replace(old,old+'\n      if (build.status!=LB_BUILD_OK) {\n'
+        '        FCALLS-=(Sint)build.cost;\n'+binary_failure_checks()+'      }')
+    # Guard and success exits must honor charged work at a real, rooted PC.
+    body=body.replace('Goto(*I);;', 'if (FCALLS<=0) goto context_switch3; Goto(*I);;')
+    body=body.replace('  Goto(*I);\n}', '  if (FCALLS<=0) goto context_switch3; Goto(*I);\n}')
+    body=body.replace('BSC_NUM_ARGS','5')
+    body=re.sub(r'\bBSC_(\w+)',r'LB_BSC_\1',body)
+    return body
+
+
 def project(source):
     bodies=[]
     groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd')]
@@ -135,6 +204,7 @@ def project(source):
         body=fallible_equality(body)
         body=fallible_addition(body)
         body=fallible_writable_init(body)
+        body=fallible_binary_build(body)
         # No tracing/saved-call/lock instrumentation capability exists in this
         # serialized interpreter. Remove those paths, not their semantic peers.
         body=re.sub(r'^\s*DTRACE_\w+\([^;]+;', '', body, flags=re.M)

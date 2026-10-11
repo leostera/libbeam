@@ -898,3 +898,19 @@ remains recorded rather than normalized.
 Fresh locked evidence: `/tmp/libbeam-init-commit-reviewed/summary.json`
 (26 Debug and Release CTests, UBSan, nine stock vectors, core/worker/public execution)
 and `/tmp/libbeam-init-tooling-final/summary.json` (29 tooling tests).
+
+## Follow-on: complete executable binary construction
+
+Baseline: `0f02c92e`. [Complete native binary construction](0003-binary-construction.md)
+now supersedes the construction-instruction and work-accounting exclusions above.
+The whole generated `i_bs_create_bin_jIWdW` case executes through owned C sizing,
+storage, writers, rooted errors and final publication, including the public worker.
+683 result vectors match installed stock OTP; the actual UTF8 error-order backend
+discrepancy remains explicit. Guard/error allocation, consumed private sources,
+dynamic alias refusal, partial-write retirement, moved Y roots, following heap
+credit and post-publication yields are exercised. Full trace/catch handling,
+matching, stateful processes and aggregate M3/M4 acceptance remain outstanding.
+
+Fresh locked evidence: `/tmp/libbeam-build-final-reviewed/summary.json`
+(27 Debug/Release CTests, UBSan and core/public execution) and
+`/tmp/libbeam-build-tooling-reviewed/summary.json` (29 tooling tests).

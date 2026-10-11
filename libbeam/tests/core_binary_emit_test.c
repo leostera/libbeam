@@ -206,7 +206,7 @@ int main(int argc,char **argv)
 {
     Memory m={0}; LbSystemAllocator callbacks={&m,allocate,release}; LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(&callbacks,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    components(space); CHECK(!lb_instruction_supported(op_i_bs_create_bin_jIWdW));
+    components(space); CHECK(lb_instruction_supported(op_i_bs_create_bin_jIWdW));
     if(argc==3) {
         size_t size; unsigned char *data=image(argv[1],&size); Emission warmup;
         prepare(&warmup,space,data,size); lb_beam_program_destroy(warmup.program); /* own fixture atoms */
@@ -216,6 +216,6 @@ int main(int argc,char **argv)
     } else CHECK(argc==1);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK);
     lb_engine_release(engine); CHECK(!m.live && !m.bytes);
-    puts("CORE_BINARY_EMIT_OK native_words=true descriptor_count=true packed_fields=true malformed_refusal=true physical_retirement=true opcode_admitted=false");
+    puts("CORE_BINARY_EMIT_OK native_words=true descriptor_count=true packed_fields=true malformed_refusal=true physical_retirement=true opcode_admitted=true");
     return 0;
 }

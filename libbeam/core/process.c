@@ -8,6 +8,7 @@
 #include "process_internal.h"
 #include "term_compare.h"
 #include "writable.h"
+#include "binary_build.h"
 const BeamInstr lb_host_return[1]={op_normal_exit};
 int lb_instruction_supported(unsigned op)
 {
@@ -153,6 +154,9 @@ static int32_t lb_packed_label(const BeamInstr *table,size_t index)
 #define SWAPIN do { HTOP=c_p->htop; E=c_p->stop; } while(0)
 #define Goto(op) do { next_op=(op); goto dispatch; } while(0)
 #define GotoPF(op) Goto(op)
+#define BADARG LB_EXC_BADARG
+#define SYSTEM_LIMIT LB_EXC_SYSTEM_LIMIT
+#define BSF_LITTLE 2
 #define BADMATCH LB_EXC_BADMATCH
 #define EXC_CASE_CLAUSE LB_EXC_CASE_CLAUSE
 LbProcessStatus lb_process_run(LbProcess *c_p,size_t budget,unsigned reductions)
@@ -221,6 +225,10 @@ find_func_info: {
     if(!(c_p->freason&LB_EXF_HAS_EXT_INFO)) c_p->fvalue=NIL;
     c_p->status=LB_PROCESS_EXCEPTION; goto stop;
 }
+execution_refused:
+    c_p->status=LB_PROCESS_REFUSED; goto stop;
+environment_failure:
+    c_p->status=LB_PROCESS_ENVIRONMENT; goto stop;
 resource_limit:
     c_p->status=LB_PROCESS_LIMIT; goto stop;
 memory_failure:

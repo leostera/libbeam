@@ -80,6 +80,10 @@ def main():
                             root / 'libbeam/tests/core_writable_init_test.c', root / 'libbeam/tests/api_writable_init_test.cpp',
                             root / 'libbeam/tests/fixtures/writable_init_slice.S', root / 'libbeam/tests/fixtures/writable_init_reference.erl',
                             root / 'libbeam/core/otp/writable-init-sources.json',
+                            root / 'libbeam/core/otp/binary-build-sources.json',
+                            root / 'libbeam/tests/core_binary_build_test.c', root / 'libbeam/tests/api_binary_build_test.cpp',
+                            root / 'libbeam/tests/fixtures/binary_construct_slice.erl', root / 'libbeam/tests/fixtures/binary_control_slice.S',
+                            root / 'libbeam/tests/fixtures/binary_construct_reference.erl',
                             root / 'libbeam/tests/fixtures/bit_writer_reference.erl',
                             root / 'libbeam/tests/core_binary_test.c', root / 'libbeam/tests/fixtures/binary_slice.erl',
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
@@ -170,6 +174,11 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError('Unreviewed writable initializer reference '+filename)
             summary['writable_init_sources'] = writable_init_sources
+            binary_build_sources = json.loads((root / 'libbeam/core/otp/binary-build-sources.json').read_text())
+            for filename, expected in binary_build_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError('Unreviewed binary construction reference '+filename)
+            summary['binary_build_sources'] = binary_build_sources
             exception_sources = json.loads((root / 'libbeam/core/otp/exception-sources.json').read_text())
             for filename, expected in exception_sources['sources'].items():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
@@ -297,6 +306,24 @@ def main():
             summary['writable_init_execution_passed'] = True
             summary['writable_init_reference_vectors'] = 9
             summary['writable_init_fixture_sha256'] = hashlib.sha256(writable_init_fixture.read_bytes()).hexdigest()
+            run('binary-build-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/binary_construct_slice.erl', root / 'libbeam/tests/fixtures/binary_control_slice.S', root / 'libbeam/tests/fixtures/binary_construct_reference.erl'])
+            build_fixture = fixture_dir / 'binary_construct_slice.beam'
+            control_fixture = fixture_dir / 'binary_control_slice.beam'
+            build_execution = run('binary-build-execution', [out / 'build/core_binary_build_test', build_fixture, control_fixture])
+            if 'CORE_BINARY_BUILD_EXECUTION_OK' not in build_execution or 'native=2:integer:size' not in build_execution:
+                raise RuntimeError('Missing actual binary construction/error-order execution')
+            build_reference = run('binary-build-reference', [args.erl, '-noshell', '-pa', fixture_dir, '-eval', 'binary_construct_reference:run(),halt().'])
+            if len(build_reference.splitlines()) != 683 or run('binary-build-vectors', [out / 'build/core_binary_build_test', '--reference', build_fixture, control_fixture]) != build_reference:
+                raise RuntimeError('Binary construction values differ from stock OTP')
+            build_order = run('binary-build-order-reference', [args.erl, '-noshell', '-pa', fixture_dir, '-eval', 'binary_construct_reference:ordering(),halt().']).strip()
+            if build_order not in ('1:utf8:type', '2:integer:size'):
+                raise RuntimeError('Unreviewed binary construction error ordering')
+            run('api-binary-build', [out / 'build/api_binary_build_test', build_fixture, control_fixture])
+            summary['binary_build_execution_passed'] = True
+            summary['binary_build_reference_vectors'] = 683
+            summary['binary_build_error_order'] = dict(stock=build_order, native_interpreter='2:integer:size', matches=build_order=='2:integer:size')
+            summary['binary_build_fixture_sha256'] = hashlib.sha256(build_fixture.read_bytes()).hexdigest()
+            summary['binary_control_fixture_sha256'] = hashlib.sha256(control_fixture.read_bytes()).hexdigest()
             binary_emission = run('binary-emission', [out / 'build/core_binary_emit_test', binary_create_fixture, binary_fixture])
             if 'CORE_BINARY_EMIT_FIXTURE_OK' not in binary_emission:
                 raise RuntimeError('Missing native binary word/fixup ownership evidence')
@@ -509,7 +536,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','exception']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -530,9 +557,9 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
                 raise RuntimeError('UBSan float segments differ from stock-OTP vectors')
             run('flatmap-ubsan', [out / 'engine-ubsan/core_flatmap_test', binary_fixture])
@@ -544,6 +571,10 @@ def main():
             run('binary-vheap-ubsan', [out / 'engine-ubsan/core_binary_vheap_test', binary_fixture])
             run('writable-init-ubsan', [out / 'engine-ubsan/core_writable_init_test', writable_init_fixture])
             run('api-writable-init-ubsan', [out / 'engine-ubsan/api_writable_init_test', writable_init_fixture])
+            run('binary-build-ubsan', [out / 'engine-ubsan/core_binary_build_test', build_fixture, control_fixture])
+            run('api-binary-build-ubsan', [out / 'engine-ubsan/api_binary_build_test', build_fixture, control_fixture])
+            if run('binary-build-ubsan-vectors', [out / 'engine-ubsan/core_binary_build_test', '--reference', build_fixture, control_fixture]) != build_reference:
+                raise RuntimeError('UBSan binary construction differs from stock OTP')
             if run('writable-init-ubsan-vectors', [out / 'engine-ubsan/core_writable_init_test', '--reference', writable_init_fixture]) != writable_reference:
                 raise RuntimeError('UBSan writable initializer values differ from stock OTP')
             if run('exception-ubsan-vectors', [out / 'engine-ubsan/core_exception_test', '--reference', exception_fixture]) != exception_reference:
@@ -589,6 +620,10 @@ def main():
             run('binary-vheap-release', [out / 'release/core_binary_vheap_test', binary_fixture])
             run('writable-init-release', [out / 'release/core_writable_init_test', writable_init_fixture])
             run('api-writable-init-release', [out / 'release/api_writable_init_test', writable_init_fixture])
+            run('binary-build-release', [out / 'release/core_binary_build_test', build_fixture, control_fixture])
+            run('api-binary-build-release', [out / 'release/api_binary_build_test', build_fixture, control_fixture])
+            if run('binary-build-release-vectors', [out / 'release/core_binary_build_test', '--reference', build_fixture, control_fixture]) != build_reference:
+                raise RuntimeError('Release binary construction differs from stock OTP')
             if run('writable-init-release-vectors', [out / 'release/core_writable_init_test', '--reference', writable_init_fixture]) != writable_reference:
                 raise RuntimeError('Release writable initializer values differ from stock OTP')
             if run('exception-release-vectors', [out / 'release/core_exception_test', '--reference', exception_fixture]) != exception_reference:

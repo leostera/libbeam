@@ -159,8 +159,8 @@ static void reference_values(const LbCodeEntry *init,const LbCodeEntry *saved)
 }
 int main(int argc,char **argv)
 {
-    CHECK(lb_instruction_supported(op_bs_init_writable) && !lb_instruction_supported(op_i_bs_create_bin_jIWdW));
-    if(argc==1) { puts("CORE_WRITABLE_INIT_GATE_OK whole_case=true bs_create_bin=false"); return 0; }
+    CHECK(lb_instruction_supported(op_bs_init_writable) && lb_instruction_supported(op_i_bs_create_bin_jIWdW));
+    if(argc==1) { puts("CORE_WRITABLE_INIT_GATE_OK whole_case=true bs_create_bin=true"); return 0; }
     int reference=argc==3 && !strcmp(argv[1],"--reference"); CHECK(argc==2 || reference);
     FILE *f=fopen(argv[argc-1],"rb"); CHECK(f && !fseek(f,0,SEEK_END)); long size=ftell(f); CHECK(size>0 && !fseek(f,0,SEEK_SET));
     unsigned char *data=malloc((size_t)size); CHECK(data && fread(data,1,(size_t)size,f)==(size_t)size && !fclose(f));
@@ -174,6 +174,6 @@ int main(int argc,char **argv)
     if(!reference) worker(engine,space,module,&m);
     lb_engine_enter(engine); CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK); lb_engine_leave(engine);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!m.live && !m.bytes);
-    if(!reference) puts("CORE_WRITABLE_INIT_EXECUTION_OK standard_beam=true native_capacity_defaults=true zeroed_owned_backing=true y_gc=true failure_prefixes=2 fresh_process_retry=true post_publication_yield=true no_replay=true limit_not_exception=true physical_retirement=true bs_create_bin=false");
+    if(!reference) puts("CORE_WRITABLE_INIT_EXECUTION_OK standard_beam=true native_capacity_defaults=true zeroed_owned_backing=true y_gc=true failure_prefixes=2 fresh_process_retry=true post_publication_yield=true no_replay=true limit_not_exception=true physical_retirement=true bs_create_bin=true");
     return 0;
 }

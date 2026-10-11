@@ -50,11 +50,12 @@ LbWritableStatus lb_writable_init(LbProcess *p,size_t capacity,Eterm *out)
 {
     LbBinary *binary;
     if(!p || !out) return LB_WRITABLE_INVALID;
+    p->last_binary_bytes=0;
     if(capacity>LB_MAX_BINARY_BYTES) return LB_WRITABLE_LIMIT;
     if(!overhead_fits(p,capacity)) return LB_WRITABLE_NO_MEMORY;
     binary=lb_binary_allocate(p->entry_module->space->domain,capacity);
     if(!binary) return LB_WRITABLE_NO_MEMORY;
-    memset(binary->orig_bytes,0,capacity);
+    memset(binary->orig_bytes,0,capacity); p->last_binary_bytes=capacity;
     if(!reserve(p,LB_REFC_BITS_WORDS,0,0)) {
         lb_binary_release(binary); return LB_WRITABLE_NO_MEMORY;
     }
@@ -79,6 +80,7 @@ LbWritableStatus lb_binary_begin(LbProcess *p,size_t bits,size_t extra,LbBitWrit
 {
     size_t words,bytes; LbBinary *binary=NULL; unsigned char *data; Eterm result;
     if(!p || !writer || !out) return LB_WRITABLE_INVALID;
+    p->last_binary_bytes=0;
     words=lb_bitstring_heap_words(bits);
     if(!words) return LB_WRITABLE_LIMIT;
     if(extra>SIZE_MAX-words || p->heap_reserved>SIZE_MAX-words) return LB_WRITABLE_NO_MEMORY;
@@ -87,7 +89,7 @@ LbWritableStatus lb_binary_begin(LbProcess *p,size_t bits,size_t extra,LbBitWrit
         if(!overhead_fits(p,bytes)) return LB_WRITABLE_NO_MEMORY;
         binary=lb_binary_allocate(p->entry_module->space->domain,bytes);
         if(!binary) return LB_WRITABLE_NO_MEMORY;
-        memset(binary->orig_bytes,0,bytes);
+        memset(binary->orig_bytes,0,bytes); p->last_binary_bytes=bytes;
     }
     /* Allocation precedes the final fallible reservation. A detached backing
      * has no heap pointers; no input term is borrowed across collection. */
@@ -102,6 +104,7 @@ LbWritableStatus lb_binary_begin(LbProcess *p,size_t bits,size_t extra,LbBitWrit
         Eterm *hp=p->htop;
         hp[0]=_make_header(words-1,HEAP_BITS_SUBTAG); hp[1]=bits;
         data=(unsigned char *)(hp+2); memset(data,0,(words-2)*sizeof(Eterm));
+        p->last_binary_bytes=(words-2)*sizeof(Eterm);
         result=make_boxed(hp); p->htop+=words;
     }
     *writer=(LbBitWriter){data,bytes,0}; *out=result;
@@ -129,6 +132,7 @@ static LbWritableStatus prepare_backing(LbProcess *p,LbBinary *old,
     replacement=lb_binary_allocate(p->entry_module->space->domain,capacity);
     if(!replacement) return LB_WRITABLE_NO_MEMORY;
     memset(replacement->orig_bytes,0,capacity);
+    p->last_binary_bytes=capacity+(old?(size_t)old->orig_size:(view.bit_size+7)/8);
     /* All bytes are initialized. Reallocation retains the old capacity;
      * immutable/unaligned sources copy only their visible bit window. */
     if(old) memcpy(replacement->orig_bytes,old->orig_bytes,(size_t)old->orig_size);
@@ -164,6 +168,7 @@ LbWritableStatus lb_writable_append(LbProcess *p,Eterm source,size_t bits,
     size_t used,bytes,words;
     Eterm result;
     if(!p || !writer || !out || !unit || unit>256) return LB_WRITABLE_INVALID;
+    p->last_binary_bytes=0;
     if(!lb_bitstring_view(source,&view)) return LB_WRITABLE_TYPE;
     if(view.bit_size%unit) return LB_WRITABLE_UNIT;
     if(bits>8u*(size_t)LB_MAX_BINARY_BYTES || view.bit_size>8u*(size_t)LB_MAX_BINARY_BYTES-bits)
@@ -209,7 +214,7 @@ static LbWritableStatus private_replacement(LbProcess *p,LbBinary *old,size_t by
     if(!binary) return LB_WRITABLE_NO_MEMORY;
     memset(binary->orig_bytes,0,capacity);
     if(copy>capacity) copy=capacity;
-    memcpy(binary->orig_bytes,old->orig_bytes,copy);
+    memcpy(binary->orig_bytes,old->orig_bytes,copy); p->last_binary_bytes=capacity+copy;
     *out=binary; return LB_WRITABLE_OK;
 }
 LbWritableStatus lb_writable_private_append(LbProcess *p,LbBinarySource location,size_t bits,
@@ -219,6 +224,7 @@ LbWritableStatus lb_writable_private_append(LbProcess *p,LbBinarySource location
     LbBinary *binary,*replacement=NULL; size_t position,used,bytes;
     LbWritableStatus status;
     if(!p || !writer || !out || !(slot=source_slot(p,location))) return LB_WRITABLE_INVALID;
+    p->last_binary_bytes=0;
     if(!is_boxed(*slot) || is_literal_ptr(*slot) || *boxed_val(*slot)!=LB_HEADER_SUB_BITS)
         return LB_WRITABLE_TYPE;
     sub=(LbSubBits *)boxed_val(*slot); ref=(LbBinRef *)boxed_val(sub->orig); binary=ref->val;

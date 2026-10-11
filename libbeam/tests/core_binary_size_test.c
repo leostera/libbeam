@@ -229,7 +229,7 @@ int main(int argc,char **argv)
 {
     if(argc==2 && !strcmp(argv[1],"--reference")) { reference(); return 0; }
     kinds(); widths(); unicode(); malformed(); if(argc==2) execution(argv[1]); else CHECK(argc==1);
-    CHECK(!lb_instruction_supported(op_i_bs_create_bin_jIWdW));
-    puts("CORE_BINARY_SIZE_OK native_flat64=true all_kinds=true unicode_order=true arithmetic_oracle=10000 aggregate_overflow=true late_error_before_limit=true checked_register_spans=true maximum_descriptors=true allocation_free=true opcode_admitted=false");
+    CHECK(lb_instruction_supported(op_i_bs_create_bin_jIWdW));
+    puts("CORE_BINARY_SIZE_OK native_flat64=true all_kinds=true unicode_order=true arithmetic_oracle=10000 aggregate_overflow=true late_error_before_limit=true checked_register_spans=true maximum_descriptors=true allocation_free=true opcode_admitted=true");
     return 0;
 }
