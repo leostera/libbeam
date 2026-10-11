@@ -8,6 +8,7 @@
 #include "exception.h"
 #include "code_internal.h"
 #include "decimal.h"
+#include "binary_vheap.h"
 struct LbProcess {
     LbCodeModule *entry_module;
     const LbMFA *current;
@@ -16,6 +17,7 @@ struct LbProcess {
     Eterm reg[MAX_REG];
     Eterm *heap, *htop, *stop, *hend;
     LbOffHeap off_heap, writable;
+    uint64_t bin_vheap_sz; /* owned soft collection threshold, in words */
     Eterm construction_root; /* explicit temporary root during fallible append */
     LbDecimal *decimal; /* sole pending native continuation; independent scratch */
     Uint freason; /* Native encoded scalar, never a GC root. */
@@ -27,6 +29,7 @@ struct LbProcess {
 };
 int lb_process_collect_live(LbProcess *,size_t,size_t);
 int lb_heap_reserve(LbProcess *,size_t,size_t);
+int lb_heap_reserve_binary(LbProcess *,size_t need,size_t incoming_bytes,size_t live);
 /* Conservative native-term alias check, including dead allocated heap objects.
  * Unknown object families abort rather than silently hiding possible roots. */
 int lb_process_has_other_reference(const LbProcess *,Eterm,const Eterm *except);

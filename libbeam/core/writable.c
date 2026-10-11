@@ -26,11 +26,12 @@ static int overhead_fits(LbProcess *p,size_t added)
     total+=p->writable.overhead;
     return words<=UINT64_MAX-total;
 }
-static int reserve(LbProcess *p,size_t words,size_t extra)
+static int reserve(LbProcess *p,size_t words,size_t extra,size_t binary_bytes)
 {
     size_t need;
     if(extra<p->heap_reserved) extra=p->heap_reserved;
-    return lb_size_add(words,extra,&need) && lb_heap_reserve(p,need,MAX_REG);
+    if(!lb_size_add(words,extra,&need)) return 0;
+    return binary_bytes?lb_heap_reserve_binary(p,need,binary_bytes,MAX_REG):lb_heap_reserve(p,need,MAX_REG);
 }
 static Eterm wrap(LbProcess *p,LbBinary *binary,size_t bits,size_t apparent)
 {
@@ -54,7 +55,7 @@ LbWritableStatus lb_writable_init(LbProcess *p,size_t capacity,Eterm *out)
     binary=lb_binary_allocate(p->entry_module->space->domain,capacity);
     if(!binary) return LB_WRITABLE_NO_MEMORY;
     memset(binary->orig_bytes,0,capacity);
-    if(!reserve(p,LB_REFC_BITS_WORDS,0)) {
+    if(!reserve(p,LB_REFC_BITS_WORDS,0,0)) {
         lb_binary_release(binary); return LB_WRITABLE_NO_MEMORY;
     }
     *out=wrap(p,binary,0,capacity);
@@ -76,7 +77,7 @@ LbWritableStatus lb_binary_begin(LbProcess *p,size_t bits,size_t extra,LbBitWrit
     }
     /* Allocation precedes the final fallible reservation. A detached backing
      * has no heap pointers; no input term is borrowed across collection. */
-    if(!reserve(p,words,extra)) {
+    if(!reserve(p,words,extra,binary?bytes:0)) {
         if(binary) lb_binary_release(binary);
         return LB_WRITABLE_NO_MEMORY;
     }
@@ -164,7 +165,7 @@ LbWritableStatus lb_writable_append(LbProcess *p,Eterm source,size_t bits,
      * the final fallible step, and never reuse heap pointers across collection. */
     if(p->construction_root!=NIL) abort();
     p->construction_root=source;
-    if(!reserve(p,words,extra)) {
+    if(!reserve(p,words,extra,0)) {
         p->construction_root=NIL;
         if(replacement) lb_binary_release(replacement);
         return LB_WRITABLE_NO_MEMORY;
@@ -222,7 +223,7 @@ LbWritableStatus lb_writable_private_append(LbProcess *p,LbBinarySource location
          * for a zero extension. Heap fragments become fallible heap reservation. */
         status=private_replacement(p,binary,bytes,&replacement);
         if(status!=LB_WRITABLE_OK) return status;
-        if(!reserve(p,LB_REFC_BITS_WORDS,0)) {
+        if(!reserve(p,LB_REFC_BITS_WORDS,0,0)) {
             lb_binary_release(replacement); return LB_WRITABLE_NO_MEMORY;
         }
         result=wrap(p,replacement,used,bytes); binary=replacement;

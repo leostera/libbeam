@@ -73,6 +73,11 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   dependencies only: register/root and private-slot consumption proofs now
   precede transforms, but runtime uniqueness checks remain mandatory and the
   whole dispatch case remains gated. Facts never come from compiler hints.
+- `binary_vheap.c`: native growth/shrink thresholds with deterministic binary64
+  rounding in integer arithmetic. Each process owns its soft pressure threshold;
+  fresh offheap construction can collect without exhausting term-heap space.
+  Collection accounts both retained-capacity chains, not a hard quota or native
+  generational/apparent-size accounting. Instruction work policy is still pending.
 - `exception.c`: native scalar reason codes and error-value expansion. The
   executor owns expanded terminal values as real GC roots; reason flags are
   not terms. Binary failure preparation atomically sets extended payload/code.

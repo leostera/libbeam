@@ -31,7 +31,7 @@ LbProcessStatus lb_process_create(const LbCodeEntry *entry,const Eterm *args,siz
     p=memory; memset(p,0,sizeof(*p));
     if(lb_alloc_domain_allocate(domain,words*sizeof(Eterm),&memory)!=LB_ALLOC_OK) { lb_release(domain,p); return LB_PROCESS_NO_MEMORY; }
     p->entry_module=module; p->heap=p->htop=memory; p->hend=p->heap+words; p->stop=p->hend-1;
-    *p->stop=(Eterm)lb_host_return;
+    *p->stop=(Eterm)lb_host_return; p->bin_vheap_sz=LB_BINARY_VHEAP_MIN_WORDS;
     for(i=0;i<MAX_REG;++i) p->reg[i]=i<arity?args[i]:NIL;
     p->fvalue=p->exception_value=p->construction_root=NIL; p->freason=LB_EXC_NULL; p->arity=arity; p->current=&entry->entry->info.mfa;
     p->i=entry->entry->dispatch.addresses[0]; p->status=LB_PROCESS_READY;

@@ -807,3 +807,44 @@ Fresh locked validation: `/tmp/libbeam-binary-flow-commit-reviewed/summary.json`
 `/tmp/libbeam-binary-flow-tooling-final/summary.json` (29 tooling tests).
 The unchanged lifecycle example passes; unchanged stateful acceptance remains red.
 The previously recorded UTF8 stock/interpreter ordering difference remains explicit.
+
+## Follow-on: owned virtual-binary-heap pressure
+
+Baseline: `846c8bb0`. Each process now owns a soft binary-heap threshold, initially
+46422 words (the native rounded default). Successful full collection applies the
+native `do_next_vheap_size` rule to the ordinary plus writable retained-capacity
+counters: grow by binary64 1.618 while `used/3 > threshold/4`, halve below one
+quarter, otherwise retain, and enforce the minimum. This is a collection trigger,
+not a quota, generational collector or apparent-size/shrink claim.
+
+The multiplication is not approximated by the different rational `1618/1000`.
+Unsigned compiler128 arithmetic reproduces both nearest/ties-even binary64
+roundings, then truncates. It uses no host floating environment, allocation or
+fallible operation after forwarding begins. Native out-of-range double-to-Uint64
+conversion would be undefined C before its wrap check; the owned helper instead
+keeps the previous threshold without performing that conversion. Invalid tiny
+threshold inputs normalize to the configured minimum.
+
+Fresh offheap construction now performs the native `>=` pressure check before its
+final reservation, even with ample term-heap space. Addition cannot wrap; incoming
+bytes are floored to words. A detached zeroed backing is released if tospace
+allocation fails, preserving outputs, old heap, threshold and pending credit.
+Only successful collection updates the threshold. Ordinary heap binaries and
+writable/append helper collection triggers are unchanged. Retained writable spare
+capacity remains charged after pin/migration; nothing silently shrinks it.
+
+Tests include 20,000 random binary64-reference vectors, rounding/hysteresis
+boundaries, unsigned128 pressure comparisons and all four host rounding modes
+with exception-flag preservation. Real C processes demonstrate pressure-triggered
+GC without heap exhaustion, two allocation-failure prefixes and same-process
+retry, subsequent threshold rollback/growth/shrink, real identity BEAM execution,
+moving roots, pinned spare-capacity retention and exact physical retirement.
+This large component result is not a public transport-limit acceptance witness.
+
+Whole binary dispatch, instruction work/reduction accounting and M3 remain
+outstanding. The existing UTF8 stock-JIT/pinned-interpreter discrepancy is unchanged.
+
+Fresh locked evidence: `/tmp/libbeam-vheap-commit-reviewed/summary.json`
+(25 Debug and Release CTests, UBSan and real-process pressure/identity witnesses),
+plus `/tmp/libbeam-vheap-tooling-final/summary.json` (29 tooling tests).
+Unchanged lifecycle passes; unchanged stateful acceptance remains red.

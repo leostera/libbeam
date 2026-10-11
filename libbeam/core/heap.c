@@ -42,6 +42,11 @@ static void move_root(Eterm *root,Eterm **top)
         ptr[0]=THE_NON_VALUE; ptr[1]=*root; *top+=2;
     }
 }
+static uint64_t binary_words(const LbProcess *p)
+{
+    if(p->writable.overhead>UINT64_MAX-p->off_heap.overhead) abort();
+    return p->off_heap.overhead+p->writable.overhead;
+}
 int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
 {
     LbAllocDomain *domain=p->entry_module->space->domain;
@@ -84,6 +89,7 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
     }
     lb_offheap_sweep(&p->off_heap);
     lb_writable_sweep(&p->writable,&p->off_heap);
+    p->bin_vheap_sz=lb_binary_vheap_next(binary_words(p),p->bin_vheap_sz);
     ASSERT(top<=stop && (size_t)(stop-top)>=need+S_RESERVED);
     p->heap=heap; p->htop=top; p->stop=stop; p->hend=heap+size;
     p->last_gc_cost=1+(Uint)(top-heap)/16; ++p->collections;
@@ -93,6 +99,13 @@ int lb_heap_reserve(LbProcess *p,size_t need,size_t live)
 {
     if(need>MAX_HEAP_WORDS) return 0;
     return (size_t)(p->stop-p->htop)>=need+S_RESERVED || lb_process_collect_live(p,need,live);
+}
+int lb_heap_reserve_binary(LbProcess *p,size_t need,size_t incoming_bytes,size_t live)
+{
+    if(need>MAX_HEAP_WORDS || live>MAX_REG) return 0;
+    if(lb_binary_vheap_pressure(binary_words(p),incoming_bytes/sizeof(Eterm),p->bin_vheap_sz))
+        return lb_process_collect_live(p,need,live);
+    return lb_heap_reserve(p,need,live);
 }
 int lb_process_has_other_reference(const LbProcess *p,Eterm value,const Eterm *except)
 {
