@@ -71,6 +71,10 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   arrays. `beam_emit.c` packs native words and fixes retained literal/string
   pointers, checking whole string spans across code growth. These are preparation
   dependencies only: executable proof and the whole dispatch case remain gated.
+- `binary_size.c`: read-only native flat64 aggregate sizing over emitted
+  descriptors, with explicit register spans and typed guest/metadata/policy
+  failures. Native UTF8/16 deferred validation remains distinct from UTF32.
+  The stock JIT UTF8 error-order discrepancy is recorded, not normalized away.
 - `writable.c`: fresh heap/refcounted construction spans, process-owned native
   writable backing and non-private append,
   fallible preparation before revocation/publication, volatile-prefix reads,

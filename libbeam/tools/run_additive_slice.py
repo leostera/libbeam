@@ -70,7 +70,8 @@ def main():
                             root / 'libbeam/tests/fixtures/binary_error_reference.erl',
                             root / 'libbeam/tests/core_binary_transform_test.c', root / 'libbeam/tests/core_binary_emit_test.c',
                             root / 'libbeam/tests/fixtures/binary_create_slice.erl',
-                            root / 'libbeam/core/otp/binary-loader-sources.json',
+                            root / 'libbeam/core/otp/binary-loader-sources.json', root / 'libbeam/core/otp/binary-size-sources.json',
+                            root / 'libbeam/tests/core_binary_size_test.c', root / 'libbeam/tests/fixtures/binary_size_reference.erl',
                             root / 'libbeam/tests/fixtures/bit_writer_reference.erl',
                             root / 'libbeam/tests/core_binary_test.c', root / 'libbeam/tests/fixtures/binary_slice.erl',
                             root / 'libbeam/tools/otp/beam_makeops', root / 'libbeam/core/otp/loader-sources.json',
@@ -146,6 +147,11 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError(f'Binary loader reference changed: {filename}')
             summary['binary_loader_sources'] = binary_loader_sources
+            binary_size_sources = json.loads((root / 'libbeam/core/otp/binary-size-sources.json').read_text())
+            for filename, expected in binary_size_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Binary sizing reference changed: {filename}')
+            summary['binary_size_sources'] = binary_size_sources
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
@@ -253,6 +259,29 @@ def main():
             if 'CORE_BINARY_EMIT_FIXTURE_OK' not in binary_emission:
                 raise RuntimeError('Missing native binary word/fixup ownership evidence')
             summary['binary_emission_dependencies_passed'] = True
+            run('binary-size-reference-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/binary_size_reference.erl'])
+            size_reference = run('binary-size-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-eval', 'binary_size_reference:run(),halt().'])
+            size_native = run('binary-size-vectors', [out / 'build/core_binary_size_test', '--reference'])
+            stock_lines, native_lines = size_reference.splitlines(), size_native.splitlines()
+            if len(stock_lines) != 11 or len(native_lines) != 11 or stock_lines[1:] != native_lines[1:] or native_lines[0] != 'utf8:badarg:2:integer:size':
+                raise RuntimeError('Unexpected native sizing/reference results')
+            # The pinned interpreter defers UTF8 validation; the ARM JIT source
+            # checks it during sizing. Keep the observed discrepancy, not a
+            # normalized value or a claim that all stock vectors matched.
+            if stock_lines[0] not in {native_lines[0], 'utf8:badarg:1:utf8:type'}:
+                raise RuntimeError('Unreviewed UTF8 reference error ordering')
+            summary['binary_size_reference_runtime'] = run('binary-size-reference-runtime', [args.erl, '-noshell', '-eval',
+                'io:format("~p ~p~n",[erlang:system_info(otp_release),erlang:system_info(emu_flavor)]),halt().']).strip()
+            summary['binary_size_reference_vectors'] = 11
+            summary['binary_size_reference_matches'] = sum(a == b for a, b in zip(stock_lines, native_lines))
+            summary['binary_size_reference_all_match'] = size_reference == size_native
+            summary['binary_size_reference_differences'] = [dict(stock=a, native_interpreter=b) for a, b in zip(stock_lines, native_lines) if a != b]
+            summary['binary_size_reference_sha256'] = hashlib.sha256((fixture_dir / 'binary_size_reference.beam').read_bytes()).hexdigest()
+            size_execution = run('binary-size-execution', [out / 'build/core_binary_size_test', binary_fixture])
+            if 'CORE_BINARY_SIZE_EXECUTION_OK' not in size_execution:
+                raise RuntimeError('Missing binary sizing ownership/execution evidence')
+            summary['binary_size_dependencies_passed'] = True
             summary['binary_create_fixture_sha256'] = hashlib.sha256(binary_create_fixture.read_bytes()).hexdigest()
             binary_execution = run('binary-execution', [out / 'build/core_binary_test', binary_fixture, fixture, peer_fixture])
             if 'CORE_BINARY_EXECUTION_OK' not in binary_execution or 'CORE_BINARY_RETIREMENT_OK' not in binary_execution:
@@ -422,7 +451,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -443,14 +472,17 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
                 raise RuntimeError('UBSan float segments differ from stock-OTP vectors')
             run('flatmap-ubsan', [out / 'engine-ubsan/core_flatmap_test', binary_fixture])
             run('binary-transform-ubsan', [out / 'engine-ubsan/core_binary_transform_test', binary_create_fixture])
             run('binary-emission-ubsan', [out / 'engine-ubsan/core_binary_emit_test', binary_create_fixture, binary_fixture])
+            run('binary-size-ubsan', [out / 'engine-ubsan/core_binary_size_test', binary_fixture])
+            if run('binary-size-ubsan-vectors', [out / 'engine-ubsan/core_binary_size_test', '--reference']) != size_native:
+                raise RuntimeError('UBSan sizing differs from the native interpreter profile')
             if run('binary-error-ubsan-vectors', [out / 'engine-ubsan/core_flatmap_test', '--reference', binary_fixture]) != error_reference:
                 raise RuntimeError('UBSan binary error payloads differ from stock-OTP vectors')
             run('bit-writer-fallback-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-DDEBUG',
@@ -484,6 +516,9 @@ def main():
             run('flatmap-release', [out / 'release/core_flatmap_test', binary_fixture])
             run('binary-transform-release', [out / 'release/core_binary_transform_test', binary_create_fixture])
             run('binary-emission-release', [out / 'release/core_binary_emit_test', binary_create_fixture, binary_fixture])
+            run('binary-size-release', [out / 'release/core_binary_size_test', binary_fixture])
+            if run('binary-size-release-vectors', [out / 'release/core_binary_size_test', '--reference']) != size_native:
+                raise RuntimeError('Release sizing differs from the native interpreter profile')
             if run('binary-error-release-vectors', [out / 'release/core_flatmap_test', '--reference', binary_fixture]) != error_reference:
                 raise RuntimeError('Release binary error payloads differ from stock-OTP vectors')
             run('release-executor', [out / 'release/core_executor_test', async_fixture])

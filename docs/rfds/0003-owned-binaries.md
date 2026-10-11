@@ -663,3 +663,51 @@ execution and stable source hashes), plus
 `/tmp/libbeam-binary-emit-tooling-final/summary.json` (29 tooling tests).
 The earlier `/tmp/libbeam-binary-emit-integrated-first/summary.json` is retained.
 Neither acceptance source changed; stateful acceptance remains red.
+
+## Follow-on: native aggregate sizing and ordered failures
+
+Baseline: `1264b27a`. `binary_size.c/.h` retain the flat64 interpreter sizing
+phase for all thirteen descriptor kinds, using borrowed explicit X/Y register
+spans and typed returned results. Structural checks precede semantic reads;
+invalid descriptors, native guest errors and caller size ceilings are distinct.
+The helper neither allocates, collects, mutates nor retains its inputs. An error's
+offending value remains borrowed and must be rooted before a collection.
+
+Append prefixes are excluded. Binary-all checks type/length but defers unit
+divisibility. Dynamic sizes preserve native negative/noninteger `badarg`,
+positive-big/product-overflow/signed-word `system_limit`, and both native safe
+multiply implementations. Fixed/string sizes are counted without eagerly
+checking source types or float widths. UTF8/16 retain the tagged-word estimates
+and defer scalar validation to writing; UTF32 checks the scalar during sizing.
+
+Aggregate addition cannot wrap. The explicit caller ceiling is an infrastructure
+policy, not a fabricated guest `system_limit`. Reaching it does not stop subsequent
+native sizing checks: a later sizing error still wins before allocation policy.
+No work/reduction, virtual-binary-heap, private-source proof, exception-state or
+whole-dispatch admission is implied.
+
+Tests cover every kind, exhaustive scalar candidates, 10,000 independent
+unsigned128 multiplication checks, aggregate overflow, late-error precedence,
+maximum descriptor count and X/Y bounds. Real relocated string/literal descriptors
+feed sizing and checked writers. A 602-bit mixed C construction reloads X/Y after
+collection, then executes real identity BEAM with further moving GC. A borrowed
+big error operand, removed from the registers, survives the payload factory's
+explicit root, allocation failure and retry; the returned map executes identity
+and collection without assigning process exception fields.
+
+**Reference discrepancy retained:** ten of eleven exception vectors match the
+installed OTP28/ERTS16.3 ARM JIT. For invalid UTF8 followed by a negative integer
+size, stock reports `{1,utf8,type,-1}` while the pinned interpreter algorithm
+reports `{2,integer,size,-1}`. The pinned ARM JIT source likewise validates UTF8
+early. The runner records exact differing lines and runtime flavor rather than
+normalizing them into an all-match result. A newly built pinned interpreter and
+controlled cross-backend/version conformance remain outstanding. The stock
+fixture is never loaded or used as an execution fallback.
+
+Final evidence: `/tmp/libbeam-binary-size-commit-reviewed/summary.json` (22 passing
+Debug/Release CTests, UBSan including the alternate native multiply path, existing
+selected-profile execution, stable hashes and the explicit stock discrepancy),
+plus `/tmp/libbeam-binary-size-tooling-final/summary.json` (29 tooling tests).
+Earlier passing integration: `/tmp/libbeam-binary-size-integrated-first/summary.json`.
+`binary_size_reference_all_match=false` is deliberate recorded evidence, not an
+all-reference pass. Stateful acceptance still fails and both sources are unchanged.

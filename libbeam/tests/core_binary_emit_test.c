@@ -4,6 +4,7 @@
  */
 #include "process_internal.h"
 #include "binary_error.h"
+#include "binary_size.h"
 #include "big.h"
 #include "writable.h"
 #include <stdio.h>
@@ -152,6 +153,11 @@ static void consumer(LbCodeSpace *space,const unsigned char *data,size_t size,co
     LbStringPatch *string=e.loader.string_patches; LbPatch *constant=e.loader.literal_patches;
     CHECK(string && constant && string->bytes+9<=sizeof(expected));
     literal=e.loader.codev[constant->pos]; CHECK(lb_is_big(literal));
+    Eterm width=make_small(72); LbBinaryRegisters registers={&width,1,NULL,0};
+    LbBinarySizeResult numeric_size=lb_binary_size(registers,e.loader.codev+constant->pos-3,5,72);
+    LbBinarySizeResult string_size=lb_binary_size(registers,e.loader.codev+string->pos-3,5,string->bytes*8);
+    CHECK(numeric_size.status==LB_BINARY_SIZE_OK && numeric_size.as.bits==72);
+    CHECK(string_size.status==LB_BINARY_SIZE_OK && string_size.as.bits==string->bytes*8);
     size_t bytes=string->bytes+9; memcpy(expected,(void *)e.loader.codev[string->pos],string->bytes);
     memset(expected+string->bytes,0,9); expected[bytes-1]=1; /* 2^64, 72-bit LE */
     CHECK(lb_process_create(identity,&nil,1,5,&p)==LB_PROCESS_READY);
