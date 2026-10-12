@@ -33,6 +33,10 @@ Eterm lb_erl_send(LbProcess *sender,Eterm destination,Eterm term)
     status=lb_message_create(space,term,&message,&cost); sender->last_native_cost=identity_cost+cost;
     if(status!=LB_PROCESS_READY) { sender->status=status; return THE_NON_VALUE; }
     message->m[2]=from;
+    if(!lb_work_domain_charge(space->domain,1)) {
+        lb_message_destroy(message); sender->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    lb_work_cross_effect(sender->work_active,receiver->work_birth);
     status=lb_message_queue_append(&receiver->messages,message);
     if(status!=LB_PROCESS_READY) { lb_message_destroy(message); sender->status=status; return THE_NON_VALUE; }
     receiver->waiting=0; /* publication precedes wake; the shared worker owns both */
@@ -47,6 +51,7 @@ LbProcessStatus lb_message_import(LbProcess *receiver,const LbMessage *message,s
     receiver->last_native_cost=1;
     size_t words=message->data.heap_frag?message->data.heap_frag->used_size:0,need;
     if(!lb_size_add(words,receiver->heap_reserved,&need) || need>LB_MAX_BINARY_BYTES/sizeof(Eterm)) return LB_PROCESS_LIMIT;
+    if(!lb_work_domain_charge(receiver->entry_module->space->domain,words+lb_work_bulk_units(words))) return LB_PROCESS_WORK_LIMIT;
     size_t collections=receiver->collections;
     if(!lb_heap_reserve(receiver,need,live)) return LB_PROCESS_NO_MEMORY;
     if(receiver->collections!=collections) receiver->last_native_cost+=receiver->last_gc_cost;
@@ -82,9 +87,12 @@ LbProcessStatus lb_message_peek_owned(LbProcess *receiver,Eterm *out)
     *out=THE_NON_VALUE; receiver->last_native_cost=1;
     LbMessage *selected=*receiver->messages.save;
     if(!selected) {
+        if(receiver->work_candidate) abort();
         receiver->receive_message=NULL; receiver->receive_root=NIL;
         return LB_PROCESS_READY;
     }
+    if(!lb_work_receive_begin(receiver,selected) || !lb_work_domain_charge(selected->space->domain,1))
+        return LB_PROCESS_WORK_LIMIT;
     if(selected!=receiver->receive_message) {
         Eterm copied;
         receiver->receive_message=NULL; receiver->receive_root=NIL;
@@ -100,6 +108,7 @@ void lb_message_skip_owned(LbProcess *receiver)
     if(!selected || selected!=receiver->receive_message) abort();
     receiver->receive_message=NULL; receiver->receive_root=NIL;
     receiver->messages.save=&selected->next;
+    lb_work_receive_end(receiver,0);
 }
 void lb_message_consume_owned(LbProcess *receiver)
 {
@@ -108,6 +117,7 @@ void lb_message_consume_owned(LbProcess *receiver)
     receiver->receive_message=NULL; receiver->receive_root=NIL;
     if(lb_message_queue_take(&receiver->messages)!=selected) abort();
     receiver->messages.save=&receiver->messages.first;
+    lb_work_receive_end(receiver,1);
     lb_message_destroy(selected);
 }
 void lb_message_queue_init(LbMessageQueue *queue)
@@ -152,6 +162,7 @@ void lb_message_destroy(LbMessage *message)
         lb_release(space->domain,fragment);
     }
     lb_fun_release_roots(space,&message->leases);
+    lb_work_budget_release(message->budget);
     if(!space->messages) abort(); --space->messages;
     lb_release(space->domain,message);
 }
@@ -170,6 +181,10 @@ LbProcessStatus lb_message_create(LbCodeSpace *space,Eterm term,LbMessage **out,
     if(lb_alloc_domain_allocate(space->domain,sizeof(LbMessage),&memory)!=LB_ALLOC_OK) return LB_PROCESS_NO_MEMORY;
     LbMessage *message=memory; memset(message,0,sizeof(*message)); message->space=space;
     message->m[0]=message->m[1]=message->m[2]=NIL;
+    message->budget=lb_work_domain_owner(space->domain);
+    if(lb_work_budget_retain(message->budget)!=LB_ALLOC_OK) {
+        lb_release(space->domain,message); return LB_PROCESS_LIMIT;
+    }
     /* Count only an internal prepared owner, never a mailbox publication.
      * The destructor rolls back every subsequently acquired prefix resource. */
     ++space->messages;
@@ -179,6 +194,9 @@ LbProcessStatus lb_message_create(LbCodeSpace *space,Eterm term,LbMessage **out,
         return held==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_REFUSED;
     }
     if(words) {
+        if(!lb_work_domain_charge(space->domain,words+lb_work_bulk_units(words))) {
+            lb_message_destroy(message); return LB_PROCESS_WORK_LIMIT;
+        }
         if(lb_alloc_domain_allocate(space->domain,bytes,&memory)!=LB_ALLOC_OK) {
             lb_message_destroy(message); return LB_PROCESS_NO_MEMORY;
         }

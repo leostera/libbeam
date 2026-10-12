@@ -49,6 +49,7 @@ Eterm lb_bif_spawn_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     if(!is_atom(args[0]) || !is_atom(args[1])) goto badarg;
     Eterm tail=args[2]; size_t length=0;
     while(is_list(tail)) {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
         if(++length>LB_MAX_BINARY_BYTES/sizeof(Eterm)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
         ++p->last_native_cost; tail=list_val(tail)[1];
     }
@@ -74,12 +75,14 @@ Eterm lb_bif_spawn_opt_4(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     if(!is_atom(args[0]) || !is_atom(args[1])) goto badarg;
     Eterm tail=args[2]; size_t length=0;
     while(is_list(tail)) {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
         if(++length>LB_MAX_BINARY_BYTES/sizeof(Eterm)) goto limit;
         tail=list_val(tail)[1];
     }
     if(!is_nil(tail)) goto badarg;
     Eterm options=args[3]; int monitored=0;
     while(is_list(options)) {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
         if(++p->last_native_cost>LB_MAX_BINARY_BYTES/sizeof(Eterm)) goto limit;
         Eterm option=list_val(options)[0]; options=list_val(options)[1];
         if(option!=am_monitor) goto refused;
@@ -120,6 +123,7 @@ Eterm lb_bif_demonitor_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     if(!is_boxed(args[0]) || boxed_val(args[0])[0]!=LB_REF_HEADER) goto badarg;
     Eterm options=args[1]; int flush=0;
     while(is_list(options)) {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
         if(++p->last_native_cost>LB_MAX_BINARY_BYTES/sizeof(Eterm)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
         Eterm option=list_val(options)[0]; options=list_val(options)[1];
         if(option==am_flush) flush=1;
@@ -136,7 +140,11 @@ Eterm lb_bif_exit_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     if(!is_internal_pid(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
     if(args[1]!=am_kill || !p->world || !p->running) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
     LbProcess *target=lb_pid_lookup(p->entry_module->space->pids,args[0]);
-    if(target) { target->exit_requested=1; target->waiting=0; }
+    if(target) {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        lb_work_cross_effect(p->work_active,target->work_birth);
+        target->exit_requested=1; target->waiting=0;
+    }
     return am_true;
 }
 Eterm lb_bif_register_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
@@ -168,6 +176,7 @@ Eterm lb_bif_error_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
     Eterm info=THE_NON_VALUE,list=args[2];
     while(is_list(list)) {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
         if(++p->last_native_cost>LB_MAX_BINARY_BYTES/sizeof(Eterm)) {
             p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE;
         }

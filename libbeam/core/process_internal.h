@@ -15,12 +15,15 @@
 #include "registry.h"
 #include "receive_marker.h"
 #include "monitor.h"
+#include "work_budget.h"
 #define F_INSLPQUEUE (1u<<1)
 #define F_TIMO (1u<<2)
 #define F_DELAY_GC (1u<<13) /* pinned native matching/schedule-out flag */
 struct LbProcess {
     LbCodeModule *entry_module;
     LbWorld *world; /* borrowed C task owner; task retirement precedes world destruction */
+    LbWorkBudget *work_birth,*work_active,*work_previous; /* owned stable metadata leases */
+    LbMessage *work_candidate; /* borrowed queue node, never a moving term */
     LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
     LbMonitorNode *monitors_origin,*monitors_target;
     Uint bitdata; /* native matching accumulator survives host-budget safepoints */

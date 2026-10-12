@@ -335,7 +335,8 @@ def owned_receive_remove(body):
     body=body[:start]+'  if (msgp->m[1]!=NIL) goto execution_refused;\n'+body[end:]
     body=body.replace('erts_msgq_unlink_msg_set_save_first(c_p, msgp);',
         'if(msgp!=c_p->receive_message || lb_message_queue_take(&c_p->messages)!=msgp) goto malformed_code;\n'
-        '  c_p->messages.save=&c_p->messages.first;\n  c_p->receive_message=NULL; c_p->receive_root=NIL;')
+        '  c_p->messages.save=&c_p->messages.first;\n  c_p->receive_message=NULL; c_p->receive_root=NIL;\n'
+        '  lb_work_receive_end(c_p,1);')
     body=body.replace('CANCEL_TIMER(c_p);', 'lb_receive_timer_cancel(c_p);')
     body=body.replace('erts_save_message_in_proc(c_p, msgp);', 'lb_message_destroy(msgp);')
     body=body.replace('ERTS_IS_GC_DESIRED_INTERNAL(c_p, HTOP, E, 0)',

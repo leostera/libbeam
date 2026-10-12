@@ -50,7 +50,8 @@ def main():
                            {root / 'libbeam/CMakeLists.txt', root / 'libbeam/src/engine.cpp',
                             root / 'libbeam/examples/run_beam.cpp', root / 'libbeam/include/libbeam/engine.hpp',
                             root / 'libbeam/tests/api_memory_test.cpp', root / 'libbeam/tests/core_memory_test.c',
-                            root / 'libbeam/tests/core_work_test.c',
+                            root / 'libbeam/tests/core_work_test.c', root / 'libbeam/tests/core_work_runtime_test.c',
+                            root / 'libbeam/tests/api_work_test.cpp', root / 'libbeam/tests/fixtures/work_slice.erl',
                             root / 'libbeam/tests/fixtures/memory_slice.erl',
                             root / 'libbeam/tests/fixtures/refused_map.erl',
                             root / 'libbeam/tests/core_beam_image_test.c', root / 'libbeam/tests/core_alloc_test.c',
@@ -252,6 +253,10 @@ def main():
             async_fixture = fixture_dir / 'async_slice.beam'
             run('memory-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/memory_slice.erl'])
             memory_fixture = fixture_dir / 'memory_slice.beam'
+            run('work-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/work_slice.erl'])
+            work_fixture = fixture_dir / 'work_slice.beam'
+            run('core-work-runtime', [out / 'build/core_work_runtime_test', work_fixture])
+            run('api-work-runtime', [out / 'build/api_work_test', work_fixture])
             run('api-memory-execution', [out / 'build/api_memory_test', memory_fixture])
             run('core-memory-gc', [out / 'build/core_memory_test', memory_fixture])
             run('executor-execution', [out / 'build/core_executor_test', async_fixture])
@@ -593,7 +598,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','stacktrace','pid_table','bif_process','fun','message','receive','registry','receive_marker','monitor','preloaded','binary_match']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','work_budget','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','stacktrace','pid_table','bif_process','fun','message','receive','registry','receive_marker','monitor','preloaded','binary_match']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -614,9 +619,9 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'api_memory_test', 'core_memory_test', 'core_work_test', 'core_alloc_test', 'engine_lifecycle', 'two_isolates', 'run_beam'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'api_memory_test', 'core_memory_test', 'core_work_test', 'core_work_runtime_test', 'api_work_test', 'core_alloc_test', 'engine_lifecycle', 'two_isolates', 'run_beam'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|api_memory_gate|core_allocation_lifetime|core_memory_scope|core_work_ledger|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|api_memory_gate|core_allocation_lifetime|core_memory_scope|core_work_ledger|core_work_runtime_gate|api_work_gate|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
                 raise RuntimeError('UBSan float segments differ from stock-OTP vectors')
             run('flatmap-ubsan', [out / 'engine-ubsan/core_flatmap_test', binary_fixture])
@@ -660,6 +665,8 @@ def main():
             run('pid-ubsan', [out / 'engine-ubsan/core_pid_test', pid_fixture, fun_target_fixture, fun_fixture])
             run('api-memory-ubsan', [out / 'engine-ubsan/api_memory_test', memory_fixture])
             run('core-memory-gc-ubsan', [out / 'engine-ubsan/core_memory_test', memory_fixture])
+            run('core-work-runtime-ubsan', [out / 'engine-ubsan/core_work_runtime_test', work_fixture])
+            run('api-work-runtime-ubsan', [out / 'engine-ubsan/api_work_test', work_fixture])
             run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, fun_fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
@@ -667,6 +674,8 @@ def main():
             run('release-ctest', ['ctest', '--test-dir', out / 'release', '--output-on-failure'])
             run('api-memory-release', [out / 'release/api_memory_test', memory_fixture])
             run('core-memory-gc-release', [out / 'release/core_memory_test', memory_fixture])
+            run('core-work-runtime-release', [out / 'release/core_work_runtime_test', work_fixture])
+            run('api-work-runtime-release', [out / 'release/api_work_test', work_fixture])
             run('runner-release', [out / 'release/run_beam', '--entry', 'probe', 'request',
                  '--boot', 'boot', '', '--expect-boot', 'A:ready', '--call', 'next', '--expect', 'A:1',
                  '--call', 'read', '--expect', 'A:1', '--isolate', probes[0], '--isolate', probes[0]])

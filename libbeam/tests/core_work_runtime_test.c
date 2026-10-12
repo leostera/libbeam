@@ -1,0 +1,110 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright 2026 Leandro Ostera <leandro@ostera.io>
+ * Actual public-world calls on the shared worker; host never interprets BEAM.
+ */
+#define _POSIX_C_SOURCE 200809L
+#include "world_internal.h"
+#include "work_budget_internal.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#define CHECK(c) do { if(!(c)) { fprintf(stderr,"CHECK %d: %s\n",__LINE__,#c); abort(); } } while(0)
+static LbBytesView text(const char *s) { return (LbBytesView){(const unsigned char *)s,strlen(s)}; }
+static void tick(void) { struct timespec delay={0,1000000}; nanosleep(&delay,NULL); }
+static LbWorld *make(LbEngine *engine,LbBytesView beam,uint64_t work)
+{
+    LbWorld *world; LbResourceOverrides limits={.has_work=1,.invocation_work=work};
+    CHECK(lb_world_create_with_overrides(engine,&limits,&world)==LB_WORLD_OK);
+    LbWorldStatus loaded=lb_world_load(world,beam);
+    if(loaded!=LB_WORLD_OK) fprintf(stderr,"fixture load status=%d\n",loaded);
+    CHECK(loaded==LB_WORLD_OK); return world;
+}
+static LbCall *invoke(LbWorld *world,const char *function,int start)
+{
+    LbCall *call=NULL;
+    LbWorldStatus status=(start?lb_world_start:lb_world_call)(world,text("work_slice"),text(function),text("value"),&call);
+    if(status!=LB_WORLD_OK) fprintf(stderr,"admission %s status=%d\n",function,status);
+    CHECK(status==LB_WORLD_OK && call); return call;
+}
+static LbWorldStatus poll(LbCall *call,LbBytesView *out)
+{
+    for(unsigned i=0;i<10000;++i) {
+        LbWorldStatus status=lb_call_poll(call,out); if(status!=LB_WORLD_PENDING) return status;
+        tick();
+    }
+    CHECK(0); return LB_WORLD_PENDING;
+}
+static void consume(LbCall *call) { CHECK(lb_call_consume(call)==LB_WORLD_OK); lb_call_release(call); }
+static void retire(LbWorld *world)
+{
+    LbWorldResourceUsage usage; CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK);
+    if(!usage.closed) {
+        LbReclamation *r; CHECK(lb_world_stop(world,&r)==LB_WORLD_OK);
+        for(unsigned i=0;lb_reclamation_poll(r)==LB_WORLD_PENDING && i<10000;++i) tick();
+        CHECK(lb_reclamation_consume(r)==LB_WORLD_OK); lb_reclamation_release(r);
+    }
+    lb_world_release(world);
+}
+static uint64_t remaining(LbCall *call)
+{
+    LbEngine *engine=call->world->engine; lb_engine_enter(engine);
+    uint64_t value=call->budget->remaining; lb_engine_leave(engine); return value;
+}
+static void result(LbCall *call,const char *expected)
+{
+    LbBytesView out; CHECK(poll(call,&out)==LB_WORLD_OK);
+    CHECK(out.size==strlen(expected) && !memcmp(out.data,expected,out.size));
+}
+int main(int argc,char **argv)
+{
+    if(argc==1) return 0; CHECK(argc==2);
+    FILE *file=fopen(argv[1],"rb"); CHECK(file); CHECK(!fseek(file,0,SEEK_END)); long size=ftell(file); CHECK(size>0);
+    rewind(file); unsigned char *bytes=malloc((size_t)size); CHECK(bytes);
+    CHECK(fread(bytes,1,(size_t)size,file)==(size_t)size && !fclose(file)); LbBytesView beam={bytes,(size_t)size};
+    LbEngine *engine; CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK);
+    LbWorld *probe=make(engine,beam,1000000); LbCall *call=invoke(probe,"pure",1); result(call,"value");
+    uint64_t pure_cost=1000000-remaining(call); CHECK(pure_cost>1 && pure_cost<1000);
+    consume(call); retire(probe);
+    LbWorld *exact=make(engine,beam,pure_cost); call=invoke(exact,"pure",1); result(call,"value");
+    CHECK(remaining(call)==0); consume(call); retire(exact);
+    LbWorld *below=make(engine,beam,pure_cost-1); call=invoke(below,"pure",1);
+    LbBytesView out; CHECK(poll(call,&out)==LB_WORLD_WORK_LIMIT); consume(call); retire(below);
+    LbWorld *world=make(engine,beam,4096),*peer=make(engine,beam,4096);
+    LbCall *waiting=invoke(world,"waiting",1); tick(); uint64_t idle=remaining(waiting);
+    for(unsigned i=0;i<8;++i) tick(); CHECK(remaining(waiting)==idle);
+    call=invoke(world,"loop",0); CHECK(poll(call,&out)==LB_WORLD_WORK_LIMIT); consume(call);
+    LbWorldResourceUsage usage; CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && !usage.closed);
+    call=invoke(world,"pure",0); result(call,"value"); consume(call);
+    call=invoke(peer,"pure",1); result(call,"value"); consume(call);
+    CHECK(lb_call_cancel(waiting)==LB_WORLD_OK && poll(waiting,&out)==LB_WORLD_CANCELLED); consume(waiting);
+    call=invoke(world,"private_wait",0); CHECK(poll(call,&out)==LB_WORLD_WORK_LIMIT); consume(call);
+    CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && !usage.closed);
+    call=invoke(world,"background",0);
+    // The root reply survives later exhaustion of its old background allowance.
+    for(unsigned i=0;i<25;++i) tick(); result(call,"ready"); consume(call);
+    CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && !usage.closed);
+    call=invoke(world,"registered_wait",0);
+    int escaped=0;
+    for(unsigned i=0;i<10000 && !escaped;++i) {
+        lb_engine_enter(engine); escaped=call->budget->escaped; lb_engine_leave(engine); if(!escaped) tick();
+    }
+    CHECK(escaped && lb_call_cancel(call)==LB_WORLD_OK && poll(call,&out)==LB_WORLD_CANCELLED); consume(call);
+    CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && usage.closed);
+    LbWorld *unsafe=make(engine,beam,4096); call=invoke(unsafe,"escaped_wait",1);
+    CHECK(poll(call,&out)==LB_WORLD_WORK_LIMIT); consume(call);
+    CHECK(lb_world_resource_usage(unsafe,&usage)==LB_WORLD_OK && usage.closed);
+    call=invoke(peer,"pure",0); result(call,"value"); consume(call);
+    LbWorld *causal=make(engine,beam,1000000);
+    call=invoke(causal,"boot",1); result(call,"boot");
+    lb_engine_enter(engine); LbWorkBudget *birth=call->budget;
+    CHECK(lb_work_budget_retain(birth)==LB_ALLOC_OK); lb_engine_leave(engine); consume(call);
+    LbCall *noise=invoke(causal,"noise",0); result(noise,"noise"); uint64_t noise_before=remaining(noise);
+    call=invoke(causal,"request",0); result(call,"value"); consume(call);
+    lb_engine_enter(engine); uint64_t dormant=birth->remaining; lb_engine_leave(engine);
+    for(unsigned i=0;i<32;++i) { call=invoke(causal,"request",0); result(call,"value"); consume(call); }
+    CHECK(remaining(noise)<noise_before); // Skipped candidate work belongs to its original sender.
+    lb_engine_enter(engine); CHECK(birth->remaining==dormant); lb_work_budget_release(birth); lb_engine_leave(engine);
+    consume(noise);
+    retire(causal); retire(world); retire(unsafe); retire(peer); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); free(bytes);
+    printf("CORE_WORK_RUNTIME_OK pure_cost=%llu exact_threshold=true fresh_credit=true private_family_reuse=true idle_unspent=true background_retained=true escaped_retirement=true candidate_sender_charged=true birth_credit_not_borrowed=true peer_survives=true execution=shared_worker\n",(unsigned long long)pure_cost);
+}

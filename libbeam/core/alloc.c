@@ -2,6 +2,8 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  */
 #include "alloc_internal.h"
+#include "work_budget_internal.h"
+#include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +50,9 @@ LbAllocStatus lb_alloc_domain_allocate(LbAllocDomain *domain,size_t size,void **
     if(size>SIZE_MAX-sizeof(*block)) return failed(domain,domain->parent?LB_ALLOC_LIMIT:LB_ALLOC_NO_MEMORY);
     charge=sizeof(*block)+size;
     if(charge>domain->limit-domain->current) return failed(domain,LB_ALLOC_LIMIT);
+    /* Conservative initialization/preparation estimate; spare backing remains
+     * memory-charged independently. The allocation callback is not guest code. */
+    if(!lb_work_domain_charge(domain,1+size/128+(size%128!=0))) return LB_ALLOC_WORK_LIMIT;
     block=domain->system.allocate(domain->system.context,charge);
     if(!block) return failed(domain,LB_ALLOC_NO_MEMORY);
     block->info.next=domain->blocks; block->info.charge=charge; domain->blocks=block;
@@ -73,7 +78,7 @@ LbAllocStatus lb_alloc_domain_destroy(LbAllocDomain *domain)
 {
     LbSystemAllocator system;
     if(!domain || !domain->system.allocate) return LB_ALLOC_INVALID;
-    if(domain->blocks || domain->children) return LB_ALLOC_BUSY;
+    if(domain->blocks || domain->children || domain->work || domain->failed_work) return LB_ALLOC_BUSY;
     if(domain->current) abort();
     if(domain->parent) {
         if(!domain->parent->children) abort(); --domain->parent->children;
@@ -83,5 +88,31 @@ LbAllocStatus lb_alloc_domain_destroy(LbAllocDomain *domain)
 }
 LbAllocUsage lb_alloc_domain_usage(const LbAllocDomain *domain)
 { return (LbAllocUsage){domain->current,domain->peak,domain->limit}; }
-void lb_alloc_domain_begin_operation(LbAllocDomain *domain) { domain->failure=LB_ALLOC_OK; }
+void lb_alloc_domain_begin_operation(LbAllocDomain *domain) { assert(!domain->failed_work); domain->failure=LB_ALLOC_OK; }
 LbAllocStatus lb_alloc_domain_failure(const LbAllocDomain *domain) { return domain->failure; }
+/* Scalar credit checks live with the allocator primitive so raw allocator/image
+ * tools do not acquire a dependency on the Engine/executor merely to stay unmetered. */
+uint64_t lb_work_bulk_units(uint64_t quantity) { return quantity/16+(quantity%16!=0); }
+int lb_work_budget_charge(LbWorkBudget *budget,uint64_t units)
+{
+    if(!budget) return 1;
+    if(budget->exhausted) return 0;
+    if(units>budget->remaining) {
+        budget->remaining=0; budget->denied_charge=units; budget->exhausted=1; return 0;
+    }
+    budget->remaining-=units; return 1;
+}
+void lb_work_domain_borrow(LbAllocDomain *domain,LbWorkBudget *budget)
+{ assert(!budget || budget->domain==domain); domain->work=budget; }
+LbWorkBudget *lb_work_domain_owner(const LbAllocDomain *domain) { return domain->work; }
+int lb_work_domain_charge(LbAllocDomain *domain,uint64_t units)
+{
+    if(domain->failure==LB_ALLOC_WORK_LIMIT) return 0;
+    if(lb_work_budget_charge(domain->work,units)) return 1;
+    if(domain->failure==LB_ALLOC_OK) {
+        domain->failure=LB_ALLOC_WORK_LIMIT;
+        assert(domain->work && domain->work->references<SIZE_MAX);
+        ++domain->work->references; domain->failed_work=domain->work;
+    }
+    return 0;
+}

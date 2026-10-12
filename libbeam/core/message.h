@@ -7,6 +7,7 @@
 #define LIBBEAM_CORE_MESSAGE_H
 #include "fun.h"
 #include "process.h"
+#include "work_budget.h"
 typedef struct LbHeapFragment {
     struct LbHeapFragment *next;
     LbOffHeap off_heap;
@@ -19,6 +20,7 @@ typedef struct LbMessage {
     Eterm m[3]; /* message, sequence-trace token, sender */
     /* Owned sidecar after the native ErtsMessageRef prefix. */
     LbCodeSpace *space;
+    LbWorkBudget *budget; /* owned sender-causal lease, independent of moving terms */
     LbFunLease *leases;
     struct LbMessageQueue *queue; /* exclusive published ownership, NULL while prepared */
 } LbMessage;

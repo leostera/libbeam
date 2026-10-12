@@ -6,6 +6,7 @@
  * the schoolbook algorithm directly, not an incomplete D&C wrapper/fallback.
  */
 #include "decimal.h"
+#include "work_budget.h"
 #include "big.h"
 #include <string.h>
 #include <stdlib.h>
@@ -80,6 +81,8 @@ int lb_decimal_step(LbDecimal *d,size_t word_budget,size_t *work)
     size_t used=0; Uint remainder;
     assert(d && word_budget && work);
     while(!d->done && used<word_budget) {
+        /* Division must not mutate the retained continuation without credit. */
+        if(!lb_work_domain_charge(d->domain,d->used+DECIMAL_DIGITS_PER_PASS+1)) { *work=used; return 0; }
         used+=d->used;
         if(d->quick) { remainder=d->digits[0]; d->done=1; }
         else {

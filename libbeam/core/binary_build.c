@@ -38,6 +38,8 @@ LbBinaryBuildStatus lb_binary_build_begin(LbProcess *p,const Uint *words,size_t 
     if(!p || !b) return LB_BUILD_INVALID;
     *b=(LbBinaryBuild){.result=THE_NON_VALUE,.float_info=NIL,.status=LB_BUILD_INVALID};
     if(live>MAX_REG || alloc>UINT32_MAX) return b->status;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1+3*(count/5)))
+        return b->status=LB_BUILD_NO_MEMORY;
     LbBinaryRegisters registers={p->reg,live,p->stop,(size_t)(p->hend-p->stop)};
     LbBinarySizeResult sized=lb_binary_size(registers,words,count,8u*(size_t)LB_MAX_BINARY_BYTES);
     /* Sizing preflight and sizing/writing scans are all bounded by the native
@@ -49,6 +51,9 @@ LbBinaryBuildStatus lb_binary_build_begin(LbProcess *p,const Uint *words,size_t 
     }
     if(sized.status==LB_BINARY_SIZE_LIMIT) return b->status=LB_BUILD_LIMIT;
     size_t bits=sized.as.bits,before; LbWritableStatus status;
+    /* Bounded complete segment writes and dead-register initialization. */
+    if(!lb_work_domain_charge(p->entry_module->space->domain,
+        lb_work_bulk_units((bits+7)/8)+lb_work_bulk_units(MAX_REG-live))) return b->status=LB_BUILD_NO_MEMORY;
     b->cost+=byte_cost((bits+7)/8);
     /* The verifier proves no operand needs these slots. Retire physical dead
      * aliases before private uniqueness checking, not just on a lucky GC. */

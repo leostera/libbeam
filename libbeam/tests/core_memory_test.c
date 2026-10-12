@@ -38,7 +38,11 @@ static LbProcess *prepared(LbWorld *world)
     CHECK(lb_atoms_find(world->space->atoms,m.data,m.size,&module)==LB_ATOM_OK);
     CHECK(lb_atoms_find(world->space->atoms,f.data,f.size,&function)==LB_ATOM_OK);
     CHECK(lb_code_entry_acquire(world->space,module,function,1,&entry)==LB_CODE_OK);
+    LbWorkBudget *budget=lb_work_budget_create(world); CHECK(budget);
+    LbWorkProcessLease lease; CHECK(lb_work_process_prepare(budget,&lease)==LB_ALLOC_OK);
     CHECK(lb_process_create_binary(entry,input,sizeof(input),1024*1024,&process)==LB_PROCESS_READY);
+    lb_work_process_publish(process,&lease); lb_work_budget_release(budget);
+    CHECK(!lease.birth && !lease.active && process->work_birth==process->work_active);
     lb_code_entry_release(entry); lb_engine_leave(world->engine); return process;
 }
 static void destroy(LbWorld *world,LbProcess *process)

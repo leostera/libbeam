@@ -27,6 +27,7 @@ LbProcess *lb_registry_lookup(LbCodeSpace *space,Eterm name,Uint *cost)
 {
     if(!space || !space->registry || !is_atom(name)) return NULL;
     for(LbRegisteredProcess *r=space->registry->bucket[bucket(name)];r;r=r->next) {
+        if(!lb_work_domain_charge(space->domain,1)) return NULL;
         if(cost && *cost<UINTPTR_MAX) ++*cost;
         if(r->name==name) return r->process;
     }
@@ -51,6 +52,8 @@ LbProcessStatus lb_registry_register(LbProcess *caller,Eterm name,Eterm pid)
     LbRegisteredProcess *r=memory;
     r->hash=atom_val(name); r->name=name; r->process=target; r->port=NULL;
     r->next=registry->bucket[bucket(name)];
+    /* A published name is reachable by later independent invocations. */
+    lb_work_budget_escape(caller->work_active); lb_work_budget_escape(target->work_birth);
     /* No allocation or interpreter re-entry after either association publishes. */
     registry->bucket[bucket(name)]=r; ++registry->count;
     target->registered=r; space->registry=registry;

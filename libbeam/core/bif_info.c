@@ -9,7 +9,10 @@ static LbCodeModule *find_module(LbProcess *p,Eterm name)
 {
     LbCodeModule *m;
     if(!is_atom(name)) return NULL;
-    for(m=p->entry_module->space->modules;m;m=m->next) if(m->name==name) return m;
+    for(m=p->entry_module->space->modules;m;m=m->next) {
+        if(!lb_work_domain_charge(m->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return NULL; }
+        if(m->name==name) return m;
+    }
     return NULL;
 }
 static int info_size(LbProcess *p,LbCodeModule *m,Eterm what,size_t *size)
@@ -60,6 +63,7 @@ Eterm lb_bif_module_info_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     for(i=0;i<5;++i) {
         if(!info_size(p,m,keys[i],&n) || !lb_size_add(size,n,&size)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }
     }
+    if(!lb_work_domain_charge(m->space->domain,size+lb_work_bulk_units(size))) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
     if(!lb_heap_reserve(p,size,1)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }
     hp=p->htop; checkpoint=p->off_heap.first;
     for(i=0;i<5;++i) {
@@ -80,6 +84,7 @@ Eterm lb_bif_module_info_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
     size_t size;
     (void)pc;
     if(!m || !info_size(p,m,what,&size)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(m->space->domain,size+lb_work_bulk_units(size))) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
     if(!lb_heap_reserve(p,size,2)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }
     hp=p->htop; result=build_info(p,m,what,&hp);
     if(is_non_value(result)) { p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE; }

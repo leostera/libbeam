@@ -10,8 +10,11 @@ or whole-application goal.**
 
 The [policy](0004-isolate-resource-policy.md) selected 256 MiB default accounted
 world memory and 10 million per-invocation work units before implementation.
-The new policy fields are resolved immutably at Engine/Isolate creation. Work
-settings are currently retained metadata, not enforced execution allowances yet.
+The policy fields are resolved immutably at Engine/Isolate creation. At this
+memory checkpoint work settings were metadata only. The later
+[invocation wiring checkpoint](0004-invocation-work-wiring.md) implements fresh
+credit/dispatch/causal ownership and replaces the interim cancellation heuristic;
+its native charging audit remains unfinished.
 
 ## Ownership and counters
 
@@ -66,8 +69,9 @@ failed construction unwinds the scope and leaves the Engine reusable. The defaul
 peak and resolved policy, including a retained closed control without revival.
 
 Loader/admission quota failure rolls back the unpublished allocation prefix.
-Runtime quota failure is a distinct memory-limit terminal status. A solitary
-private invocation can retire its own heap/task and leave loaded code reusable.
+Runtime quota failure is a distinct memory-limit terminal status. **Historical
+checkpoint boundary (superseded by the later invocation wiring):** a solitary
+private invocation could retire its own heap/task and leave loaded code reusable.
 If another same-world process is still active, the interim conservative policy
 closes/drains that world after publishing the originating limit outcome; peer
 worlds survive. The next causal-budget implementation must replace this interim

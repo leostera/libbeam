@@ -29,7 +29,7 @@ struct ByteView {
 
 enum class ErrorCode {
     not_implemented, invalid_argument, invalid_beam, unsupported, invalid_state, full, limit,
-    closed, cancelled, exception, timeout, busy, internal_error, memory_limit
+    closed, cancelled, exception, timeout, busy, internal_error, memory_limit, work_limit
 };
 struct Error {
     ErrorCode code;
@@ -52,7 +52,8 @@ struct ResourceUsage {
     bool closed;
 };
 // Finite positive policy resolved at creation. Accounted backing is not RSS.
-// Memory enforcement is implemented; invocation charging is under construction.
+// Memory and causal invocation charging/cancellation are implemented;
+// the complete admitted-native charging/failure audit remains under construction.
 
 class Call {
 public:
@@ -65,6 +66,9 @@ public:
     // Success transfers host-owned bytes. Timeout does not cancel the invocation;
     // the same handle can be waited on again. A terminal result is consumed once.
     Result<Bytes> wait_until(Deadline);
+    // Cancel a pending private family, or close its world after escaped effects.
+    // Already-ready results are not rewritten; no guest-state rollback is promised.
+    Status cancel();
 private:
     friend class Isolate;
     struct Impl;

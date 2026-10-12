@@ -24,7 +24,8 @@ typedef enum {
     LB_ALLOC_INVALID,
     LB_ALLOC_NO_MEMORY,
     LB_ALLOC_BUSY,
-    LB_ALLOC_LIMIT
+    LB_ALLOC_LIMIT,
+    LB_ALLOC_WORK_LIMIT
 } LbAllocStatus;
 typedef struct { size_t current,peak,limit; } LbAllocUsage;
 /* Serialized allocation-operation diagnostics. Callers clear the causal result

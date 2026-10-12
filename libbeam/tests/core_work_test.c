@@ -26,6 +26,10 @@ int main(void)
     size_t before=lb_alloc_domain_usage(&world->domain).current;
     LbWorkBudget *a=lb_work_budget_create(world),*b=lb_work_budget_create(world);
     CHECK(a && b && a!=b && lb_work_budget_usage(a).remaining==5);
+    LbWorkProcessLease prepared;
+    CHECK(lb_work_process_prepare(a,&prepared)==LB_ALLOC_OK && a->references==3);
+    lb_work_process_abort(&prepared);
+    CHECK(a->references==1 && !prepared.birth && !prepared.active);
     size_t owned=lb_alloc_domain_usage(&world->domain).current; CHECK(owned>before);
     CHECK(lb_work_budget_retain(a)==LB_ALLOC_OK); // A child/message lease, not a renewed allowance.
     a->references=SIZE_MAX;

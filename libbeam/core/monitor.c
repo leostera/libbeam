@@ -63,6 +63,7 @@ void lb_monitor_discard(LbMonitor *m)
 void lb_monitor_publish(LbMonitor *m,LbProcess *target)
 {
     if(m->refc || !target->identity.owner || target->entry_module->space!=m->origin_process->entry_module->space) abort();
+    lb_work_cross_effect(m->origin_process->work_active,target->work_birth);
     m->target_process=target; m->origin.other.item=target->identity.id;
     m->u.target.other.item=m->origin_process->identity.id;
     insert(&m->origin_process->monitors_origin,&m->origin);
@@ -79,7 +80,14 @@ static void flush(LbProcess *p,Eterm ref)
 {
     LbMessageQueue *q=&p->messages; LbMessage **saved=q->save,**link=&q->first;
     while(*link) {
-        LbMessage *message=*link; Eterm value=message->m[0];
+        LbMessage *message=*link;
+        LbAllocDomain *domain=p->entry_module->space->domain;
+        LbWorkBudget *prior=lb_work_domain_owner(domain);
+        lb_work_domain_borrow(domain,message->budget);
+        int charged=lb_work_domain_charge(domain,1);
+        lb_work_domain_borrow(domain,prior);
+        if(!charged) { p->status=LB_PROCESS_WORK_LIMIT; break; }
+        Eterm value=message->m[0];
         if(is_tuple(value)) {
             Eterm *tuple=tuple_val(value);
             if(arityval(tuple[0])==5 && tuple[1]==am_DOWN && equal_ref(tuple[2],ref)) {
@@ -97,6 +105,7 @@ void lb_monitor_demonitor(LbProcess *p,Eterm ref,int do_flush)
 {
     LbMonitorNode *first=p->monitors_origin,*node=first;
     if(node) do {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return; }
         LbMonitor *m=owner(node); node=node->node.list.next;
         if(equal_ref(m->ref,ref)) { detach(m); break; }
     } while(node!=first);
@@ -124,6 +133,7 @@ void lb_monitor_exit(LbProcess *p,int notify)
                 LbMessage *message; Uint cost;
                 status=lb_message_create(p->entry_module->space,make_boxed(tuple),&message,&cost);
                 if(status==LB_PROCESS_READY) {
+                    lb_work_cross_effect(p->work_active,origin->work_birth);
                     status=lb_message_queue_append(&origin->messages,message);
                     if(status!=LB_PROCESS_READY) lb_message_destroy(message);
                 }

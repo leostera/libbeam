@@ -55,6 +55,7 @@ static Eterm integer_plus(LbProcess *p,Eterm a,Eterm b)
     size=lb_big_size(a)>lb_big_size(b)?lb_big_size(a):lb_big_size(b);
     if(size>LB_BIG_ARITY_MAX) return fail(p,LB_EXC_SYSTEM_LIMIT);
     size+=2;
+    if(!lb_work_domain_charge(domain,2*size+1)) return no_memory(p);
     if(!lb_size_mul(size,sizeof(Eterm),&bytes) || lb_alloc_domain_allocate(domain,bytes,&memory)!=LB_ALLOC_OK) return no_memory(p);
     words=memory; result=lb_big_plus(a,b,words);
     p->last_native_cost=size/16+1; /* native ERTS_ARITH_WORDS_PER_REDUCTION */
@@ -77,6 +78,8 @@ static Eterm float_plus(LbProcess *p,Eterm a,Eterm b)
 {
     fenv_t previous; double left,right,sum=0; Eterm words[2]; int valid;
     _Static_assert(sizeof(double)==sizeof(Eterm),"Native flat-64 float payload");
+    uint64_t work=1+(lb_is_big(a)?lb_big_size(a):0)+(lb_is_big(b)?lb_big_size(b):0);
+    if(!lb_work_domain_charge(p->entry_module->space->domain,work)) return no_memory(p);
     /* The host may use another rounding mode or enabled FP traps. This scope
      * never exposes those settings to guest arithmetic, nor changes the host
      * control thread. Restore the worker's environment before any allocation. */

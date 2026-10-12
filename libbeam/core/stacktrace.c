@@ -15,9 +15,11 @@ static int lookup(LbCodeSpace *space,const BeamInstr *pc,LbMFA *mfa)
 {
     Uint address=(Uint)pc;
     for(LbCodeModule *m=space->modules;m;m=m->next) {
+        if(!lb_work_domain_charge(space->domain,1)) return 0;
         if(address<(Uint)m->words || address>=(Uint)(m->words+m->word_count)) continue;
         size_t count=lb_code_module_function_count(m);
         for(size_t i=0;i<count;++i) {
+            if(!lb_work_domain_charge(space->domain,1)) return 0;
             const BeamInstr *info=(const BeamInstr *)m->words[i];
             Uint end=i+1<count?m->words[i+1]:(Uint)(m->words+m->word_count);
             if(address>=(Uint)info && address<end) {
@@ -89,6 +91,7 @@ LbProcessStatus lb_error_down_reason(LbProcess *p,Eterm *out)
      * adjustment, bounded depth. Trace-return frames cannot be admitted by
      * this runtime, and the host return is not an Erlang continuation. */
     for(Eterm *ptr=p->stop;ptr<p->hend && depth<TRACE_DEPTH;++ptr) {
+        if(!lb_work_domain_charge(space->domain,1)) return LB_PROCESS_WORK_LIMIT;
         if((*ptr&7u)!=0 || !*ptr) continue;
         const BeamInstr *cp=(const BeamInstr *)*ptr;
         if(cp==previous || cp==lb_host_return) continue;
@@ -100,6 +103,7 @@ LbProcessStatus lb_error_down_reason(LbProcess *p,Eterm *out)
      * Raw fvalue and the expanded reason are permanent moving process roots.
      * Frame storage above contains only atom words/arity, not heap pointers. */
     size_t need=depth*7+args_arity*2+6+5+3;
+    if(!lb_work_domain_charge(space->domain,args_arity+depth+lb_work_bulk_units(need))) return LB_PROCESS_WORK_LIMIT;
     if(!lb_heap_reserve(p,need,MAX_REG)) return LB_PROCESS_NO_MEMORY;
     if(wrapper) {
         Eterm *tuple=tuple_val(p->fvalue);

@@ -19,7 +19,10 @@ int main(int argc,char** argv) {
     CHECK(file.read(reinterpret_cast<char*>(code.data()),length));
     auto engine=take(Engine::create()); Bytes input(65,0x59),kept;
     {
-        auto a=take(engine.create_isolate()),b=take(engine.create_isolate());
+        // This gate tests explicit stop, not the independently tested work threshold.
+        // Release can finish the old default allowance during the peer's large memset.
+        ResourceOverrides stopping; stopping.invocation_work_limit=UINT64_MAX;
+        auto a=take(engine.create_isolate(stopping)),b=take(engine.create_isolate());
         CHECK(!a.load_module(view(code)) && !b.load_module(view(code)));
         auto loop=take(a.start("writable_init_slice","loop",view(input)));
         auto peer=take(b.start("writable_init_slice","saved",view(input))); kept=take(peer.wait_until(deadline())); CHECK(kept==input);

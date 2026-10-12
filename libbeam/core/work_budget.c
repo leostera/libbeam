@@ -3,6 +3,7 @@
  */
 #include "work_budget_internal.h"
 #include "world_internal.h"
+#include "process_internal.h"
 LbWorkBudget *lb_work_budget_create(LbWorld *world)
 {
     void *memory;
@@ -10,7 +11,7 @@ LbWorkBudget *lb_work_budget_create(LbWorld *world)
     assert(world->engine->control_borrow); // Only an independently admitted host invocation creates credit.
     if(lb_alloc_domain_allocate(&world->domain,sizeof(LbWorkBudget),&memory)!=LB_ALLOC_OK) return NULL;
     LbWorkBudget *budget=memory; memset(budget,0,sizeof(*budget));
-    budget->world=world; budget->references=1;
+    budget->world=world; budget->domain=&world->domain; budget->references=1;
     budget->limit=budget->remaining=world->limits.invocation_work;
     budget->next=world->budgets; world->budgets=budget; return budget;
 }
@@ -28,19 +29,66 @@ void lb_work_budget_release(LbWorkBudget *budget)
     if(--budget->references) return;
     LbWorld *world=budget->world; LbWorkBudget **link;
     for(link=&world->budgets;*link && *link!=budget;link=&(*link)->next) {}
-    if(!*link) abort(); *link=budget->next;
+    if(!*link || budget->call || world->domain.work==budget) abort(); *link=budget->next;
     lb_release(&world->domain,budget);
-}
-int lb_work_budget_charge(LbWorkBudget *budget,uint64_t units)
-{
-    if(!budget) return 1;
-    if(budget->exhausted) return 0;
-    if(units>budget->remaining) {
-        budget->remaining=0; budget->denied_charge=units; budget->exhausted=1; return 0;
-    }
-    budget->remaining-=units; return 1;
 }
 void lb_work_budget_escape(LbWorkBudget *budget) { if(budget) budget->escaped=1; }
 LbWorkUsage lb_work_budget_usage(const LbWorkBudget *budget)
 { return (LbWorkUsage){budget->limit,budget->remaining,budget->denied_charge,budget->exhausted,budget->escaped}; }
-uint64_t lb_work_bulk_units(uint64_t quantity) { return quantity/16+(quantity%16!=0); }
+LbAllocStatus lb_work_process_prepare(LbWorkBudget *budget,LbWorkProcessLease *out)
+{
+    if(!out) return LB_ALLOC_INVALID;
+    *out=(LbWorkProcessLease){0};
+    LbAllocStatus status=lb_work_budget_retain(budget);
+    if(status!=LB_ALLOC_OK) return status;
+    status=lb_work_budget_retain(budget);
+    if(status!=LB_ALLOC_OK) { lb_work_budget_release(budget); return status; }
+    out->birth=out->active=budget; return LB_ALLOC_OK;
+}
+void lb_work_process_abort(LbWorkProcessLease *lease)
+{
+    lb_work_budget_release(lease->birth); lb_work_budget_release(lease->active);
+    *lease=(LbWorkProcessLease){0};
+}
+void lb_work_process_publish(LbProcess *process,LbWorkProcessLease *lease)
+{
+    assert(!process->work_birth && !process->work_active && !process->work_previous && !process->work_candidate);
+    assert(!lease->birth || process->entry_module->space==lease->birth->world->space);
+    process->work_birth=lease->birth; process->work_active=lease->active;
+    *lease=(LbWorkProcessLease){0};
+}
+void lb_work_process_release(LbProcess *process)
+{
+    lb_work_budget_release(process->work_birth); lb_work_budget_release(process->work_active);
+    lb_work_budget_release(process->work_previous);
+    process->work_birth=process->work_active=process->work_previous=NULL; process->work_candidate=NULL;
+}
+void lb_work_domain_clear_failure(LbAllocDomain *domain)
+{
+    assert(!domain->work);
+    LbWorkBudget *failed=domain->failed_work; domain->failed_work=NULL;
+    lb_work_budget_release(failed);
+}
+void lb_work_cross_effect(LbWorkBudget *source,LbWorkBudget *target)
+{
+    if(source!=target) { lb_work_budget_escape(source); lb_work_budget_escape(target); }
+}
+int lb_work_receive_begin(LbProcess *process,LbMessage *candidate)
+{
+    if(!candidate || process->work_candidate==candidate) return 1;
+    if(process->work_candidate) abort();
+    if(lb_work_budget_retain(candidate->budget)!=LB_ALLOC_OK) return 0;
+    process->work_previous=process->work_active; // Transfer, not an additional lease.
+    process->work_active=candidate->budget; process->work_candidate=candidate;
+    lb_work_domain_borrow(process->entry_module->space->domain,process->work_active);
+    return 1;
+}
+void lb_work_receive_end(LbProcess *process,int consumed)
+{
+    if(!process->work_candidate) return; // Explicit unmetered raw component cursor.
+    LbWorkBudget *released=consumed?process->work_previous:process->work_active;
+    if(!consumed) process->work_active=process->work_previous;
+    process->work_previous=NULL; process->work_candidate=NULL;
+    lb_work_domain_borrow(process->entry_module->space->domain,process->work_active);
+    lb_work_budget_release(released);
+}

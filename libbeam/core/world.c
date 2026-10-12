@@ -5,6 +5,7 @@
 #include "world_internal.h"
 #include "binary.h"
 #include "bit_copy.h"
+#include "work_budget_internal.h"
 
 static LbWorldStatus code_status(LbCodeStatus status)
 {
@@ -141,13 +142,23 @@ static LbWorldStatus admit(LbWorld *world,LbBytesView module,LbBytesView functio
     }
     call=memory; memset(call,0,sizeof(*call)); call->world=world;
     call->status=LB_WORLD_PENDING; call->owner_live=1; call->slot_held=1; call->charge=charge;
+    call->budget=lb_work_budget_create(world);
+    if(!call->budget) {
+        lb_release(world->engine->domain,call); status=memory_status(world,LB_WORLD_NO_MEMORY); goto release_entry;
+    }
+    lb_work_domain_borrow(&world->domain,call->budget);
     task_status=lb_task_create_call_locked(world->engine,entry,input,call,&call->task);
+    lb_work_domain_borrow(&world->domain,NULL);
+    lb_work_domain_clear_failure(&world->domain);
     if(task_status!=LB_ENGINE_OK) {
+        lb_work_budget_release(call->budget);
         lb_release(world->engine->domain,call);
-        status=memory_status(world,task_status==LB_ENGINE_NO_MEMORY?LB_WORLD_NO_MEMORY:LB_WORLD_INVALID); goto release_entry;
+        status=lb_alloc_domain_failure(&world->domain)==LB_ALLOC_WORK_LIMIT?LB_WORLD_WORK_LIMIT:
+            memory_status(world,task_status==LB_ENGINE_NO_MEMORY?LB_WORLD_NO_MEMORY:LB_WORLD_INVALID); goto release_entry;
     }
     /* Worker publication is protected by the same mutex. No fallible work
      * follows; failed start never leaves a half-started world or lost status. */
+    call->budget->call=call;
     call->next=world->calls; world->calls=call; ++world->references;
     ++world->outstanding; world->queued_bytes+=charge;
     if(starting) world->phase=LB_WORLD_RUNNING;
@@ -168,8 +179,10 @@ static LbWorldStatus copy_result(LbCall *call,LbProcess *process)
     if(!lb_bitstring_view(lb_process_result(process),&view) || view.bit_size%8) return LB_WORLD_BAD_RESULT;
     size=view.bit_size/8; if(size>LB_CALL_BYTES_LIMIT) return LB_WORLD_LIMIT;
     if(!size) return LB_WORLD_OK;
+    if(!lb_work_domain_charge(&call->world->domain,lb_work_bulk_units(size))) return LB_WORLD_WORK_LIMIT;
     if(lb_alloc_domain_allocate(&call->world->domain,size,&memory)!=LB_ALLOC_OK)
-        return memory_status(call->world,LB_WORLD_NO_MEMORY);
+        return lb_alloc_domain_failure(&call->world->domain)==LB_ALLOC_WORK_LIMIT?LB_WORLD_WORK_LIMIT:
+            memory_status(call->world,LB_WORLD_NO_MEMORY);
     call->bytes=memory; call->size=size;
     /* Valid owned views fit their backing binary. Treat broken internal
      * metadata as an invariant violation, not a successful truncated reply. */
@@ -188,12 +201,16 @@ void lb_call_complete(LbCall *call,LbProcess *process,LbTaskStatus status)
     case LB_TASK_EXCEPTION: call->status=LB_WORLD_EXCEPTION; break;
     case LB_TASK_NO_MEMORY: call->status=LB_WORLD_NO_MEMORY; break;
     case LB_TASK_MEMORY_LIMIT: call->status=LB_WORLD_MEMORY_LIMIT; break;
+    case LB_TASK_WORK_LIMIT: call->status=LB_WORLD_WORK_LIMIT; break;
     case LB_TASK_LIMIT: call->status=LB_WORLD_RESOURCE_LIMIT; break;
     case LB_TASK_REFUSED: call->status=LB_WORLD_EXECUTION_REFUSED; break;
     case LB_TASK_ENVIRONMENT: call->status=LB_WORLD_ENVIRONMENT; break;
     case LB_TASK_CANCELLED: call->status=LB_WORLD_CANCELLED; break;
     default: abort();
     }
+    if(call->status==LB_WORLD_WORK_LIMIT && world->domain.failed_work && call->budget!=world->domain.failed_work)
+        call->status=LB_WORLD_CANCELLED; // Failure belongs to the causally selected sender, not this other root.
+    if(call->budget) call->budget->call=NULL; // No later background failure rewrites a terminal reply.
     call->charge=call->size;
     if(call->charge>LB_CALL_QUEUE_LIMIT-world->queued_bytes) abort();
     world->queued_bytes+=call->charge;
@@ -207,6 +224,7 @@ static void release_payload(LbCall *call)
     if(call->slot_held) {
         if(!world->outstanding) abort(); --world->outstanding; call->slot_held=0;
     }
+    lb_work_budget_release(call->budget); call->budget=NULL;
 }
 void lb_call_discard_completed(LbCall *call)
 {
@@ -237,6 +255,15 @@ LbWorldStatus lb_call_consume(LbCall *call)
         release_payload(call); call->consumed=1;
         lb_task_release_locked(call->task); call->task=NULL; status=LB_WORLD_OK;
     }
+    lb_engine_leave(engine); return status;
+}
+LbWorldStatus lb_call_cancel(LbCall *call)
+{
+    if(!call) return LB_WORLD_INVALID;
+    LbEngine *engine=call->world->engine; lb_engine_enter(engine);
+    LbWorldStatus status=call->consumed?LB_WORLD_CLOSED:
+        (call->status==LB_WORLD_PENDING?LB_WORLD_OK:LB_WORLD_INVALID_STATE);
+    if(status==LB_WORLD_OK) lb_task_cancel_family_locked(call->budget,LB_TASK_CANCELLED);
     lb_engine_leave(engine); return status;
 }
 void lb_call_release(LbCall *call)

@@ -38,8 +38,10 @@ static LbAllocStatus retain(LbCodeSpace *space,LbFunLease **leases,const LbFunEn
 {
     if(!space || !leases || !entry || !entry->owner || entry->owner->space!=space ||
        !entry->owner->published || !entry->dispatch.addresses[0] || entry->pend_purge_address) return LB_ALLOC_INVALID;
-    for(LbFunLease *lease=*leases;lease;lease=lease->next)
+    for(LbFunLease *lease=*leases;lease;lease=lease->next) {
+        if(!lb_work_domain_charge(space->domain,1)) return LB_ALLOC_WORK_LIMIT;
         if(lease->entry->owner==entry->owner) return LB_ALLOC_OK;
+    }
     if(entry->owner->users==SIZE_MAX) return LB_ALLOC_NO_MEMORY;
     void *memory;
     if(lb_alloc_domain_allocate(space->domain,sizeof(LbFunLease),&memory)!=LB_ALLOC_OK) return LB_ALLOC_NO_MEMORY;
@@ -60,6 +62,7 @@ static LbAllocStatus retain_roots(LbCodeSpace *space,LbFunLease **leases,Eterm t
     LbAllocDomain *domain=space->domain;
     LbAllocStatus status=LB_ALLOC_OK; todo[0]=term;
     while(count) {
+        if(!lb_work_domain_charge(domain,1)) { status=LB_ALLOC_WORK_LIMIT; break; }
         Eterm value=todo[--count]; const Eterm *children=NULL; size_t n=0;
         ++*cost;
         if(is_list(value)) { children=list_val(value); n=2; }
@@ -89,7 +92,11 @@ static LbAllocStatus retain_roots(LbCodeSpace *space,LbFunLease **leases,Eterm t
             if(todo!=local) lb_release(domain,todo);
             todo=grown; capacity=next;
         }
-        if(n) memcpy(todo+count,children,n*sizeof(Eterm)); count+=n;
+        if(n) {
+            if(!lb_work_domain_charge(domain,lb_work_bulk_units(n))) { status=LB_ALLOC_WORK_LIMIT; break; }
+            memcpy(todo+count,children,n*sizeof(Eterm));
+        }
+        count+=n;
     }
     if(todo!=local) lb_release(domain,todo); return status;
 }
@@ -160,10 +167,12 @@ LbAllocStatus lb_fun_prepare_instruction(LbProcess *p,const BeamInstr *pc,Uint *
     if(!space->has_fun_literals) return LB_ALLOC_OK;
     Uint address=(Uint)pc;
     for(LbCodeModule *module=space->modules;module;module=module->next) {
+        if(!lb_work_domain_charge(space->domain,1)) return LB_ALLOC_WORK_LIMIT;
         ++*cost;
         if(!contains_code(module,address)) continue;
         size_t index=(size_t)(pc-module->words);
         for(const LbLiteralFunUse *use=module->literal_fun_uses;use;use=use->next) {
+            if(!lb_work_domain_charge(space->domain,1)) return LB_ALLOC_WORK_LIMIT;
             ++*cost;
             if(use->pc!=index) continue;
             LbAllocStatus status=lb_fun_retain(p,use->entry);
@@ -184,6 +193,7 @@ const BeamInstr *lb_fun_call(LbProcess *p,unsigned arity)
     if(!fun) { p->current=NULL; p->freason=LB_EXC_BADFUN; p->fvalue=value; return NULL; }
     const LbFunEntry *entry=fun->entry.fun; int retained=0;
     for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next) {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return NULL; }
         ++p->last_native_cost;
         if(lease->entry->owner==entry->owner) { retained=1; break; }
     }
@@ -196,6 +206,7 @@ const BeamInstr *lb_fun_call(LbProcess *p,unsigned arity)
         if(arity+count>MAX_ARG || entry->arity!=(int)arity) { p->status=LB_PROCESS_INVALID; return NULL; }
         int found=0;
         for(size_t i=0;i<lb_code_module_function_count(entry->owner);++i) {
+            if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return NULL; }
             const BeamInstr *info=(const BeamInstr *)entry->owner->words[i]; ++p->last_native_cost;
             if(info+sizeof(LbCodeInfo)/sizeof(BeamInstr)==entry->dispatch.addresses[0]) {
                 found=info[sizeof(LbCodeInfo)/sizeof(BeamInstr)-1]==arity+count; break;

@@ -24,8 +24,10 @@ available UBSan. Whole Midgard/Elixir application compatibility is still being
 constructed; [the earlier application attempt](../../docs/rfds/0003-midgard-application-attempt.md)
 records a real refusal, not execution. [RFD 0004](../../docs/rfds/0004-isolate-resource-policy.md)
 selects memory/invocation policy. [World memory accounting/enforcement](../../docs/rfds/0004-accounted-memory.md)
-is implemented; invocation work charging and full causal-family cancellation are
-still under construction.
+is implemented. [Invocation wiring](../../docs/rfds/0004-invocation-work-wiring.md)
+now charges actual worker dispatch/native paths and uses owned causal credits and
+private-family/escaped-world cancellation. Native coverage and failure-boundary
+audit remain unfinished; this is not resource-milestone or application completion.
 
 ## Boundaries
 
@@ -153,7 +155,7 @@ still under construction.
   rounding in integer arithmetic. Each process owns its soft pressure threshold;
   fresh offheap construction can collect without exhausting term-heap space.
   Collection accounts both retained-capacity chains, not a hard quota or native
-  generational/apparent-size accounting. Instruction work policy is still pending.
+  generational/apparent-size accounting. Instruction/causal work charging is implemented with a continuing native-path audit.
 - `exception.c`: native scalar reason codes and error-value expansion. The
   executor owns expanded terminal values as real GC roots; reason flags are
   not terms. Binary failure preparation atomically sets extended payload/code.

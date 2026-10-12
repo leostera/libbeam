@@ -9,6 +9,7 @@
 #include "flatmap.h"
 #include "reference.h"
 #include "fun.h"
+#include "work_budget.h"
 #include <stdlib.h>
 
 typedef unsigned char byte;
@@ -89,11 +90,13 @@ LbAllocStatus lb_term_equal(LbAllocDomain *domain,Eterm a,Eterm b,int *equal)
 tailrecur:
     if(a==b) goto pop_next;
 tailrecur_ne:
+    if(!lb_work_domain_charge(domain,1)) goto no_memory;
     switch(primary_tag(a)) {
     case TAG_PRIMARY_LIST:
         if(is_list(b)) {
             Eterm *aval=list_val(a),*bval=list_val(b);
             for(;;) {
+                if(!lb_work_domain_charge(domain,1)) goto no_memory;
                 Eterm atmp=CAR(aval),btmp=CAR(bval);
                 if(atmp!=btmp) {
                     PUSH2(CDR(bval),CDR(aval)); a=atmp; b=btmp; goto tailrecur_ne;
@@ -136,6 +139,7 @@ tailrecur_ne:
             LbBitstringView av,bv;
             if(!lb_bitstring_view(a,&av)) abort();
             if(!lb_bitstring_view(b,&bv)) goto not_equal;
+            if(av.bit_size==bv.bit_size && !lb_work_domain_charge(domain,lb_work_bulk_units((av.bit_size+7)/8))) goto no_memory;
             if(lb_bitstrings_equal(av,bv)) goto pop_next;
             break;
         }
@@ -145,7 +149,10 @@ tailrecur_ne:
             aa=boxed_val(a); bb=boxed_val(b);
             if(*aa!=*bb) goto not_equal;
             i=*aa>>_HEADER_ARITY_OFFS;
-            while(i--) if(*++aa!=*++bb) goto not_equal;
+            while(i--) {
+                if(!lb_work_domain_charge(domain,1)) goto no_memory;
+                if(*++aa!=*++bb) goto not_equal;
+            }
             goto pop_next;
         }
         case FLOAT_SUBTAG:
@@ -166,6 +173,7 @@ term_array:
     {
         Eterm *ap=aa,*bp=bb; Sint i=sz;
         for(;;) {
+            if(!lb_work_domain_charge(domain,1)) goto no_memory;
             if(*ap!=*bp) break;
             if(--i==0) goto pop_next;
             ++ap; ++bp;

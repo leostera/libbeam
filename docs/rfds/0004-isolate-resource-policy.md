@@ -3,7 +3,9 @@
 
 # RFD 0004: Isolate memory and invocation execution policy
 
-Status: **Implementation direction selected for the whole-Midgard goal; enforcement not yet implemented.**
+Status: **Policy selected before enforcement. Accounted memory is implemented;
+[invocation wiring](0004-invocation-work-wiring.md) now has actual worker charging
+and causal cancellation, with native coverage/failure audit still unfinished.**
 
 ## Decision
 

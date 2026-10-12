@@ -6,6 +6,8 @@
 #include "work_budget.h"
 struct LbWorkBudget {
     LbWorld *world;
+    LbAllocDomain *domain;
+    struct LbCall *call; /* borrowed pending completion; cleared before it retires */
     LbWorkBudget *next;
     size_t references;
     uint64_t limit,remaining,denied_charge;

@@ -68,6 +68,7 @@ static LbProcessStatus create_owned(LbCodeModule *module,const BeamInstr *pc,con
 static int private_mfa(const LbCodeModule *module,const BeamInstr *pc,LbMFA *mfa)
 {
     for(size_t i=0;i<lb_code_module_function_count(module);++i) {
+        if(!lb_work_domain_charge(module->space->domain,1)) return 0;
         const BeamInstr *info=(const BeamInstr *)module->words[i];
         if(info+sizeof(LbCodeInfo)/sizeof(BeamInstr)!=pc) continue;
         memcpy(mfa,info+offsetof(LbCodeInfo,mfa)/sizeof(BeamInstr),sizeof(*mfa)); return 1;
@@ -105,6 +106,9 @@ LbProcessStatus lb_process_create_fun(LbProcess *parent,Eterm value,size_t words
         if(held!=LB_ALLOC_OK) {
             status=held==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_REFUSED; goto failure;
         }
+    }
+    if(!lb_work_domain_charge(module->space->domain,needed+lb_work_bulk_units(needed))) {
+        status=LB_PROCESS_WORK_LIMIT; goto failure;
     }
     for(size_t i=0;i<free;++i) {
         child->reg[i]=lb_copy_flat(fun->env[i],&child->htop,&child->off_heap);
@@ -164,6 +168,7 @@ void lb_process_destroy(LbProcess *p)
     lb_decimal_destroy(p->decimal);
     lb_offheap_clear(&p->off_heap);
     lb_offheap_clear(&p->writable);
+    lb_work_process_release(p);
     lb_release(d,p->heap); lb_release(d,p);
     if(!module->users) abort(); --module->users;
 }
@@ -275,12 +280,20 @@ dispatch:
         c_p->freason=LB_EXC_EXIT; c_p->fvalue=c_p->exception_value=am_killed;
         c_p->status=LB_PROCESS_EXCEPTION; goto stop;
     }
-    if(!pc_valid(c_p,I) || !VALID_INSTR(next_op) || (c_p->decimal && next_op!=op_call_bif_W)) goto malformed_code;
     if(!budget--) goto context_switch3;
+    /* Candidate examination is sender-causal, before import/removal/matching. */
+    if(next_op==op_i_loop_rec_f && !lb_work_receive_begin(c_p,*c_p->messages.save)) goto resource_limit;
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
+    /* pc_valid is also an assertion predicate: it must remain pure. Pay its
+     * frozen private-directory bound here, not from inside CHECK_ARGS. */
+    for(LbCodeModule *module=c_p->entry_module->space->modules;module;module=module->next)
+        if(!lb_work_domain_charge(module->space->domain,2)) goto work_failure;
+    if(!pc_valid(c_p,I) || !VALID_INSTR(next_op) || (c_p->decimal && next_op!=op_call_bif_W)) goto malformed_code;
     {
         Uint cost; LbAllocStatus held=lb_fun_prepare_instruction(c_p,I,&cost);
         FCALLS-=(Sint)cost;
         if(held==LB_ALLOC_NO_MEMORY) goto memory_failure;
+        if(held==LB_ALLOC_WORK_LIMIT) goto work_failure;
         if(held!=LB_ALLOC_OK) goto malformed_code;
     }
     switch(next_op) {
@@ -298,6 +311,7 @@ dispatch:
         if(c_p->decimal && function!=lb_bif_integer_to_binary_1) goto malformed_code;
         c_p->last_native_cost=0;
         value=function(c_p,reg,I); SWAPIN; FCALLS-=1+(Sint)c_p->last_native_cost;
+        if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;
         if(c_p->decimal) {
             /* Reenter this actual native trampoline on the next worker slice.
              * Heap collection cannot invalidate the independent continuation. */
@@ -327,6 +341,7 @@ context_switch3:
     c_p->flags &= ~(1u<<13); /* native F_DELAY_GC cannot cross schedule-out */
     c_p->status=LB_PROCESS_YIELDED; goto stop;
 find_func_info: {
+    if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;
     /* Materialize the native error value, not handle_error/stacktrace/catch.
      * Keep the original code/flags and extended payload for future handling.
      * Native error/3 arglist wrappers retain their raw payload separately;
@@ -353,6 +368,8 @@ environment_failure:
     c_p->status=LB_PROCESS_ENVIRONMENT; goto stop;
 resource_limit:
     c_p->status=LB_PROCESS_LIMIT; goto stop;
+work_failure:
+    c_p->status=LB_PROCESS_WORK_LIMIT; goto stop;
 memory_failure:
     /* The failed collection left the old roots intact. */
     c_p->status=LB_PROCESS_NO_MEMORY; goto stop;
@@ -365,8 +382,10 @@ stop:
     c_p->flags &= ~(1u<<13);
     /* Guest exit removes identity before publishing completion. The retained
      * process/result allocation may outlive that logical death. */
+    LbAllocStatus failure=lb_alloc_domain_failure(c_p->entry_module->space->domain);
+    if(failure==LB_ALLOC_WORK_LIMIT) c_p->status=LB_PROCESS_WORK_LIMIT;
     if(c_p->status!=LB_PROCESS_YIELDED) {
-        lb_monitor_exit(c_p,1);
+        lb_monitor_exit(c_p,c_p->status!=LB_PROCESS_WORK_LIMIT && failure!=LB_ALLOC_LIMIT);
         lb_registry_remove(c_p);
         c_p->receive_message=NULL; c_p->receive_root=NIL;
         lb_message_queue_clear(&c_p->messages);

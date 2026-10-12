@@ -6,6 +6,7 @@
  * or magic resources. Pin/sweep deliberately retain capacity until release.
  */
 #include "binary_internal.h"
+#include "work_budget.h"
 #include <stdlib.h>
 
 typedef union {
@@ -98,6 +99,7 @@ LbAllocStatus lb_bitstring_build(LbAllocDomain *domain,LbOffHeap *offheap,Eterm 
     if(!domain || !offheap || !heap || !*heap || !_is_taggable_pointer(*heap) || !out || !words ||
        (bits && !bytes) || (flags!=0 && flags!=TAG_LITERAL_PTR)) return LB_ALLOC_INVALID;
     size=(bits+7)/8; /* bounded above before rounding */
+    if(!lb_work_domain_charge(domain,1+lb_work_bulk_units(size))) return LB_ALLOC_WORK_LIMIT;
     if(size>LB_ONHEAP_BINARY_LIMIT) {
         if(!overhead_fits(offheap,size)) return LB_ALLOC_NO_MEMORY;
         binary=lb_binary_allocate(domain,size);

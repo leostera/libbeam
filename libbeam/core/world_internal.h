@@ -25,6 +25,7 @@ struct LbCall {
     LbWorld *world;
     LbCall *next;
     LbTask *task;
+    LbWorkBudget *budget;
     unsigned char *bytes;
     size_t size, charge;
     LbWorldStatus status;
@@ -44,6 +45,7 @@ LbProcessStatus lb_task_spawn_fun_locked(LbWorld *,LbProcess *,Eterm,Eterm *);
  * exposing the source process or interpreting on the host control thread. */
 LbProcessStatus lb_task_spawn_result_locked(LbWorld *,LbTask *,Eterm *);
 void lb_task_cancel_world_children_locked(LbWorld *);
+void lb_task_cancel_family_locked(LbWorkBudget *,LbTaskStatus);
 void lb_world_close_for_limit_locked(LbWorld *);
 void lb_task_cancel_locked(LbTask *);
 void lb_task_release_locked(LbTask *);

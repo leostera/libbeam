@@ -53,6 +53,7 @@ LbWritableStatus lb_writable_init(LbProcess *p,size_t capacity,Eterm *out)
     p->last_binary_bytes=0;
     if(capacity>LB_MAX_BINARY_BYTES) return LB_WRITABLE_LIMIT;
     if(!overhead_fits(p,capacity)) return LB_WRITABLE_NO_MEMORY;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,lb_work_bulk_units(capacity))) return LB_WRITABLE_NO_MEMORY;
     binary=lb_binary_allocate(p->entry_module->space->domain,capacity);
     if(!binary) return LB_WRITABLE_NO_MEMORY;
     memset(binary->orig_bytes,0,capacity); p->last_binary_bytes=capacity;
@@ -85,6 +86,7 @@ LbWritableStatus lb_binary_begin(LbProcess *p,size_t bits,size_t extra,LbBitWrit
     if(!words) return LB_WRITABLE_LIMIT;
     if(extra>SIZE_MAX-words || p->heap_reserved>SIZE_MAX-words) return LB_WRITABLE_NO_MEMORY;
     bytes=(bits+7)/8;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,lb_work_bulk_units(bytes))) return LB_WRITABLE_NO_MEMORY;
     if(bytes>LB_ONHEAP_BINARY_LIMIT) {
         if(!overhead_fits(p,bytes)) return LB_WRITABLE_NO_MEMORY;
         binary=lb_binary_allocate(p->entry_module->space->domain,bytes);
@@ -129,6 +131,9 @@ static LbWritableStatus prepare_backing(LbProcess *p,LbBinary *old,
     LbBinary *replacement;
     if(!old && capacity<256) capacity=256;
     if(!overhead_fits(p,capacity)) return LB_WRITABLE_NO_MEMORY;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,
+        lb_work_bulk_units(capacity)+lb_work_bulk_units(old?(size_t)old->orig_size:(view.bit_size+7)/8)))
+        return LB_WRITABLE_NO_MEMORY;
     replacement=lb_binary_allocate(p->entry_module->space->domain,capacity);
     if(!replacement) return LB_WRITABLE_NO_MEMORY;
     memset(replacement->orig_bytes,0,capacity);
@@ -210,6 +215,8 @@ static LbWritableStatus private_replacement(LbProcess *p,LbBinary *old,size_t by
     size_t capacity=grown_capacity(bytes),copy=(size_t)old->orig_size;
     LbBinary *binary;
     if(!overhead_fits(p,capacity)) return LB_WRITABLE_NO_MEMORY;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,lb_work_bulk_units(capacity)+lb_work_bulk_units(copy)))
+        return LB_WRITABLE_NO_MEMORY;
     binary=lb_binary_allocate(p->entry_module->space->domain,capacity);
     if(!binary) return LB_WRITABLE_NO_MEMORY;
     memset(binary->orig_bytes,0,capacity);

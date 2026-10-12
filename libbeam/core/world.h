@@ -17,7 +17,7 @@ typedef enum {
     LB_WORLD_BAD_BEAM, LB_WORLD_UNSUPPORTED, LB_WORLD_NOT_FOUND,
     LB_WORLD_EXCEPTION, LB_WORLD_CANCELLED, LB_WORLD_BAD_RESULT,
     LB_WORLD_RESOURCE_LIMIT, LB_WORLD_EXECUTION_REFUSED, LB_WORLD_ENVIRONMENT,
-    LB_WORLD_MEMORY_LIMIT
+    LB_WORLD_MEMORY_LIMIT, LB_WORLD_WORK_LIMIT
 } LbWorldStatus;
 typedef struct { const unsigned char *data; size_t size; } LbBytesView;
 #define LB_CALL_BYTES_LIMIT (64u * 1024u)
@@ -47,6 +47,9 @@ void lb_world_release(LbWorld *);
  * A host-copy allocation failure can leave a ready completion unconsumed. */
 LbWorldStatus lb_call_poll(LbCall *,LbBytesView *);
 LbWorldStatus lb_call_consume(LbCall *);
+/* Pending invocation cancellation uses causal containment, not state rollback.
+ * Private families permit reuse; escaped effects require world closure. */
+LbWorldStatus lb_call_cancel(LbCall *);
 void lb_call_release(LbCall *);
 LbWorldStatus lb_reclamation_poll(LbReclamation *);
 LbWorldStatus lb_reclamation_consume(LbReclamation *);

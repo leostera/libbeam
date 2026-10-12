@@ -76,6 +76,7 @@ void lb_receive_marker_use(LbProcess *p,Eterm reference)
     if(!ordinary_ref(reference)) return;
     LbRecvMarkerBlock *b=p->messages.markers; int i=find(b,reference);
     if(i<0) return;
+    lb_work_receive_end(p,0);
     p->receive_message=NULL; p->receive_root=NIL;
     p->messages.save=b->marker[i].prev_next;
 }

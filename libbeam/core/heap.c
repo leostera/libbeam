@@ -67,6 +67,17 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
        !lb_size_add(size,S_RESERVED,&size) || size>MAX_HEAP_WORDS) return 0;
     if(size<16) size=16;
     if(size<=MAX_HEAP_WORDS/2) size*=2;
+    /* Precharge all roots/copy/sweep and worst-case code-mark searches before
+     * forwarding. No work-budget check may fail inside the collector commit. */
+    uint64_t leases=0;
+    for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next) {
+        if(!lb_work_domain_charge(domain,1)) return 0;
+        ++leases;
+    }
+    uint64_t factor=used+live+2*stack+8,work=MAX_REG+2*used+2*stack+16;
+    if(leases && factor>(UINT64_MAX-work)/leases) return 0;
+    work+=factor*leases;
+    if(!lb_work_domain_charge(domain,work)) return 0;
     if(lb_alloc_domain_allocate(domain,size*sizeof(Eterm),&memory)!=LB_ALLOC_OK) return 0;
     heap=top=memory; stop=heap+size-stack;
     memcpy(stop,p->stop,stack*sizeof(Eterm));
@@ -131,6 +142,8 @@ int lb_heap_reserve_binary(LbProcess *p,size_t need,size_t incoming_bytes,size_t
 int lb_process_has_other_reference(const LbProcess *p,Eterm value,const Eterm *except)
 {
     const Eterm *scan; size_t i;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,
+        MAX_REG+(size_t)(p->hend-p->stop)+(size_t)(p->htop-p->heap))) return 1;
     for(i=0;i<MAX_REG;++i) if(&p->reg[i]!=except && p->reg[i]==value) return 1;
     for(scan=p->stop;scan<p->hend;++scan) if(scan!=except && *scan==value) return 1;
     if(p->fvalue==value || p->exception_value==value || p->construction_root==value) return 1;
@@ -165,6 +178,7 @@ int lb_flat_size(LbAllocDomain *domain,Eterm term,size_t *out)
     int ok=0;
     todo[0]=term;
     while(count) {
+        if(!lb_work_domain_charge(domain,1)) goto done;
         Eterm value=todo[--count],*children=NULL;
         size_t n=0,words=0;
         if(is_list(value)) { children=list_val(value); n=words=2; }
@@ -186,7 +200,10 @@ int lb_flat_size(LbAllocDomain *domain,Eterm term,size_t *out)
             if(todo!=local) lb_release(domain,todo);
             todo=next; capacity=new_capacity;
         }
-        if(n) { memcpy(todo+count,children,n*sizeof(Eterm)); count+=n; }
+        if(n) {
+            if(!lb_work_domain_charge(domain,lb_work_bulk_units(n))) goto done;
+            memcpy(todo+count,children,n*sizeof(Eterm)); count+=n;
+        }
     }
     *out=total; ok=1;
 done:

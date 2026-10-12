@@ -5,6 +5,7 @@
 #define LIBBEAM_CORE_ALLOC_INTERNAL_H
 #include "alloc.h"
 typedef union LbBlock LbBlock;
+typedef struct LbWorkBudget LbWorkBudget;
 /* Stable C metadata, embedded in a world's host control. Child backing is not
  * simultaneously charged to the shared Engine. Parent callback lifetime is
  * retained until the embedded child and every allocation have been released. */
@@ -14,6 +15,8 @@ struct LbAllocDomain {
     LbAllocDomain *parent;
     size_t children,current,peak,limit;
     LbAllocStatus failure;
+    LbWorkBudget *work; /* borrowed only within the serialized operation's owned lease */
+    LbWorkBudget *failed_work; /* owned first-failure attribution until outer cleanup */
 };
 /* Fresh zeroed storage only. A child is destroyed before its containing control.
  * Init performs no callback/allocation; destroy refuses live allocations/users. */

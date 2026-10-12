@@ -19,6 +19,7 @@ Error world_error(LbWorldStatus status) {
     case LB_WORLD_LIMIT: return {ErrorCode::limit, "transport limit exceeded"};
     case LB_WORLD_RESOURCE_LIMIT: return {ErrorCode::limit, "runtime resource limit exceeded"};
     case LB_WORLD_MEMORY_LIMIT: return {ErrorCode::memory_limit, "Isolate accounted memory limit exceeded"};
+    case LB_WORLD_WORK_LIMIT: return {ErrorCode::work_limit, "invocation work limit exceeded"};
     case LB_WORLD_EXECUTION_REFUSED: return {ErrorCode::unsupported, "execution outside admitted ownership profile"};
     case LB_WORLD_ENVIRONMENT: return {ErrorCode::internal_error, "floating-point environment failure"};
     case LB_WORLD_NO_MEMORY: return {ErrorCode::limit, "out of memory"};
@@ -217,6 +218,14 @@ Result<Bytes> Call::wait_until(Deadline deadline) {
         // Host-copy failure is retryable: the terminal C completion is untouched.
         return Error{ErrorCode::limit, {}};
     }
+}
+Status Call::cancel() {
+    try {
+        if (!usable(impl_)) return invalid_handle();
+        const auto status = lb_call_cancel(impl_->runtime);
+        if (status != LB_WORLD_OK) return world_error(status);
+        return std::nullopt;
+    } catch (const std::bad_alloc&) { return Error{ErrorCode::limit, {}}; }
 }
 Status Reclamation::wait_until(Deadline deadline) {
     try {
