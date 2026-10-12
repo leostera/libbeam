@@ -7,6 +7,7 @@
 #include "code_internal.h"
 #include "executor.h"
 #include "alloc_internal.h"
+#include "work_budget.h"
 typedef enum { LB_WORLD_LOADING, LB_WORLD_RUNNING, LB_WORLD_STOPPING, LB_WORLD_RECLAIMED } LbWorldPhase;
 struct LbWorld {
     LbEngine *engine;
@@ -15,6 +16,7 @@ struct LbWorld {
     LbCodeSpace *space;
     LbWorld *next;
     LbCall *calls;
+    LbWorkBudget *budgets;
     size_t references, outstanding, queued_bytes;
     LbWorldPhase phase;
     int owner_live;

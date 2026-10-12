@@ -53,7 +53,7 @@ endif()
 add_library(libbeam_core STATIC core/alloc.c core/utf8.c core/beam_image.c core/atoms.c
     core/opcodes.c core/beam_reader.c core/beam_program.c core/beam_decode.c
     core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c core/binary_match.c core/writable.c core/binary_error.c core/binary_size.c core/binary_vheap.c core/binary_build.c core/exception.c core/stacktrace.c core/pid_table.c core/bif_process.c core/fun.c core/message.c core/receive.c core/registry.c core/receive_marker.c core/monitor.c core/preloaded.c core/bit_copy.c core/bit_writer.c core/bit_float.c core/term_compare.c
-    core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/engine.c core/executor.c core/world.c core/md5.c core/process.c core/heap.c core/bif_info.c core/big.c core/bif_numeric.c core/decimal.c core/bif_decimal.c)
+    core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/engine.c core/executor.c core/world.c core/work_budget.c core/md5.c core/process.c core/heap.c core/bif_info.c core/big.c core/bif_numeric.c core/decimal.c core/bif_decimal.c)
 add_dependencies(libbeam_core libbeam_atom_definitions libbeam_opcode_definitions)
 target_link_libraries(libbeam_core PUBLIC ZLIB::ZLIB Threads::Threads m)
 target_include_directories(libbeam_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core ${LIBBEAM_ATOM_GEN} ${LIBBEAM_OPCODE_GEN})
@@ -99,6 +99,9 @@ if(BUILD_TESTING)
     set_tests_properties(beam_runner_invalid_cli PROPERTIES WILL_FAIL TRUE)
     add_test(NAME engine_lifecycle_acceptance COMMAND engine_lifecycle)
     set_tests_properties(engine_lifecycle_acceptance PROPERTIES TIMEOUT 20)
+    add_executable(core_work_test tests/core_work_test.c)
+    target_link_libraries(core_work_test PRIVATE libbeam_core)
+    add_test(NAME core_work_ledger COMMAND core_work_test)
     add_executable(core_memory_test tests/core_memory_test.c)
     target_link_libraries(core_memory_test PRIVATE libbeam_core)
     add_test(NAME core_memory_scope COMMAND core_memory_test)

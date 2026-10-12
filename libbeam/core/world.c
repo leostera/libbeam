@@ -28,7 +28,7 @@ static void world_unref(LbWorld *world)
     if(!world->references) abort();
     if(--world->references) return;
     if(!engine->control_borrow || world->owner_live || world->phase!=LB_WORLD_RECLAIMED || world->calls ||
-       world->outstanding || world->queued_bytes) abort();
+       world->outstanding || world->queued_bytes || world->budgets) abort();
     for(link=&engine->worlds;*link && *link!=world;link=&(*link)->next) {}
     if(!*link) abort();
     *link=world->next;
