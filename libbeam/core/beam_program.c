@@ -47,7 +47,7 @@ void lb_beam_program_destroy(LbBeamProgram *p)
     if(lb_alloc_domain_release(domain,p)!=LB_ALLOC_OK) abort();
 }
 static LbBeamStatus begin(LbAllocDomain *domain,LbAtomTable *atoms,const void *bytes,size_t size,
-                          LbBeamProgram **out,LbBeamError *error,int executable)
+                          LbBeamProgram **out,LbBeamError *error,int executable,int bind_atoms)
 {
     LbBeamProgram *p;
     const LbBeamImageInfo *info;
@@ -84,28 +84,30 @@ static LbBeamStatus begin(LbAllocDomain *domain,LbAtomTable *atoms,const void *b
     if(!lb_pliterals(p) || !lb_pmetadata(p) || !lb_pdecode(p)) goto fail;
     if(executable && !lb_pmodule_info(p)) goto fail;
     p->error.stage="atom admission";
-    names=lb_palloc(p,p->name_count,sizeof(*names));
-    terms=lb_palloc(p,p->name_count,sizeof(*terms));
-    if(!names || !terms) goto fail;
-    i=p->name_count;
-    for(patch=p->names;patch;patch=patch->next) names[--i]=patch->name;
     ast=lb_atoms_retain(atoms);
     if(ast!=LB_ATOM_OK) { lb_pfail(p,LB_BEAM_LIMIT); goto fail; }
     p->retained=1;
-    ast=lb_atoms_prepare_names(atoms,names,p->name_count,terms,&p->transaction);
-    if(ast!=LB_ATOM_OK) {
-        lb_pfail(p,ast==LB_ATOM_NO_MEMORY ? LB_BEAM_NO_MEMORY : ast==LB_ATOM_LIMIT ? LB_BEAM_LIMIT : LB_BEAM_BAD_FORMAT);
-        goto fail;
+    if(bind_atoms) {
+        names=lb_palloc(p,p->name_count,sizeof(*names));
+        terms=lb_palloc(p,p->name_count,sizeof(*terms));
+        if(!names || !terms) goto fail;
+        i=0;
+        for(patch=p->names;patch;patch=patch->next) names[i++]=patch->name;
+        ast=lb_atoms_prepare_names(atoms,names,p->name_count,terms,&p->transaction);
+        if(ast!=LB_ATOM_OK) {
+            lb_pfail(p,ast==LB_ATOM_NO_MEMORY ? LB_BEAM_NO_MEMORY : ast==LB_ATOM_LIMIT ? LB_BEAM_LIMIT : LB_BEAM_BAD_FORMAT);
+            goto fail;
+        }
+        /* Provisional atom identities are usable only inside this unpublished
+         * transaction. Code transformation/linking may still fail and abort it. */
+        i=0;
+        for(patch=p->names;patch;patch=patch->next) *patch->destination=terms[i++];
+        for(op=p->ops;op;op=op->next) for(i=0;i<op->arity;++i)
+            if(op->a[i].type==TAG_a) op->a[i].val=(Sint)p->file_atoms[op->a[i].val];
+        for(i=0;i<p->lambda_count;++i) p->lambdas[i].function=p->file_atoms[p->lambdas[i].function];
     }
-    /* Provisional atom identities are usable only inside this unpublished
-     * transaction. Code transformation/linking may still fail and abort it. */
-    i=p->name_count;
-    for(patch=p->names;patch;patch=patch->next) *patch->destination=terms[--i];
-    for(op=p->ops;op;op=op->next) for(i=0;i<op->arity;++i)
-        if(op->a[i].type==TAG_a) op->a[i].val=(Sint)p->file_atoms[op->a[i].val];
-    for(i=0;i<p->lambda_count;++i) p->lambdas[i].function=p->file_atoms[p->lambdas[i].function];
     *out=p;
-    if(error) *error=(LbBeamError){LB_BEAM_OK,0,"decoded; not executable"};
+    if(error) *error=(LbBeamError){LB_BEAM_OK,0,bind_atoms?"decoded; not executable":"decoded; atoms staged"};
     return LB_BEAM_OK;
 fail:
     if(p->error.status==LB_BEAM_OK) abort();
@@ -115,7 +117,56 @@ fail:
 LbBeamStatus lb_program_begin(LbAllocDomain *domain,LbAtomTable *atoms,const void *bytes,size_t size,
                               LbBeamProgram **out,LbBeamError *error)
 {
-    return begin(domain,atoms,bytes,size,out,error,1);
+    return begin(domain,atoms,bytes,size,out,error,1,1);
+}
+LbBeamStatus lb_program_begin_staged(LbAllocDomain *domain,LbAtomTable *atoms,const void *bytes,size_t size,
+                                     LbBeamProgram **out,LbBeamError *error)
+{
+    return begin(domain,atoms,bytes,size,out,error,1,0);
+}
+LbBeamStatus lb_program_bind_batch(LbBeamProgram *const *programs,size_t count)
+{
+    LbBeamProgram *first;
+    LbBeamBytes *names;
+    Eterm *terms;
+    LbNamePatch *patch;
+    LbBeamOp *op;
+    LbAtomTransaction *transaction=NULL;
+    LbAtomStatus status;
+    size_t total=0,at=0,i,j;
+    if(!programs || !count || !programs[0]) return LB_BEAM_INVALID_ARGUMENT;
+    first=programs[0];
+    for(i=0;i<count;++i) {
+        LbBeamProgram *p=programs[i];
+        if(!p || p->atoms!=first->atoms || p->transaction || !p->retained) return LB_BEAM_INVALID_ARGUMENT;
+        if(!lb_size_add(total,p->name_count,&total)) {
+            lb_pfail(first,LB_BEAM_LIMIT);
+            return LB_BEAM_LIMIT;
+        }
+    }
+    names=lb_palloc(first,total,sizeof(*names));
+    terms=lb_palloc(first,total,sizeof(*terms));
+    if(!names || !terms) return first->error.status;
+    for(i=0;i<count;++i) for(patch=programs[i]->names;patch;patch=patch->next) names[at++]=patch->name;
+    if(at!=total) abort();
+    status=lb_atoms_prepare_names(first->atoms,names,total,terms,&transaction);
+    if(status!=LB_ATOM_OK) {
+        first->error.stage="atom batch admission";
+        lb_pfail(first,status==LB_ATOM_NO_MEMORY?LB_BEAM_NO_MEMORY:
+            status==LB_ATOM_LIMIT?LB_BEAM_LIMIT:LB_BEAM_BAD_FORMAT);
+        return first->error.status;
+    }
+    at=0;
+    for(i=0;i<count;++i) {
+        LbBeamProgram *p=programs[i];
+        for(patch=p->names;patch;patch=patch->next) *patch->destination=terms[at++];
+        for(op=p->ops;op;op=op->next) for(j=0;j<op->arity;++j)
+            if(op->a[j].type==TAG_a) op->a[j].val=(Sint)p->file_atoms[op->a[j].val];
+        for(j=0;j<p->lambda_count;++j) p->lambdas[j].function=p->file_atoms[p->lambdas[j].function];
+    }
+    if(at!=total) abort();
+    first->transaction=transaction;
+    return LB_BEAM_OK;
 }
 void lb_program_commit(LbBeamProgram *p)
 {
@@ -124,7 +175,7 @@ void lb_program_commit(LbBeamProgram *p)
 LbBeamStatus lb_beam_program_prepare(LbAllocDomain *domain,LbAtomTable *atoms,const void *bytes,size_t size,
                                      LbBeamProgram **out,LbBeamError *error)
 {
-    LbBeamStatus status=begin(domain,atoms,bytes,size,out,error,0);
+    LbBeamStatus status=begin(domain,atoms,bytes,size,out,error,0,1);
     if(status==LB_BEAM_OK) lb_program_commit(*out);
     return status;
 }

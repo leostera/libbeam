@@ -26,7 +26,9 @@ records a real refusal, not execution. [RFD 0004](../../docs/rfds/0004-isolate-r
 selects memory/invocation policy. [World memory accounting/enforcement](../../docs/rfds/0004-accounted-memory.md)
 is implemented. [Invocation wiring](../../docs/rfds/0004-invocation-work-wiring.md)
 now charges every currently admitted worker dispatch/native path and uses owned
-causal credits with private-family/escaped-world cancellation. The current-profile
+causal credits with private-family/escaped-world cancellation. [Eager batch admission](../../docs/rfds/0004-eager-batch-admission.md)
+now stages exact-name module groups, resolves forward/mutual imports before a single
+no-fail atom/code publication, and retires cyclic dependency groups physically. The current-profile
 loop inventory and failure-boundary audit are recorded in RFD 0004; mandatory drain,
 allocator bookkeeping and teardown remain explicit exclusions, not a hard CPU cap.
 Debug/Release/UBSan actual-worker tests pin exact thresholds for decimal formatting,
@@ -138,10 +140,12 @@ checkpoint does not mean whole-Midgard execution or compatibility.
   from executable registers before native adjacency optimizations. Missing dependencies
   reject admission; they are never false/success-shaped helper implementations.
 - `code.c`: private export/module lookup, eager resolution of **all** imports,
-  atomic publication, retained entries/frames/import dependencies, and guarded
-  physical retirement. Construction requires an Engine, whose catalog is used
-  by import binding and transformation; mutable exports remain private.
-  No lazy loading, hot reload, NIF loading or root swapping.
+  atomic single-module or exact-name batch publication (including mutual
+  dependencies), retained entries/frames/import dependencies, and guarded
+  physical retirement. A cyclic group retires together only after every user
+  drains. Construction requires an Engine, whose catalog is used by import
+  binding and transformation; mutable exports remain private. No lazy loading,
+  hot reload, NIF loading or root swapping.
 - `process.c`, `heap.c`: explicit X/Y/continuation/reduction/exception state,
   bounded generated interpreter dispatch and selected copying-GC algorithms.
   Local calls use verified entry labels and native continuations; private-entry

@@ -87,20 +87,41 @@ LbWorldStatus lb_world_resource_usage(LbWorld *world,LbWorldResourceUsage *out)
     *out=(LbWorldResourceUsage){world->limits,usage.current,usage.peak,closed(world)};
     lb_engine_leave(world->engine); return LB_WORLD_OK;
 }
-LbWorldStatus lb_world_load_report(LbWorld *world,LbBytesView bytes,LbWorldLoadReport *report)
+LbWorldStatus lb_world_load_batch_report(LbWorld *world,const LbBytesView *modules,size_t count,
+                                               LbWorldLoadReport *report)
 {
-    LbWorldStatus status; LbCodeModule *module; LbBeamError error;
+    LbWorldStatus status; LbCodeInput single,*inputs=NULL; void *memory=NULL; size_t i,bytes;
+    LbBeamError error;
     if(report) *report=(LbWorldLoadReport){.stage="arguments"};
-    if(!world) return LB_WORLD_INVALID;
+    if(!world || !modules || !count) return LB_WORLD_INVALID;
+    if(count>LB_CODE_BATCH_MODULE_LIMIT) return LB_WORLD_LIMIT;
+    for(i=0;i<count;++i) if(!modules[i].data || !modules[i].size) return LB_WORLD_INVALID;
     lb_engine_enter(world->engine);
     if(closed(world)) status=LB_WORLD_CLOSED;
-    else if(bytes.size && !bytes.data) status=LB_WORLD_INVALID;
     else if(world->phase!=LB_WORLD_LOADING) status=LB_WORLD_INVALID_STATE;
     else {
         lb_alloc_domain_begin_operation(&world->domain);
-        status=memory_status(world,code_status(lb_code_load_report(world->space,bytes.data,bytes.size,&module,&error,report)));
+        if(count==1) {
+            single=(LbCodeInput){modules[0].data,modules[0].size};
+            inputs=&single;
+        } else if(!lb_size_mul(count,sizeof(*inputs),&bytes) ||
+                  lb_alloc_domain_allocate(&world->domain,bytes,&memory)!=LB_ALLOC_OK) {
+            status=memory_status(world,LB_WORLD_NO_MEMORY);
+            if(report) report->stage="batch input descriptors";
+            goto done;
+        } else {
+            inputs=memory;
+            for(i=0;i<count;++i) inputs[i]=(LbCodeInput){modules[i].data,modules[i].size};
+        }
+        status=memory_status(world,code_status(lb_code_load_batch(world->space,inputs,count,&error,report)));
+        if(memory && lb_alloc_domain_release(&world->domain,memory)!=LB_ALLOC_OK) abort();
     }
+done:
     lb_engine_leave(world->engine); return status;
+}
+LbWorldStatus lb_world_load_report(LbWorld *world,LbBytesView bytes,LbWorldLoadReport *report)
+{
+    return lb_world_load_batch_report(world,&bytes,1,report);
 }
 LbWorldStatus lb_world_load(LbWorld *world,LbBytesView bytes)
 {
@@ -282,9 +303,9 @@ void lb_call_release(LbCall *call)
 static void retire_one(LbWorld *world)
 {
     if(world->space->modules) {
-        /* Eager publication only imports older modules (or self). Retiring
-         * newest first is a reverse dependency order; no hot-load cycles exist. */
-        if(lb_code_unload(world->space->modules)!=LB_CODE_OK) abort();
+        /* A single eagerly-published batch may contain mutual import cycles;
+         * retire its closed namespace as one group after every user has drained. */
+        if(lb_code_unload_all(world->space)!=LB_CODE_OK) abort();
         return;
     }
     if(lb_code_space_destroy(world->space)!=LB_CODE_OK) abort();

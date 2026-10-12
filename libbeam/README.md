@@ -31,8 +31,10 @@ transforms/dispatch, copying GC, module-info BIFs and guarded code retirement.
 The [Engine lifecycle integration](../docs/rfds/0003-engine-lifecycle.md) connects
 that actual execution substrate to the C++ factory and passes the unchanged
 create/shutdown/recreate target. [Public Isolates and calls](../docs/rfds/0003-public-isolates.md)
-now execute the selected profile on the worker, with copied transport and physical
-reclamation. [Native numeric addition](../docs/rfds/0003-numeric-addition.md) now
+execute the selected profile on the shared worker, with copied transport and
+physical reclamation. [Eager batch admission](../docs/rfds/0004-eager-batch-admission.md)
+adds exact-name dependency groups with transactional atom/code publication and
+mutual-import retirement. [Native numeric addition](../docs/rfds/0003-numeric-addition.md)
 executes small/bignum/float semantics with fallible scratch and collection-safe Y
 destinations. [Decimal formatting](../docs/rfds/0003-decimal-continuations.md)
 uses owned worker continuations with peer progress and cancellation cleanup.
@@ -43,12 +45,14 @@ construction is still unadmitted.
 Full A03–A07 breadth and stateful process machinery remain unfinished. Native archive work below is diagnostic/reference evidence,
 not a fallback runtime for the new core.
 
-This directory contains build/link probes and an
-[API-first two-isolate example](examples/two_isolates.md). Its experimental C++
-library and CMake target now build and execute selected-profile modules. The
-unchanged example still refuses its unsupported stateful module during loading;
-no successful world execution or persistent process is faked.
-RFD 0003 supersedes the construction strategy in the earlier
+This directory contains build/link probes, an
+[API-first two-isolate example](examples/two_isolates.md), and a batch-admission
+path used by the example runner and public Isolate API. Its experimental C++
+library and CMake target execute selected-profile modules, including the admitted
+stateful fixtures. The unchanged Midgard `hello_worker` application remains
+unverified and still requires additional native/Elixir capabilities; the earlier
+[application attempt](../docs/rfds/0003-midgard-application-attempt.md) is a refusal,
+not success. RFD 0003 supersedes the construction strategy in the earlier
 [implementation plan](../docs/rfds/0002-example-implementation-plan.md), while
 retaining its real-engine, private-world, execution and reclamation goals.
 ## Preserved subtractive experiment (not the production runtime)

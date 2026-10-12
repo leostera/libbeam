@@ -72,7 +72,7 @@ struct LbCodeModule {
     LbCodeModule *next;
     Eterm name;
     BeamInstr *words;
-    size_t word_count, users, importers;
+    size_t word_count, users, importers, pending_importers;
     Export *exports;
     size_t export_count;
     Export **imports;
@@ -113,6 +113,9 @@ int lb_transform(LoaderState *);
 LbCodeStatus lb_emit(LoaderState *,BeamOp *);
 LbCodeStatus lb_finish_emit(LoaderState *);
 LbCodeStatus lb_compile_code(LbCodeModule *);
+LbCodeStatus lb_code_prepare_module(LbCodeModule *,LoaderState *);
+LbCodeStatus lb_code_resolve_imports(LoaderState *,LbCodeModule *const *,size_t);
+LbCodeStatus lb_code_compile_prepared(LoaderState *);
 LbCodeStatus lb_code_space_create_in_domain(LbEngine *,LbAllocDomain *,LbCodeSpace **);
 LbCodeStatus lb_verify_program(LoaderState *);
 int lb_instruction_supported(unsigned);

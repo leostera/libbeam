@@ -37,6 +37,8 @@ struct LbBeamProgram {
     size_t op_count;
 };
 LbBeamStatus lb_program_begin(LbAllocDomain *, LbAtomTable *, const void *, size_t, LbBeamProgram **, LbBeamError *);
+LbBeamStatus lb_program_begin_staged(LbAllocDomain *, LbAtomTable *, const void *, size_t, LbBeamProgram **, LbBeamError *);
+LbBeamStatus lb_program_bind_batch(LbBeamProgram *const *, size_t);
 void lb_program_commit(LbBeamProgram *);
 void *lb_palloc(LbBeamProgram *, size_t, size_t);
 int lb_pfail(LbBeamProgram *, LbBeamStatus);

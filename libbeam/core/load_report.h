@@ -6,10 +6,13 @@
 #include <stddef.h>
 /* Value-only loader diagnostic. Stage is static runtime metadata; names are
  * copied UTF-8 bytes, not atom handles, C strings or borrowed preparation data.
- * Native atoms have at most 255 code points (1020 UTF-8 bytes). */
+ * Batch errors optionally identify the input module index. Native atoms have at
+ * most 255 code points (1020 UTF-8 bytes). */
 typedef struct {
     const char *stage;
     size_t offset;
+    size_t module_index;
+    int has_module_index;
     int has_import;
     size_t module_size,function_size;
     unsigned arity;

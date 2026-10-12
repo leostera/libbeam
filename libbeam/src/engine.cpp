@@ -52,6 +52,22 @@ LbBytesView bytes(ByteView view) { return {view.data, view.size}; }
 LbBytesView name(std::string_view view) {
     return {reinterpret_cast<const unsigned char*>(view.data()), view.size()};
 }
+Error load_error(LbWorldStatus status, const LbWorldLoadReport& report) {
+    auto error = world_error(status);
+    if (status == LB_WORLD_BAD_BEAM || status == LB_WORLD_UNSUPPORTED || status == LB_WORLD_MEMORY_LIMIT) {
+        const std::string stage = report.stage ? report.stage : "unknown";
+        error.message += " (stage=" + stage +
+            (stage == "unresolved import" ? ", import_index=" : ", offset=") +
+            std::to_string(report.offset);
+        if (report.has_import) error.message += ", mfa=\"" +
+            diagnostic_name(report.module, report.module_size) + "\":\"" +
+            diagnostic_name(report.function, report.function_size) + "\"/" + std::to_string(report.arity);
+        if (report.has_module_index)
+            error.message += ", module_index=" + std::to_string(report.module_index);
+        error.message += ")";
+    }
+    return error;
+}
 bool wait_tick(Deadline deadline) {
     const auto now = std::chrono::steady_clock::now();
     if (now >= deadline) return false;
@@ -152,24 +168,23 @@ Status Engine::shutdown(Deadline deadline) {
 Status Isolate::load_module(ByteView input) {
     try {
         if (!usable(impl_)) return invalid_handle();
-        LbWorldLoadReport report;
-        const auto status = lb_world_load_report(impl_->runtime, bytes(input), &report);
-        if (status != LB_WORLD_OK) {
-            auto error = world_error(status);
-            if (status == LB_WORLD_BAD_BEAM || status == LB_WORLD_UNSUPPORTED || status == LB_WORLD_MEMORY_LIMIT) {
-                const std::string stage = report.stage ? report.stage : "unknown";
-                error.message += " (stage=" + stage +
-                    (stage == "unresolved import" ? ", import_index=" : ", offset=") +
-                    std::to_string(report.offset);
-                if (report.has_import) error.message += ", mfa=\"" +
-                    diagnostic_name(report.module, report.module_size) + "\":\"" +
-                    diagnostic_name(report.function, report.function_size) + "\"/" + std::to_string(report.arity);
-                error.message += ")";
-            }
-            return error;
-        }
-        return std::nullopt;
+        return load_modules(std::vector<ByteView>{input});
     } catch (const std::bad_alloc&) { return Error{ErrorCode::limit, {}}; }
+}
+Status Isolate::load_modules(const std::vector<ByteView>& modules) {
+    try {
+        if (!usable(impl_)) return invalid_handle();
+        std::vector<LbBytesView> views;
+        views.reserve(modules.size());
+        for (const auto& module : modules) views.push_back(bytes(module));
+
+        LbWorldLoadReport report{};
+        const auto status = lb_world_load_batch_report(impl_->runtime, views.data(), views.size(), &report);
+        if (status != LB_WORLD_OK) return load_error(status, report);
+        return std::nullopt;
+    } catch (const std::bad_alloc&) {
+        return Error{ErrorCode::limit, {}};
+    }
 }
 Result<Call> Isolate::invoke(bool starting, std::string_view module, std::string_view function, ByteView input) {
     try {

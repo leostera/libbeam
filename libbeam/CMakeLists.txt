@@ -94,9 +94,44 @@ target_link_libraries(run_beam PRIVATE libbeam::libbeam)
 
 include(CTest)
 if(BUILD_TESTING)
+    set(LIBBEAM_BATCH_FIXTURE_DIR ${CMAKE_CURRENT_BINARY_DIR}/fixtures/batch_admission)
+    set(LIBBEAM_BATCH_ALPHA ${LIBBEAM_BATCH_FIXTURE_DIR}/batch_alpha.beam)
+    set(LIBBEAM_BATCH_BETA ${LIBBEAM_BATCH_FIXTURE_DIR}/batch_beta.beam)
+    set(LIBBEAM_BATCH_UNSUPPORTED ${LIBBEAM_BATCH_FIXTURE_DIR}/batch_unsupported.beam)
+    add_custom_command(OUTPUT ${LIBBEAM_BATCH_ALPHA} ${LIBBEAM_BATCH_BETA} ${LIBBEAM_BATCH_UNSUPPORTED}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${LIBBEAM_BATCH_FIXTURE_DIR}
+        COMMAND ${LIBBEAM_ERLC} -o ${LIBBEAM_BATCH_FIXTURE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/batch_alpha.erl
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/batch_beta.erl
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/batch_unsupported.erl
+        DEPENDS tests/fixtures/batch_alpha.erl tests/fixtures/batch_beta.erl
+            tests/fixtures/batch_unsupported.erl
+        VERBATIM)
+    add_custom_target(libbeam_batch_fixtures DEPENDS
+        ${LIBBEAM_BATCH_ALPHA} ${LIBBEAM_BATCH_BETA} ${LIBBEAM_BATCH_UNSUPPORTED})
+    add_executable(core_batch_admission_test tests/core_batch_admission_test.c)
+    target_link_libraries(core_batch_admission_test PRIVATE libbeam_core)
+    add_dependencies(core_batch_admission_test libbeam_batch_fixtures)
+    add_test(NAME core_batch_admission
+        COMMAND core_batch_admission_test ${LIBBEAM_BATCH_ALPHA} ${LIBBEAM_BATCH_BETA} ${LIBBEAM_BATCH_UNSUPPORTED})
+    set_tests_properties(core_batch_admission PROPERTIES TIMEOUT 120)
+    add_executable(api_batch_admission_test tests/api_batch_admission_test.cpp)
+    target_link_libraries(api_batch_admission_test PRIVATE libbeam::libbeam)
+    add_dependencies(api_batch_admission_test libbeam_batch_fixtures)
+    add_test(NAME api_batch_admission
+        COMMAND api_batch_admission_test
+            ${LIBBEAM_BATCH_ALPHA} ${LIBBEAM_BATCH_BETA} ${LIBBEAM_BATCH_UNSUPPORTED})
+    set_tests_properties(api_batch_admission PROPERTIES TIMEOUT 30)
     add_test(NAME beam_runner_help COMMAND run_beam --help)
     add_test(NAME beam_runner_invalid_cli COMMAND run_beam --dependency missing.beam)
     set_tests_properties(beam_runner_invalid_cli PROPERTIES WILL_FAIL TRUE)
+    add_test(NAME beam_runner_eager_dependency_groups COMMAND run_beam
+        --entry batch_alpha entry
+        --isolate ${LIBBEAM_BATCH_ALPHA} --dependency ${LIBBEAM_BATCH_BETA}
+        --isolate ${LIBBEAM_BATCH_ALPHA} --dependency ${LIBBEAM_BATCH_BETA}
+        --call payload --expect payload --call repeated --expect repeated)
+    set_tests_properties(beam_runner_eager_dependency_groups PROPERTIES TIMEOUT 30)
+    add_dependencies(run_beam libbeam_batch_fixtures)
     add_test(NAME engine_lifecycle_acceptance COMMAND engine_lifecycle)
     set_tests_properties(engine_lifecycle_acceptance PROPERTIES TIMEOUT 20)
     add_executable(core_work_runtime_test tests/core_work_runtime_test.c)

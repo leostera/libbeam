@@ -9,6 +9,9 @@
 typedef struct LbCodeSpace LbCodeSpace;
 typedef struct LbCodeModule LbCodeModule;
 typedef struct LbCodeEntry LbCodeEntry;
+typedef struct { const unsigned char *data; size_t size; } LbCodeInput;
+#define LB_CODE_BATCH_MODULE_LIMIT 4096u
+#define LB_CODE_BATCH_BYTES_LIMIT (64u * 1024u * 1024u)
 typedef enum { LB_CODE_OK, LB_CODE_INVALID, LB_CODE_FORMAT, LB_CODE_UNSUPPORTED,
                LB_CODE_NO_MEMORY, LB_CODE_LIMIT, LB_CODE_BUSY, LB_CODE_NOT_FOUND,
                LB_CODE_EXISTS, LB_CODE_UNRESOLVED, LB_CODE_CLOSED } LbCodeStatus;
@@ -24,7 +27,14 @@ LbCodeStatus lb_code_space_destroy(LbCodeSpace *);
 LbAtomTable *lb_code_space_atoms(LbCodeSpace *); /* borrowed; no concurrent writer */
 LbCodeStatus lb_code_load_report(LbCodeSpace *, const void *, size_t, LbCodeModule **, LbBeamError *, LbLoadReport *);
 LbCodeStatus lb_code_load(LbCodeSpace *, const void *, size_t, LbCodeModule **, LbBeamError *);
+/* At most 4096 modules and 64 MiB aggregate encoded input per group. Atom
+ * identities and all code exports become visible in one no-fail commit. Inputs
+ * are copied into the world-owned preparation arena. Dependencies may
+ * refer forward or form cycles within this exact-name batch. */
+LbCodeStatus lb_code_load_batch(LbCodeSpace *, const LbCodeInput *, size_t, LbBeamError *, LbLoadReport *);
 LbCodeStatus lb_code_unload(LbCodeModule *); /* refuses frames/entries/importers */
+/* Whole-space retirement handles mutually importing module groups atomically. */
+LbCodeStatus lb_code_unload_all(LbCodeSpace *);
 LbCodeStatus lb_code_entry_acquire(LbCodeSpace *, Eterm module, Eterm function, unsigned arity, LbCodeEntry **);
 void lb_code_entry_release(LbCodeEntry *);
 /* Entry views retain the actual module, not a successfully allocated empty token. */

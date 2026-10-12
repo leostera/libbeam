@@ -36,6 +36,8 @@ LbWorldStatus lb_world_resource_usage(LbWorld *,LbWorldResourceUsage *);
  * the loader's byte/instruction location. It remains valid after rollback. */
 typedef LbLoadReport LbWorldLoadReport;
 LbWorldStatus lb_world_load_report(LbWorld *,LbBytesView,LbWorldLoadReport *);
+/* Eagerly admits one exact-name application/module group in one transaction. */
+LbWorldStatus lb_world_load_batch_report(LbWorld *,const LbBytesView *,size_t,LbWorldLoadReport *);
 LbWorldStatus lb_world_load(LbWorld *,LbBytesView);
 LbWorldStatus lb_world_start(LbWorld *,LbBytesView module,LbBytesView function,LbBytesView input,LbCall **);
 LbWorldStatus lb_world_call(LbWorld *,LbBytesView module,LbBytesView function,LbBytesView input,LbCall **);

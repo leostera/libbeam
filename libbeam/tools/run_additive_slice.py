@@ -98,6 +98,11 @@ def main():
                             root / 'libbeam/tools/otp/make_tables', root / 'libbeam/core/otp/atom.names', root / 'libbeam/core/otp/bif.tab',
                             root / 'libbeam/tests/fixtures/first_slice.erl',
                             root / 'libbeam/tests/api_engine_test.cpp', root / 'libbeam/tests/api_world_test.cpp',
+                            root / 'libbeam/tests/core_batch_admission_test.c', root / 'libbeam/tests/api_batch_admission_test.cpp',
+                            root / 'libbeam/tests/fixtures/batch_alpha.erl', root / 'libbeam/tests/fixtures/batch_beta.erl',
+                            root / 'libbeam/tests/fixtures/batch_unsupported.erl',
+                            root / 'libbeam/core/README.md', root / 'libbeam/README.md',
+                            root / 'docs/rfds/0004-eager-batch-admission.md',
                             root / 'libbeam/tests/core_engine_test.c',
                             root / 'libbeam/tests/core_executor_test.c', root / 'libbeam/tests/core_world_test.c',
                             root / 'libbeam/tests/core_local_test.c', root / 'libbeam/tests/fixtures/local_slice.erl',
@@ -619,9 +624,9 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'api_memory_test', 'core_memory_test', 'core_work_test', 'core_work_runtime_test', 'api_work_test', 'core_alloc_test', 'engine_lifecycle', 'two_isolates', 'run_beam'])
+                'core_engine_test', 'core_executor_test', 'core_batch_admission_test', 'api_batch_admission_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'api_memory_test', 'core_memory_test', 'core_work_test', 'core_work_runtime_test', 'api_work_test', 'core_alloc_test', 'engine_lifecycle', 'two_isolates', 'run_beam'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|api_memory_gate|core_allocation_lifetime|core_memory_scope|core_work_ledger|core_work_runtime_gate|api_work_gate|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_batch_admission|api_batch_admission|beam_runner_eager_dependency_groups|core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|api_memory_gate|core_allocation_lifetime|core_memory_scope|core_work_ledger|core_work_runtime_gate|api_work_gate|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
                 raise RuntimeError('UBSan float segments differ from stock-OTP vectors')
             run('flatmap-ubsan', [out / 'engine-ubsan/core_flatmap_test', binary_fixture])
@@ -652,6 +657,14 @@ def main():
             run('bit-writer-fallback', [out / 'bit-writer-fallback'])
             if run('bit-writer-fallback-vectors', [out / 'bit-writer-fallback', '--reference']) != writer_reference:
                 raise RuntimeError('Native fallback bit writers differ from stock-OTP vectors')
+            run('batch-admission-ubsan', [out / 'engine-ubsan/core_batch_admission_test',
+                 out / 'engine-ubsan/fixtures/batch_admission/batch_alpha.beam',
+                 out / 'engine-ubsan/fixtures/batch_admission/batch_beta.beam',
+                 out / 'engine-ubsan/fixtures/batch_admission/batch_unsupported.beam'])
+            run('api-batch-admission-ubsan', [out / 'engine-ubsan/api_batch_admission_test',
+                 out / 'engine-ubsan/fixtures/batch_admission/batch_alpha.beam',
+                 out / 'engine-ubsan/fixtures/batch_admission/batch_beta.beam',
+                 out / 'engine-ubsan/fixtures/batch_admission/batch_unsupported.beam'])
             run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
             run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture, fun_fixture, *probes])
             run('runner-ubsan', [out / 'engine-ubsan/run_beam', '--entry', 'probe', 'request',

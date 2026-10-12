@@ -86,13 +86,21 @@ static void show(std::size_t index,const char* phase,const Bytes& bytes) {
     for(auto byte:bytes) std::printf("%02x",static_cast<unsigned>(byte));
     std::putchar('\n');
 }
-static bool load(Isolate& world,std::size_t index,const std::string& path) {
-    auto bytes=file_bytes(path,8*1024*1024);
-    if(auto failure=world.load_module(view(bytes))) {
-        std::printf("ISOLATE %zu LOAD path=%s code=%d error=%s\n",index,path.c_str(),static_cast<int>(failure->code),failure->message.c_str());
+static bool load_group(Isolate& world,std::size_t index,const ModuleGroup& group) {
+    std::vector<std::string> paths=group.dependencies;
+    paths.push_back(group.main);
+    std::vector<Bytes> images; images.reserve(paths.size());
+    std::vector<ByteView> views; views.reserve(paths.size());
+    for(const auto& path:paths) images.push_back(file_bytes(path,8*1024*1024));
+    for(const auto& image:images) views.push_back(view(image));
+    if(auto failure=world.load_modules(views)) {
+        std::printf("ISOLATE %zu LOAD_GROUP modules=%zu code=%d error=%s\n",index,paths.size(),
+                    static_cast<int>(failure->code),failure->message.c_str());
         return false;
     }
-    std::printf("ISOLATE %zu LOAD path=%s admitted=true\n",index,path.c_str()); return true;
+    for(const auto& path:paths)
+        std::printf("ISOLATE %zu LOAD path=%s admitted=true\n",index,path.c_str());
+    return true;
 }
 static bool finish(Call& call,std::size_t index,const char* phase,const Invocation& expected) {
     auto result=call.wait_until(deadline());
@@ -117,12 +125,12 @@ static bool invoke(Isolate& world,std::size_t index,const Plan& plan,const Invoc
 static int execute(const Plan& plan) {
     auto engine=take(Engine::create()); bool success=true;
     {
-        // All groups coexist; dependencies eagerly precede each main module.
+        // All exact-name groups coexist; each dependency graph publishes in one
+        // transaction, so forward and mutual imports need no load ordering.
         std::vector<Isolate> worlds; worlds.reserve(plan.groups.size());
         for(std::size_t i=0;i<plan.groups.size();++i) {
             worlds.push_back(take(engine.create_isolate()));
-            for(const auto& path:plan.groups[i].dependencies) if(!load(worlds.back(),i,path)) success=false;
-            if(!load(worlds.back(),i,plan.groups[i].main)) success=false;
+            if(!load_group(worlds.back(),i,plan.groups[i])) success=false;
         }
         enum class RunState { loaded,running,failed };
         std::vector<RunState> states(worlds.size(),RunState::loaded);

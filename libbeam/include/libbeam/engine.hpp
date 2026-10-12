@@ -101,10 +101,14 @@ public:
     Isolate& operator=(const Isolate&) = delete;
     ~Isolate();
 
-    // Copies/consumes bytes before return, derives the module name from BEAM,
-    // and publishes only in this isolate. No filesystem paths or module aliases.
-    // Load failure rolls back unpublished state. Loading after start is rejected.
+    // Copies/consumes bytes before return, derives module names from BEAM,
+    // and publishes only in this isolate. No filesystem aliases or renaming.
+    // Group load resolves exact-name peers (including cycles) before an atomic
+    // publication; failure rolls back unpublished state. Loading after start is rejected.
     Status load_module(ByteView);
+    // Admit an exact-name eager dependency graph atomically. Modules may import
+    // peers loaded later in this same group, including mutual dependencies.
+    Status load_modules(const std::vector<ByteView>&);
     Result<ResourceUsage> resource_usage(); // Read-only; retained closed controls are observable.
 
     // Atomically enters running state and admits the initial binary arity-one
