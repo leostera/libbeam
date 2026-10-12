@@ -1,3 +1,4 @@
+.pi
 # Repository-level development outputs. OTP-specific rules live in beam/.gitignore.
 .DS_Store
 __pycache__/
