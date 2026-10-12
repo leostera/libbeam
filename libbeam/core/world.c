@@ -48,6 +48,11 @@ LbWorldStatus lb_world_create(LbEngine *engine,LbWorld **out)
     world=memory; memset(world,0,sizeof(*world)); world->engine=engine;
     status=lb_code_space_create(engine,&world->space);
     if(status!=LB_CODE_OK) { lb_release(engine->domain,world); lb_engine_leave(engine); return code_status(status); }
+    status=lb_code_preload(world->space);
+    if(status!=LB_CODE_OK) {
+        if(lb_code_space_destroy(world->space)!=LB_CODE_OK) abort();
+        lb_release(engine->domain,world); lb_engine_leave(engine); return code_status(status);
+    }
     world->references=1; world->owner_live=1; world->phase=LB_WORLD_LOADING;
     world->next=engine->worlds; engine->worlds=world; *out=world;
     lb_engine_leave(engine); return LB_WORLD_OK;

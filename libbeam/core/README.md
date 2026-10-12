@@ -33,8 +33,11 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   owned local fun/0, with copied environments and worker-only execution.
   Malformed module/function/argument-list inputs retain native badarg; other
   valid MFAs/apply shapes refuse the runtime profile, not a guest exception.
-  `spawn/1` remains an unadmitted preloaded Erlang wrapper, not a native alias;
-  spawn monitors and broader signals remain pending; local send and selective receive execute on owned mailboxes.
+  `preloaded.c` loads ordinary compiler-produced BEAM for complete pinned
+  `spawn/1`, `spawn_monitor/1` and their badarg helper into each world. Protected
+  bootstrap cannot be replaced by guest loading; these are not native aliases.
+  `spawn_opt/4` admits monitored local fun/0 startup, preparing owned monitor
+  halves before publishing the child. Other valid options/startup shapes refuse.
   Spaces retain it through physical release; shutdown refuses live children;
   out-of-order owner drop defers cleanup to the last physical child. No singleton
   or implicit world. The C++ factory owns this C handle.
@@ -46,14 +49,23 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   reclamation physically frees code/atoms/heaps while finite host controls survive.
   Spawned and waiting processes and their owned messages drain on stop. Receive
   deadlines belong to actors rather than external callbacks; broader timer and
-  monitor services remain pending.
+  timer services remain pending.
 - `message.c`, `receive.c`: selective receive through whole native scan/removal/
   wait/timeout cases, GC-rooted actor copies, waiting-task exclusion and wakeup
   after send publication. Compiler-produced persistent request/reply and timeout
   fixtures execute on the shared worker; copied-closure failure prefixes drain
   queues and identities. Monotonic deadlines use bounded idle polling, not native
   timer wheels or a hard latency guarantee. Registered destinations now resolve
-  in the owning namespace; monitors and broader signals remain unadmitted.
+  in the owning namespace. Broader signals remain unadmitted.
+- `monitor.c`: native monitor-node/data prefixes, owned ordinary references and
+  circular origin/target half lists under Engine serialization. Normal and kill
+  DOWN messages copy before queue publication; demonitor/2 accepts flush, repairs
+  queue anchors and releases both halves. Private cancellation detaches silently.
+  Allocation failures propagate infrastructure failure, not fabricated DOWN.
+  Error-class DOWN still refuses because native stacktrace capture is absent;
+  aliases, distribution, info options and non-kill exit/2 are not admitted.
+  Actual monitored worker actors cover normal exit, waiting-child kill, flush,
+  rollback and reclamation. Unchanged two_isolates still requires binary matching.
 - `receive_marker.c`: all four native receive-marker dispatch cases execute.
   Eight-slot reuse/reference binding owns stable ordinary-reference storage.
   Serialized tail anchors replace non-message queue insertion; message unlink

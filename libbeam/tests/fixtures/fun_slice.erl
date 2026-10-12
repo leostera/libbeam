@@ -3,13 +3,26 @@
 -module(fun_slice).
 -export([echo/1, factory/1, closed/1, closed_factory/1, nested/1, badarity/1, reply/1, process_factory/1, process_nested/1, is_fun/1, is_zero/1, is_arity/2, process_loop/1,
          spawn_finite/1, spawn_loop/1, spawn_badarg/1, spawn_refused/1,
-         send_self/1, send_child/1, send_badarg/1, receive_roundtrip/1, receive_timeout/1, receive_self/1, named_self/1, named_duplicate/1, missing_name/1, guest_error/1, guest_error_info/1, marked_request/1]).
+         send_self/1, send_child/1, send_badarg/1, receive_roundtrip/1, receive_timeout/1, receive_self/1, named_self/1, named_duplicate/1, missing_name/1, guest_error/1, guest_error_info/1, marked_request/1, monitored_normal/1, monitored_kill/1, monitored_flush/1]).
 is_fun(F) when is_function(F) -> true;
 is_fun(_) -> false.
 is_zero(F) when is_function(F,0) -> true;
 is_zero(_) -> false.
 is_arity(F,N) when is_function(F,N) -> true;
 is_arity(_,_) -> false.
+monitored_normal(B) ->
+    {Pid,Ref} = erlang:spawn_monitor(fun() -> ok end),
+    receive {'DOWN',Ref,process,Pid,normal} -> B end.
+monitored_kill(B) ->
+    {Pid,Ref} = erlang:spawn_monitor(fun() -> receive never -> ok end end),
+    true = exit(Pid,kill),
+    receive {'DOWN',Ref,process,Pid,killed} -> B end.
+monitored_flush(B) ->
+    Parent = self(),
+    {Pid,Ref} = erlang:spawn_monitor(fun() -> Parent ! ready end),
+    receive ready -> ok end,
+    true = demonitor(Ref,[flush]),
+    receive {'DOWN',Ref,process,Pid,_} -> <<"unexpected down">> after 0 -> B end.
 marked_request(B) ->
     self() ! noise,
     Ref = make_ref(),

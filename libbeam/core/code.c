@@ -91,7 +91,7 @@ static LbCodeStatus setup(LoaderState *st)
     if((lb_beam_image_chunk(p->image,LB_BEAM_ID('R','e','c','s'),&chunk)==LB_BEAM_OK && chunk.size) ||
        (lb_beam_image_chunk(p->image,LB_BEAM_ID('D','b','g','B'),&chunk)==LB_BEAM_OK && chunk.size)) return LB_CODE_UNSUPPORTED;
     st->module=module->name=p->file_atoms[1];
-    if(module->name==am_erlang) return LB_CODE_EXISTS; /* protected native catalog */
+    if(module->name==am_erlang && !st->space->preloading) return LB_CODE_EXISTS; /* protected native catalog/wrappers */
     module->attributes=p->attributes; module->compile=p->compile;
     st->label_count=info->label_count;
     st->labels=lb_palloc(p,st->label_count,sizeof(*st->labels));
@@ -125,6 +125,8 @@ static LbCodeStatus setup(LoaderState *st)
         *entry=(BeamFile_ImportEntry){p->file_atoms[imp.module],p->file_atoms[imp.function],imp.arity};
         e=entry->module==module->name?local_export(module,entry->function,(unsigned)entry->arity):
             lb_export_find(st->space,entry->module,entry->function,(unsigned)entry->arity);
+        if(!e && st->space->preloading && entry->module==am_erlang)
+            e=lb_export_find(st->space,entry->module,entry->function,(unsigned)entry->arity);
         if(!e) return LB_CODE_UNRESOLVED;
         if(e->owner && e->owner!=module && e->owner->importers>SIZE_MAX-module->import_count) return LB_CODE_LIMIT;
         module->imports[i]=e; module->dependencies[i]=e->owner==module?NULL:e->owner;

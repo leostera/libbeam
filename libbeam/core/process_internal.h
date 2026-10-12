@@ -14,6 +14,7 @@
 #include "message.h"
 #include "registry.h"
 #include "receive_marker.h"
+#include "monitor.h"
 #define F_INSLPQUEUE (1u<<1)
 #define F_TIMO (1u<<2)
 #define F_DELAY_GC (1u<<13) /* pinned native matching/schedule-out flag */
@@ -21,6 +22,8 @@ struct LbProcess {
     LbCodeModule *entry_module;
     LbWorld *world; /* borrowed C task owner; task retirement precedes world destruction */
     LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
+    LbMonitorNode *monitors_origin,*monitors_target;
+    int exit_requested;
     LbRegisteredProcess *registered; /* borrowed association owned by code space */
     LbFunLease *fun_leases; /* one lease per defining module, represented by a stable entry */
     LbMessageQueue messages; /* native inner queue; immutable fragments own their code/offheap roots */

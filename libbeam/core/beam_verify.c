@@ -210,7 +210,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_call_fun_1:case genop_call_fun2_3:
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
         case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:case genop_trim_2:
-        case genop_jump_1:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:
+        case genop_jump_1:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_function_2:case genop_is_function2_3:
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:
         case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_get_list_3:
@@ -377,6 +377,15 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             REQUIRE(arguments(&f,live)); forget_append_facts(&f);
             if(op->op==genop_call_2 || op->op==genop_call_ext_2) {
                 REQUIRE(f.frame!=NO_FRAME); memset(f.x,0,sizeof(f.x)); memset(f.xs,0,sizeof(f.xs)); define(f.x,0); f.heap=0;
+                if(op->op==genop_call_ext_2 && st->bif_imports[imp]==&st->space->engine->bifs[BIF_spawn_opt_4])
+                    f.xs[0]=TUPLE_SHAPE|2; /* every successful admitted monitored startup */
+                if(op->op==genop_call_ext_2) {
+                    Export *entry=st->module_code->imports[imp];
+                    Eterm monitored;
+                    if(entry->owner && entry->info.mfa.module==am_erlang && live==1 &&
+                       lb_atoms_find(st->space->atoms,"spawn_monitor",13,&monitored)==LB_ATOM_OK && entry->info.mfa.function==monitored)
+                        f.xs[0]=TUPLE_SHAPE|2; /* protected complete pinned wrapper, not a BIF alias */
+                }
             } else {
                 if(op->op==genop_call_only_2 || op->op==genop_call_ext_only_2) REQUIRE(f.frame==NO_FRAME);
                 else REQUIRE(a[2].type==TAG_u && f.frame==(Uint)a[2].val);
@@ -385,7 +394,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             break;
         case genop_select_tuple_arity_3:
             status=select_arities(st,w,index,&f,op); if(status!=LB_CODE_OK) return status; terminal=1; break;
-        case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:
+        case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_function_2:case genop_is_function2_3:
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_is_nonempty_list_2:
             REQUIRE(label(st,a[0]) && source(st,&f,a[1])); alternate=labels[a[0].val];

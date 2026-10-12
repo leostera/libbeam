@@ -37,7 +37,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx i_trim_t move_trim_yxt move2_par_xxxy move_window2_xxy move_shift_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt send recv_marker_reserve_S recv_marker_bind_SS recv_marker_clear_S recv_marker_use_S i_loop_rec_f loop_rec_end_f remove_message timeout timeout_locked is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_trim_yxt move2_par_xxxy move_window2_xxy move_shift_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_atom_fx is_atom_fy is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt send recv_marker_reserve_S recv_marker_bind_SS recv_marker_clear_S recv_marker_use_S i_loop_rec_f loop_rec_end_f remove_message timeout timeout_locked is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx').split()
 
 
 def case(source, name):

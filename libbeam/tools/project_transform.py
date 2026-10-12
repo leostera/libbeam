@@ -9,9 +9,9 @@ it must never be treated as TE_FAIL (which would silently skip an optimization).
 import re
 
 PURE = {'distinct', 'equal', 'independent_moves', 'is_offset', 'negation_is_small',
-        'never', 'succ', 'succ3', 'succ4'}
+        'never', 'succ', 'succ3', 'succ4', 'fixed_size_values'}
 OWNED = {'needs_nif_padding', 'is_heavy_bif', 'smp_already_locked', 'smp_mark_target_label'}
-GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2', 'make_fun3', 'is_function2', 'get', 'element', 'literal_timeout', 'literal_timeout_locked'}
+GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2', 'make_fun3', 'is_function2', 'get', 'element', 'literal_timeout', 'literal_timeout_locked', 'select_val'}
 
 
 def project(text):
@@ -61,7 +61,11 @@ def project(text):
     for name in sorted(PURE & used):
         match = re.search(r'^static int '+name+r'\(.*?^\}', text, re.M|re.S)
         if not match: raise RuntimeError('Missing pure helper '+name)
-        helpers.append(match[0])
+        helper=match[0]
+        if name=='fixed_size_values':
+            helper=helper.replace('beamfile_get_literal(&S->beam, Rest[i].val)', 'load_literal(S, Rest[i].val)')
+            helper=helper.replace('is_float(', 'lb_transform_is_float(')
+        helpers.append(helper)
     for name in sorted(GENERATORS & used):
         match = re.search(r'^static BeamOp\* '+name+r'\(.*?^\}', text, re.M|re.S)
         if not match: raise RuntimeError('Missing generator '+name)
@@ -100,6 +104,18 @@ def project(text):
                 body=body.replace(old,new)
             body=body.replace('op->a = lb_palloc(S->program, op->arity, sizeof(BeamOpArg));',
                 'op->a = lb_palloc(S->program, op->arity, sizeof(BeamOpArg));\n  if (!op->a) return NULL;')
+        if name == 'select_val':
+            body=body.replace('int arity = Size.val + 3;',
+                'int arity;\n  if (Size.type!=TAG_u || Size.val<2 || Size.val%2 || Size.val>MAX_REG*2) { S->program->error.status=LB_BEAM_LIMIT; return NULL; }\n  arity = Size.val + 3;')
+            body=body.replace('erts_alloc(ERTS_ALC_T_LOADER_TMP, op->arity * sizeof(BeamOpArg))',
+                'lb_palloc(S->program, op->arity, sizeof(BeamOpArg))')
+            body=body.replace('op->a[0] = Src;', 'if (!op->a) return NULL;\n    op->a[0] = Src;')
+            body=body.replace('(BeamOpArg *) erts_alloc(ERTS_ALC_T_LOADER_TMP, sizeof(BeamOpArg)*(arity-2*align))',
+                'lb_palloc(S->program, arity-2*align, sizeof(BeamOpArg))')
+            body=body.replace('  for (i = 3; i < arity - 2*align; i++)',
+                '  if (!tmp) return NULL;\n  for (i = 3; i < arity - 2*align; i++)')
+            body=body.replace('erts_free(ERTS_ALC_T_LOADER_TMP, (void *) tmp);',
+                '/* Owned temporary preparation arena. */')
         if name == 'select_tuple_arity':
             body = body.replace('erts_alloc(ERTS_ALC_T_LOADER_TMP, op->arity * sizeof(BeamOpArg))',
                                 'lb_palloc(S->program, op->arity, sizeof(BeamOpArg))')

@@ -57,6 +57,7 @@ struct LbCodeSpace {
     LbAllocDomain *domain; /* borrowed Engine allocation substrate */
     LbAtomTable *atoms;
     LbPidTable *pids; /* lazy identity directory; retained empty to prevent ID reuse */
+    int preloading; /* internal protected-module bootstrap only */
     LbRegistry *registry; /* removed on logical process exit, never a moving root */
     LbCodeModule *modules;
     Export *exports;
@@ -122,7 +123,11 @@ Eterm lb_bif_integer_to_binary_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_self_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_make_ref_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_spawn_3(LbProcess *,Eterm *,const BeamInstr *);
+LbCodeStatus lb_code_preload(LbCodeSpace *);
 Eterm lb_bif_error_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_error_3(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_register_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_spawn_opt_4(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_demonitor_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_exit_2(LbProcess *,Eterm *,const BeamInstr *);
 #endif

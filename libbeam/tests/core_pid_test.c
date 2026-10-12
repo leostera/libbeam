@@ -449,6 +449,7 @@ int main(int argc,char **argv)
     if(argc==1) { puts("CORE_PID_GATE_OK"); return 0; } CHECK(argc==4);
     Memory m={0}; LbSystemAllocator allocator={&m,allocate,release}; LbEngine *engine; LbCodeSpace *a,*b;
     CHECK(lb_engine_create(&allocator,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&a)==LB_CODE_OK && lb_code_space_create(engine,&b)==LB_CODE_OK);
+    CHECK(lb_code_preload(a)==LB_CODE_OK); LbCodeModule *preloaded=a->modules;
     LbCodeModule *ma=load(a,argv[1]),*mb=load(b,argv[1]); LbCodeEntry *ea=entry(a,ma,"identity",0),*eb=entry(b,mb,"identity",0);
     LbCodeModule *target_module=load(a,argv[2]);
     table(a,ea,&m); permuted_ring(a,ea); references(a,ma,&m); fun_consumers(a,ma,target_module,&m);
@@ -489,6 +490,7 @@ int main(int argc,char **argv)
     LbCodeModule *fun_module=load(a,argv[3]); guest_funs(a,fun_module,&m); prepared_children(a,fun_module,&m); message_fragments(a,fun_module,&m);
     fun_guards(a,fun_module);
     CHECK(lb_code_unload(fun_module)==LB_CODE_OK);
+    CHECK(lb_code_unload(preloaded)==LB_CODE_OK);
     lb_code_entry_release(ea); lb_code_entry_release(eb);
     CHECK(lb_code_unload(ma)==LB_CODE_OK && lb_code_unload(mb)==LB_CODE_OK);
     LbMessage *namespace_root; Uint cost;

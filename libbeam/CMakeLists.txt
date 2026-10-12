@@ -16,6 +16,15 @@ add_custom_command(
     VERBATIM)
 add_custom_target(libbeam_atom_definitions DEPENDS
     ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.h ${LIBBEAM_ATOM_GEN}/lb_atoms_generated.inc ${LIBBEAM_ATOM_GEN}/lb_bif_ids_generated.h)
+find_program(LIBBEAM_ERLC erlc REQUIRED)
+add_custom_command(
+    OUTPUT ${LIBBEAM_ATOM_GEN}/lb_preloaded_generated.inc
+    COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_preloaded.py
+        --erlc ${LIBBEAM_ERLC} --output ${LIBBEAM_ATOM_GEN}
+    DEPENDS tools/generate_preloaded.py ../beam/erts/preloaded/src/erlang.erl
+    VERBATIM)
+add_custom_target(libbeam_preloaded_definitions DEPENDS ${LIBBEAM_ATOM_GEN}/lb_preloaded_generated.inc)
+add_dependencies(libbeam_atom_definitions libbeam_preloaded_definitions)
 set(LIBBEAM_OPCODE_GEN ${CMAKE_CURRENT_BINARY_DIR}/generated/opcodes)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS core/otp/opcodes/manifest.json)
 file(READ ${CMAKE_CURRENT_SOURCE_DIR}/core/otp/opcodes/manifest.json LIBBEAM_OPCODE_MANIFEST)
@@ -43,7 +52,7 @@ if(NOT UNIX)
 endif()
 add_library(libbeam_core STATIC core/alloc.c core/utf8.c core/beam_image.c core/atoms.c
     core/opcodes.c core/beam_reader.c core/beam_program.c core/beam_decode.c
-    core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c core/writable.c core/binary_error.c core/binary_size.c core/binary_vheap.c core/binary_build.c core/exception.c core/pid_table.c core/bif_process.c core/fun.c core/message.c core/receive.c core/registry.c core/receive_marker.c core/bit_copy.c core/bit_writer.c core/bit_float.c core/term_compare.c
+    core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c core/writable.c core/binary_error.c core/binary_size.c core/binary_vheap.c core/binary_build.c core/exception.c core/pid_table.c core/bif_process.c core/fun.c core/message.c core/receive.c core/registry.c core/receive_marker.c core/monitor.c core/preloaded.c core/bit_copy.c core/bit_writer.c core/bit_float.c core/term_compare.c
     core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/engine.c core/executor.c core/world.c core/md5.c core/process.c core/heap.c core/bif_info.c core/big.c core/bif_numeric.c core/decimal.c core/bif_decimal.c)
 add_dependencies(libbeam_core libbeam_atom_definitions libbeam_opcode_definitions)
 target_link_libraries(libbeam_core PUBLIC ZLIB::ZLIB Threads::Threads m)

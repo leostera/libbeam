@@ -141,6 +141,7 @@ void lb_process_destroy(LbProcess *p)
     if(!p) return;
     if(p->running) abort(); /* internal serialized API misuse, not a guest path */
     module=p->entry_module; d=module->space->domain;
+    lb_monitor_exit(p,0);
     lb_registry_remove(p);
     if(p->identity.owner && lb_pid_remove(p->identity.owner,&p->identity)!=LB_PID_OK) abort();
     lb_receive_marker_destroy(p);
@@ -194,6 +195,7 @@ static int32_t lb_packed_label(const BeamInstr *table,size_t index)
 #define ERTS_UNLIKELY(test) (test)
 #define ERTS_LIKELY(test) (test)
 #define BEAM_IS_TUPLE(term) is_boxed(term)
+#define is_not_atom(term) (!is_atom(term))
 #define is_not_list(term) (!is_list(term))
 #define is_not_tuple(term) (!is_tuple(term))
 #define x(i) reg[(i)]
@@ -248,8 +250,16 @@ LbProcessStatus lb_process_run(LbProcess *c_p,size_t budget,unsigned reductions)
     if(c_p->waiting) return LB_PROCESS_INVALID;
     if(c_p->receive_message) c_p->flags|=F_DELAY_GC;
     c_p->running=1; reg=c_p->reg; I=c_p->i; E=c_p->stop; HTOP=c_p->htop; FCALLS=reductions;
+    if(c_p->exit_requested) {
+        c_p->freason=LB_EXC_EXIT; c_p->fvalue=c_p->exception_value=am_killed;
+        c_p->status=LB_PROCESS_EXCEPTION; goto stop;
+    }
     next_op=*I;
 dispatch:
+    if(c_p->exit_requested) {
+        c_p->freason=LB_EXC_EXIT; c_p->fvalue=c_p->exception_value=am_killed;
+        c_p->status=LB_PROCESS_EXCEPTION; goto stop;
+    }
     if(!pc_valid(c_p,I) || !VALID_INSTR(next_op) || (c_p->decimal && next_op!=op_call_bif_W)) goto malformed_code;
     if(!budget--) goto context_switch3;
     {
@@ -337,6 +347,7 @@ stop:
     /* Guest exit removes identity before publishing completion. The retained
      * process/result allocation may outlive that logical death. */
     if(c_p->status!=LB_PROCESS_YIELDED) {
+        lb_monitor_exit(c_p,1);
         lb_registry_remove(c_p);
         c_p->receive_message=NULL; c_p->receive_root=NIL;
         lb_message_queue_clear(&c_p->messages);

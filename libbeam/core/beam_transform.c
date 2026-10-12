@@ -204,6 +204,8 @@ static int dictionary_hash(LoaderState *st,Eterm key,Sint *out)
     if(is_atom(key)) { *out=(Sint)atom_val(key); return 1; }
     st->status=LB_CODE_UNSUPPORTED; return 0;
 }
+static int lb_transform_is_float(Eterm value)
+{ return is_boxed(value) && boxed_val(value)[0]==((1u<<_HEADER_ARITY_OFFS)|FLOAT_SUBTAG); }
 #include "lb_transform_generated.inc"
 #if defined(__clang__)
 #pragma clang diagnostic pop

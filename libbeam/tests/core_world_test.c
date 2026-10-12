@@ -288,6 +288,18 @@ static void spawned_children(LbBytesView code)
         CHECK(status==LB_WORLD_NO_MEMORY || status==LB_WORLD_OK); expect(call,status);
         if(status==LB_WORLD_OK) break;
     }
+    const char *monitored[]={"monitored_normal","monitored_kill","monitored_flush"};
+    for(size_t i=0;i<sizeof(monitored)/sizeof(monitored[0]);++i) for(size_t prefix=1;;++prefix) {
+        CHECK(prefix<300);
+        lb_engine_enter(engine); m.fail_worker=m.worker_calls+prefix; lb_engine_leave(engine);
+        CHECK(lb_world_call(world,text("fun_slice"),text(monitored[i]),text("monitored reply"),&call)==LB_WORLD_OK);
+        LbBytesView result; LbWorldStatus status=await_call(call,&result);
+        if(status==LB_WORLD_OK) CHECK(result.size==15 && !memcmp(result.data,"monitored reply",15));
+        lb_engine_enter(engine); m.fail_worker=0;
+        CHECK(!world->space->registry && !world->space->messages && !lb_pid_count(world->space->pids)); lb_engine_leave(engine);
+        CHECK(status==LB_WORLD_NO_MEMORY || status==LB_WORLD_OK); expect(call,status);
+        if(status==LB_WORLD_OK) break;
+    }
     const char *errors[]={"named_duplicate","missing_name","guest_error"};
     for(size_t i=0;i<sizeof(errors)/sizeof(errors[0]);++i) {
         CHECK(lb_world_call(world,text("fun_slice"),text(errors[i]),text("reason"),&call)==LB_WORLD_OK);

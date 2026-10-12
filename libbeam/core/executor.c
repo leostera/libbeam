@@ -75,6 +75,10 @@ static LbTask *runnable(LbEngine *engine)
 static void finish_task(LbTask *task,LbTaskStatus status)
 {
     LbCall *call=task->completion;
+    /* Timer/infrastructure failure can bypass the interpreter stop label.
+     * Propagate that failure through owned monitor halves too; private world
+     * cancellation instead detaches them during destruction without DOWN. */
+    if(status!=LB_TASK_CANCELLED) lb_monitor_exit(task->process,1);
     task->status=status;
     if(call) {
         lb_call_complete(call,task->process,status);
@@ -193,7 +197,7 @@ LbEngineStatus lb_task_create_call_locked(LbEngine *engine,const LbCodeEntry *en
 /* Internal serialized spawn publication, not a host interpreter or a native
  * import admission. The real spawn effect must supply its parent/world and
  * prepare monitors/signals before making this runnable boundary available. */
-LbProcessStatus lb_task_spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm fun,Eterm *out)
+LbProcessStatus lb_task_spawn_fun_monitored_locked(LbWorld *world,LbProcess *parent,Eterm fun,LbMonitor *monitor,Eterm *out)
 {
     if(!out) return LB_PROCESS_INVALID; *out=THE_NON_VALUE;
     if(!world || !parent || world->phase!=LB_WORLD_RUNNING ||
@@ -206,9 +210,12 @@ LbProcessStatus lb_task_spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm 
     if(status!=LB_PROCESS_READY) { lb_release(engine->domain,task); return status; }
     *out=task->process->identity.id;
     task->process->world=world;
+    if(monitor) lb_monitor_publish(monitor,task->process);
     task->next=engine->tasks; engine->tasks=task;
     checked(pthread_cond_signal(&engine->wake)); return LB_PROCESS_READY;
 }
+LbProcessStatus lb_task_spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm fun,Eterm *out)
+{ return lb_task_spawn_fun_monitored_locked(world,parent,fun,NULL,out); }
 LbProcessStatus lb_task_spawn_result_locked(LbWorld *world,LbTask *source,Eterm *out)
 {
     if(!out) return LB_PROCESS_INVALID; *out=THE_NON_VALUE;

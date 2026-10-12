@@ -68,6 +68,77 @@ badarg:
 refused:
     p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
 }
+Eterm lb_bif_spawn_opt_4(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!is_atom(args[0]) || !is_atom(args[1])) goto badarg;
+    Eterm tail=args[2]; size_t length=0;
+    while(is_list(tail)) {
+        if(++length>LB_MAX_BINARY_BYTES/sizeof(Eterm)) goto limit;
+        tail=list_val(tail)[1];
+    }
+    if(!is_nil(tail)) goto badarg;
+    Eterm options=args[3]; int monitored=0;
+    while(is_list(options)) {
+        if(++p->last_native_cost>LB_MAX_BINARY_BYTES/sizeof(Eterm)) goto limit;
+        Eterm option=list_val(options)[0]; options=list_val(options)[1];
+        if(option!=am_monitor) goto refused;
+        monitored=1;
+    }
+    if(!is_nil(options)) goto badarg;
+    if(!monitored) goto refused; /* positive spawn_opt/4 result is always {Pid,Ref} */
+    if(args[0]!=am_erlang || args[1]!=am_apply || length!=2 || !p->world || !p->running) goto refused;
+    Eterm *first=list_val(args[2]),*second=list_val(first[1]);
+    const LbFun *fun=lb_fun(first[0]);
+    if(!is_nil(second[0]) || !fun || lb_fun_arity(fun)!=0) goto refused;
+    LbEngine *engine=p->entry_module->space->engine;
+    if(engine->reference_counter==UINT64_MAX) goto limit;
+    size_t need,before=p->collections;
+    if(!lb_size_add(LB_REF_WORDS+3,p->heap_reserved,&need) || !lb_heap_reserve(p,need,4)) goto memory;
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    Eterm parent_pid;
+    LbProcessStatus status=lb_process_identity(p,&parent_pid);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    Eterm ref=lb_reference_write(p->htop,engine->reference_counter); p->htop+=LB_REF_WORDS;
+    LbMonitor *monitor; status=lb_monitor_prepare(p,ref,&monitor);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    /* Reserve/GC preceded borrowing the reloaded closure and preparing halves.
+     * The task attaches both halves before publishing the child's runnable link. */
+    Eterm pid;
+    status=lb_task_spawn_fun_monitored_locked(p->world,p,list_val(args[2])[0],monitor,&pid);
+    if(status!=LB_PROCESS_READY) { lb_monitor_discard(monitor); p->status=status; return THE_NON_VALUE; }
+    ++engine->reference_counter; /* no fallible work remains after runnable publication */
+    Eterm result=TUPLE2(p->htop,pid,ref); p->htop+=3; return result;
+badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+refused: p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
+limit: p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE;
+memory: p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE;
+}
+Eterm lb_bif_demonitor_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!is_boxed(args[0]) || boxed_val(args[0])[0]!=LB_REF_HEADER) goto badarg;
+    Eterm options=args[1]; int flush=0;
+    while(is_list(options)) {
+        if(++p->last_native_cost>LB_MAX_BINARY_BYTES/sizeof(Eterm)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+        Eterm option=list_val(options)[0]; options=list_val(options)[1];
+        if(option==am_flush) flush=1;
+        else if(option==am_info) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+        else goto badarg;
+    }
+    if(!is_nil(options)) goto badarg;
+    lb_monitor_demonitor(p,args[0],flush); return am_true;
+badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_exit_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!is_internal_pid(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(args[1]!=am_kill || !p->world || !p->running) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    LbProcess *target=lb_pid_lookup(p->entry_module->space->pids,args[0]);
+    if(target) { target->exit_requested=1; target->waiting=0; }
+    return am_true;
+}
 Eterm lb_bif_register_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)instruction; p->last_native_cost=3;

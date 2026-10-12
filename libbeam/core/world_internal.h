@@ -32,6 +32,8 @@ void lb_call_complete(LbCall *,LbProcess *,LbTaskStatus);
 void lb_call_discard_completed(LbCall *);
 int lb_world_retire_step(LbEngine *);
 LbEngineStatus lb_task_create_call_locked(LbEngine *,const LbCodeEntry *,LbBytesView,LbCall *,LbTask **);
+typedef struct LbMonitor LbMonitor;
+LbProcessStatus lb_task_spawn_fun_monitored_locked(LbWorld *,LbProcess *,Eterm,LbMonitor *,Eterm *);
 LbProcessStatus lb_task_spawn_fun_locked(LbWorld *,LbProcess *,Eterm,Eterm *);
 /* Internal component seam: use a worker-produced retained closure, without
  * exposing the source process or interpreting on the host control thread. */

@@ -2,6 +2,9 @@
   "baseline": "1c47d6c3",
   "scope": "Selected C copying-GC helpers, interpreter ownership boundary, function/export word layouts, module_info and MD5. This is not whole-file admission.",
   "sources": {
+    "beam/erts/preloaded/src/erlang.erl": "81dacbaae40928bb5fcda57024b66af4a059e68b536aede0c891a5dd868c5ecd",
+    "beam/erts/emulator/beam/erl_monitor_link.h": "62f04c707eed5d134b656bb85a6ccbe3c5d7906cfad850522a6bd85ca510dc67",
+    "beam/erts/emulator/beam/erl_monitor_link.c": "69db809909d9a2063aa6e4c0cd2204efce0ff04fcea0cc53c7c301b933efbe7e",
     "beam/erts/emulator/beam/erl_proc_sig_queue.h": "ca6c71cbfd860260cd218f2443d176000ff216bc0f8941ace4a7f3debb485168",
     "beam/erts/emulator/beam/erl_proc_sig_queue.c": "8c09013466104034a847e3439df4d31c4d5184d2c46430a3cdb0f86710f2c519",
     "beam/erts/emulator/beam/register.c": "402a87121eab21184d4ff0e2a7c7fab2758648583aaca798f26211453ce9717c",
@@ -29,7 +32,7 @@
     "shapes": "Native tuple/list tests, extraction, cons and tuple-arity tables; proof of shape/minimum arity across both branches, joins, moves, calls and Y roots; compiler hints are not trusted and are removed after proof, before native transformations",
     "arity_tables": "Whole generated select_tuple_arity helper and native operand-pair qsort; fallible arena allocation; signed packed label reads use memcpy without word-array aliasing",
     "analysis_limits": "64 MiB temporary proof workspace released before load completion; at most 256 distinct tuple arities per selector; no density, quota or latency guarantee",
-    "native_imports": ["erlang:get_module_info/1", "erlang:get_module_info/2", "erlang:+/2", "erlang:integer_to_binary/1", "erlang:self/0", "erlang:make_ref/0", "erlang:is_function/1", "erlang:is_function/2", "erlang:spawn/3", "erlang:register/2", "erlang:error/1", "erlang:error/3"],
+    "native_imports": ["erlang:get_module_info/1", "erlang:get_module_info/2", "erlang:+/2", "erlang:integer_to_binary/1", "erlang:self/0", "erlang:make_ref/0", "erlang:is_function/1", "erlang:is_function/2", "erlang:spawn/3", "erlang:register/2", "erlang:error/1", "erlang:error/3", "erlang:spawn_opt/4", "erlang:demonitor/2", "erlang:exit/2"],
     "addition": "Native small/bignum/finite-float addition; whole plus/increment groups and increment generator; fallible scratch before collection, preserved heap credit, repaired Y destinations and OOM checked before guard failure; scoped default IEEE environment; numeric-sources.json",
     "writable_initialization": "Whole native bs_init_writable dispatch; allocating-frame proof, native capacity defaults, owned initialized storage, fallible publication, per-attempt/GC work charge, post-publication yields and explicit process/task/world infrastructure limits; writable-init-sources.json",
     "binary_construction": "Complete native i_bs_create_bin dispatch; full-kind sizing/storage dependencies, whole generated writer branches, checked Live/Y roots, private consumption and runtime alias refusal, late destination publication, rooted error payloads, conservative work charging and post-instruction yields; binary-build-sources.json. Installed ARM JIT UTF8 error ordering differs from the pinned interpreter; no trace/catch-unwind or matching admission.",
