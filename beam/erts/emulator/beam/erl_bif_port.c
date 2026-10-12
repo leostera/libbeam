@@ -66,17 +66,6 @@ BIF_RETTYPE erts_internal_open_port_2(BIF_ALIST_2)
     int err_type, err_num;
     ErtsLink *proc_lnk, *port_lnk;
 
-    /* Reject the unsupported family before option parsing, environment merging,
-     * driver lookup, port creation or native effects. The public erlang wrapper
-     * raises error:notsup for this internal result, as for other error atoms. */
-    if (is_tuple(BIF_ARG_1)) {
-        Eterm *name = tuple_val(BIF_ARG_1);
-        if (arityval(name[0]) == 2
-            && (name[1] == am_spawn || name[1] == am_spawn_executable
-                || name[1] == am_spawn_driver))
-            BIF_RET(am_notsup);
-    }
-
     port = open_port(BIF_P, BIF_ARG_1, BIF_ARG_2, &err_type, &err_num);
     if (!port) {
 	if (err_type == -4) {
@@ -1051,7 +1040,31 @@ open_port(Process* p, Eterm name, Eterm settings, int *err_typep, int *err_nump)
 	    goto badarg;
 	}
     
-	if (*tp == am_fd) { /* An fd port */
+	if (*tp == am_spawn || *tp == am_spawn_driver || *tp == am_spawn_executable) {	/* A process port */
+	    int encoding;
+	    if (arity != make_arityval(2)) {
+		goto badarg;
+	    }
+	    name = tp[1];
+	    encoding = erts_get_native_filename_encoding();
+	    /* Do not convert the command to utf-16le yet, do that in win32 specific code */
+	    /* since the cmd is used for comparison with drivers names and copied to port info */
+	    if (encoding == ERL_FILENAME_WIN_WCHAR) {
+		encoding = ERL_FILENAME_UTF8;
+	    }
+	    if ((name_buf = erts_convert_filename_to_encoding(name, NULL, 0, ERTS_ALC_T_TMP,0,1, encoding, NULL, 0))
+		== NULL) {
+		goto badarg;
+	    }
+
+	    if (*tp == am_spawn_driver) {
+		opts.spawn_type = ERTS_SPAWN_DRIVER;
+	    } else if (*tp == am_spawn_executable) {
+		opts.spawn_type = ERTS_SPAWN_EXECUTABLE;
+	    }
+
+	    driver = &spawn_driver;
+	} else if (*tp == am_fd) { /* An fd port */
 	    if (arity != make_arityval(3)) {
 		goto badarg;
 	    }
@@ -1070,8 +1083,11 @@ open_port(Process* p, Eterm name, Eterm settings, int *err_typep, int *err_nump)
 	    goto badarg;
 	}
 
-    if (opts.argv != NULL) {
-	/* No executable ports in this runtime. */
+    if ((driver != &spawn_driver && opts.argv != NULL) ||
+	(driver == &spawn_driver && 
+	 opts.spawn_type != ERTS_SPAWN_EXECUTABLE && 
+	 opts.argv != NULL)) {
+	/* Argument vector only if explicit spawn_executable */
 	goto badarg;
     }
 
@@ -1081,7 +1097,7 @@ open_port(Process* p, Eterm name, Eterm settings, int *err_typep, int *err_nump)
 	}
     }
 
-    if (opts.exit_status) {
+    if (driver != &spawn_driver && opts.exit_status) {
 	goto badarg;
     }
     

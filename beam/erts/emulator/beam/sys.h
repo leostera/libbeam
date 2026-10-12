@@ -572,6 +572,13 @@ int erts_send_warning_to_logger_str_nogl(char *);
 
 #include "erl_threads.h"
 
+#ifdef ERTS_WANT_BREAK_HANDLING
+extern erts_atomic32_t erts_break_requested;
+#    define ERTS_BREAK_REQUESTED \
+  ((int) erts_atomic32_read_nob(&erts_break_requested))
+void erts_do_break_handling(void);
+#endif
+
 
 extern erts_atomic32_t erts_writing_erl_crash_dump;
 extern erts_tsd_key_t erts_is_crash_dumping_key;
@@ -791,6 +798,7 @@ extern void sys_init_time(ErtsSysInitTimeResult *);
 extern void erts_late_sys_init_time(void);
 extern void erts_deliver_time(void);
 extern void erts_time_remaining(SysTimeval *);
+extern void erts_sys_init_float(void);
 
 /* Dynamic library/driver loading */
 typedef struct {
@@ -827,14 +835,17 @@ extern void erts_sys_pre_init(void);
 extern void erts_sys_scheduler_init(void);
 
 extern void erl_sys_init(void);
+extern void erl_sys_late_init(void);
 extern void erl_sys_args(int *argc, char **argv);
 extern void erl_sys_schedule(int);
+void sys_tty_reset(int);
 
 int sys_max_files(void);
 void sys_init_io(void);
 Preload* sys_preloaded(void);
 unsigned char* sys_preload_begin(Preload*);
 void sys_preload_end(Preload*);
+int sys_get_key(int);
 void get_time(int *hour, int *minute, int *second);
 void get_date(int *year, int *month, int *day);
 void get_localtime(int *year, int *month, int *day, 

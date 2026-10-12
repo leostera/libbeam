@@ -44,7 +44,6 @@
 #include "erl_process_dict.h"
 #include "erl_unicode.h"
 #include "beam_file.h"
-#include "erl_isolate_state.h"
 
 Uint erts_total_code_size;
 
@@ -54,11 +53,11 @@ static int load_code(LoaderState *stp);
 
 /**********************************************************************/
 
-void init_load(ErtsIsolateNamespaceState *owner)
+void init_load(void)
 {
     erts_total_code_size = 0;
-    beam_catches_init(erts_isolate_namespace_catches(owner));
-    erts_init_ranges(erts_isolate_namespace_ranges(owner));
+    beam_catches_init();
+    erts_init_ranges();
 
 #ifdef DEBUG
     {
@@ -75,7 +74,7 @@ void init_load(ErtsIsolateNamespaceState *owner)
 #endif
 }
 
-Binary *erts_alloc_loader_state(ErtsIsolateNamespaceState *owner) {
+Binary *erts_alloc_loader_state(void) {
     LoaderState* stp;
     Binary* magic;
 
@@ -86,9 +85,6 @@ Binary *erts_alloc_loader_state(ErtsIsolateNamespaceState *owner) {
     stp = ERTS_MAGIC_BIN_DATA(magic);
 
     sys_memset(stp, 0, sizeof(*stp));
-    ASSERT(owner);
-    stp->namespace_owner = owner;
-    erts_isolate_namespace_acquire(owner);
 
     /* Function not known yet */
     stp->function = THE_NON_VALUE;
@@ -97,15 +93,6 @@ Binary *erts_alloc_loader_state(ErtsIsolateNamespaceState *owner) {
     beamopallocator_init(&stp->op_allocator);
 
     return magic;
-}
-
-ErtsIsolateNamespaceState *erts_prepared_code_owner(Binary *magic)
-{
-    LoaderState *stp;
-    if (ERTS_MAGIC_BIN_DESTRUCTOR(magic) != beam_load_prepared_dtor)
-        return NULL;
-    stp = ERTS_MAGIC_BIN_DATA(magic);
-    return stp->namespace_owner;
 }
 
 Eterm
@@ -120,7 +107,7 @@ erts_preload_module(Process *c_p,
                     const byte* code,   /* Points to the code to load */
                     Uint size)          /* Size of code to load. */
 {
-    Binary* magic = erts_alloc_loader_state(erts_diagnostic_namespace());
+    Binary* magic = erts_alloc_loader_state();
     Eterm retval;
 
     ASSERT(!erts_initialized);
@@ -143,13 +130,6 @@ erts_prepare_loading(Binary* magic, Process *c_p, Eterm group_leader,
     LoaderState* stp;
 
     stp = ERTS_MAGIC_BIN_DATA(magic);
-    /* Literal decoding/import fixups still have diagnostic-only boundaries.
-     * Reject, rather than parse private atoms into those global adapters. */
-    if (stp->namespace_owner != erts_diagnostic_namespace() ||
-        (c_p && c_p->namespace_owner != stp->namespace_owner)) {
-        beam_load_prepared_free(magic);
-        return am_badarg;
-    }
     stp->module = *modp;
     stp->group_leader = group_leader;
 
@@ -269,11 +249,6 @@ erts_finish_loading(Binary* magic, Process* c_p,
     struct erl_module_instance* inst_p;
     Module* mod_tab_p;
 
-    if (!stp->namespace_owner ||
-        stp->namespace_owner != erts_diagnostic_namespace() ||
-        (c_p && c_p->namespace_owner != stp->namespace_owner))
-        return am_badarg;
-
     ERTS_LC_ASSERT(erts_initialized == 0 || erts_has_code_load_permission() ||
                    erts_thr_progress_is_blocking());
 
@@ -338,8 +313,6 @@ erts_finish_loading(Binary* magic, Process* c_p,
     }
 
     beam_load_finalize_code(stp, inst_p);
-    ASSERT(inst_p->code_hdr->namespace_owner == stp->namespace_owner);
-    erts_isolate_namespace_acquire(stp->namespace_owner);
 
 #if defined(LOAD_MEMORY_HARD_DEBUG) && defined(DEBUG)
     erts_fprintf(stderr,"Loaded %T\n",*modp);
@@ -709,19 +682,10 @@ load_error:
     return 0;
 }
 
-void erts_literal_area_init_owner(ErtsLiteralArea *area,
-                                  ErtsIsolateNamespaceState *owner)
-{
-    area->retained_namespace = owner;
-    if (owner)
-        erts_isolate_namespace_acquire(owner);
-}
-
 void
 erts_release_literal_area(ErtsLiteralArea* literal_area)
 {
     struct erl_off_heap_header* oh;
-    ErtsIsolateNamespaceState *owner;
 
     if (!literal_area)
         return;
@@ -751,10 +715,7 @@ erts_release_literal_area(ErtsLiteralArea* literal_area)
         }
         oh = oh->next;
     }
-    owner = literal_area->retained_namespace;
     erts_free(ERTS_ALC_T_LITERAL, literal_area);
-    if (owner)
-        erts_isolate_namespace_release(owner);
 }
 
 #ifdef ENABLE_DBG_TRACE_MFA

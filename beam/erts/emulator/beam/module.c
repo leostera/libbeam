@@ -43,39 +43,23 @@
 #define MODULE_SIZE   50
 #define MODULE_LIMIT  (64*1024)
 
-int erts_module_table_default_limit(void) { return MODULE_LIMIT; }
+static int module_limit = MODULE_LIMIT;
 
-struct ErtsModuleTable {
-    IndexTable index;
-    erts_atomic_t bytes;
-    int independently_allocated;
-};
+static IndexTable module_tables[ERTS_NUM_CODE_IX];
 
-/* Diagnostic OTP-world adapter until loader/process code-space propagation.
- * Private tables use the same component, never swap these roots. */
-static ErtsModuleTable **module_tables; /* Borrowed diagnostic state slots. */
+erts_rwmtx_t the_old_code_rwlocks[ERTS_NUM_CODE_IX];
 
-#include "erl_module_namespace.h"
-struct ErtsModuleNamespace {
-    ErtsModuleTable **tables;
-    erts_rwmtx_t old_code_locks[ERTS_NUM_CODE_IX];
-    struct erl_module_instance *unsealed;
-    ErtsCodeIndex staging;
-    int entries_at_start, bound;
-};
-static ErtsModuleNamespace *diagnostic_modules;
-#define NO_MODULE_STAGE (~(ErtsCodeIndex)0)
-
+static erts_atomic_t tot_module_bytes;
 
 /* SMP note: Active module table lookup and current module instance can be
  *           read without any locks. Old module instances are protected by
- *           the namespace's old-code locks while purging the active table.
+ *           "the_old_code_rwlocks" as purging is done on active module table.
  *           Staging table is protected by the "code_ix lock". 
  */
 
 void module_info(fmtfn_t to, void *to_arg)
 {
-    index_info(to, to_arg, &module_tables[erts_active_code_ix()]->index);
+    index_info(to, to_arg, &module_tables[erts_active_code_ix()]);
 }
 
 
@@ -98,38 +82,37 @@ void erts_module_instance_init(struct erl_module_instance* modi)
     modi->nif = NULL;
     modi->num_breakpoints = 0;
     modi->num_traced_exports = 0;
-    modi->executable_region = NULL;
-    modi->writable_region = NULL;
-    modi->metadata = NULL;
     modi->unsealed = 0;
 }
 
 static Module* module_alloc(Module* tmpl)
 {
     Module* obj = (Module*) erts_alloc(ERTS_ALC_T_MODULE, sizeof(Module));
-    obj->table_owner = tmpl->table_owner;
-    erts_atomic_add_nob(&obj->table_owner->bytes, sizeof(Module));
+    erts_atomic_add_nob(&tot_module_bytes, sizeof(Module));
 
     obj->module = tmpl->module;
     obj->slot.index = -1;
     erts_module_instance_init(&obj->curr);
     erts_module_instance_init(&obj->old);
     obj->on_load = 0;
+    DBG_TRACE_MFA(make_atom(obj->module), 0, 0, "module_alloc");
     return obj;
 }
 
 static void module_free(Module* mod)
 {
-    ErtsModuleTable *owner = mod->table_owner;
     erts_free(ERTS_ALC_T_MODULE, mod);
-    erts_atomic_add_nob(&owner->bytes, -sizeof(Module));
+    erts_atomic_add_nob(&tot_module_bytes, -sizeof(Module));
 }
 
-static void init_owned_module_table(ErtsModuleTable *owner, int limit)
+void init_module_table(int limit)
 {
     HashFunctions f;
-    erts_atomic_init_nob(&owner->bytes, 0);
-    owner->independently_allocated = 0;
+    int i;
+
+    if (limit > 0) {
+        module_limit = limit;
+    }
 
     f.hash = (H_FUN) module_hash;
     f.cmp  = (HCMP_FUN) module_cmp;
@@ -139,142 +122,62 @@ static void init_owned_module_table(ErtsModuleTable *owner, int limit)
     f.meta_free = (HMFREE_FUN) erts_free;
     f.meta_print = (HMPRINT_FUN) erts_print;
 
-    erts_index_init(ERTS_ALC_T_MODULE_TABLE, &owner->index, "module_code",
-                    MODULE_SIZE, limit, f);
-}
-
-ErtsModuleNamespace *erts_module_namespace_create(ErtsModuleTable **tables)
-{
-    ErtsModuleNamespace *owner = erts_alloc(ERTS_ALC_T_MODULE_TABLE, sizeof(*owner));
-    owner->tables = tables;
-    owner->unsealed = NULL;
-    owner->staging = NO_MODULE_STAGE;
-    owner->entries_at_start = 0;
-    owner->bound = 0;
-    for (int i = 0; i < ERTS_NUM_CODE_IX; ++i)
-        erts_rwmtx_init(&owner->old_code_locks[i], "old_code", make_small(i),
-                        ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
-    return owner;
-}
-void init_module_table(ErtsModuleNamespace *owner)
-{
-    ASSERT(owner && !diagnostic_modules);
-    diagnostic_modules = owner;
-    module_tables = owner->tables;
-    owner->bound = 1;
-    owner->staging = 0;
-}
-erts_rwmtx_t *erts_diagnostic_old_code_lock(ErtsCodeIndex ix)
-{
-    return &diagnostic_modules->old_code_locks[ix];
-}
-
-
-ErtsModuleTable *erts_module_table_create(int limit)
-{
-    ErtsModuleTable *owner;
-    if (limit <= 0)
-        return NULL;
-    owner = erts_alloc(ERTS_ALC_T_MODULE_TABLE, sizeof(*owner));
-    init_owned_module_table(owner, limit);
-    owner->independently_allocated = 1;
-    return owner;
-}
-
-Module *erts_module_table_find(ErtsModuleTable *owner, int atom_index)
-{
-    Module key;
-    if (atom_index < 0)
-        return NULL;
-    key.module = atom_index;
-    return (Module *) hash_get(&owner->index.htable, &key);
-}
-
-int erts_module_table_count(const ErtsModuleTable *owner)
-{
-    return owner->index.entries;
-}
-
-int erts_module_table_capacity(const ErtsModuleTable *owner)
-{
-    return owner->index.limit;
-}
-
-static int module_instance_has_resources(const struct erl_module_instance *modi)
-{
-    return modi->code_hdr || modi->code_length || modi->catches != BEAM_CATCHES_NIL ||
-        modi->nif || modi->num_breakpoints || modi->num_traced_exports ||
-        modi->executable_region || modi->writable_region || modi->metadata ||
-        modi->unsealed;
-}
-
-int erts_module_table_can_discard_unpublished(ErtsModuleTable *owner)
-{
-    int i;
-    if (!owner || !owner->independently_allocated)
-        return 0;
-    for (i = 0; i < owner->index.entries; i++) {
-        Module *mod = (Module *) erts_index_lookup(&owner->index, i);
-        if (mod->on_load || module_instance_has_resources(&mod->curr) ||
-            module_instance_has_resources(&mod->old))
-            return 0;
+    for (i = 0; i < ERTS_NUM_CODE_IX; i++) {
+        erts_index_init(ERTS_ALC_T_MODULE_TABLE, &module_tables[i], "module_code",
+            MODULE_SIZE, module_limit, f);
     }
-    return 1;
+
+    for (i=0; i<ERTS_NUM_CODE_IX; i++) {
+        erts_rwmtx_init(&the_old_code_rwlocks[i], "old_code", make_small(i),
+            ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
+    }
+    erts_atomic_init_nob(&tot_module_bytes, 0);
 }
 
-int erts_module_table_discard_unpublished(ErtsModuleTable *owner)
-{
-    if (!erts_module_table_can_discard_unpublished(owner))
-        return 1;
-    erts_index_destroy(&owner->index);
-    erts_free(ERTS_ALC_T_MODULE_TABLE, owner);
-    return 0;
-}
 
 Module*
 erts_get_module(Eterm mod, ErtsCodeIndex code_ix)
 {
+    Module e;
+    int index;
+    IndexTable* mod_tab;
+
     ASSERT(is_atom(mod));
     ERTS_LC_ASSERT(erts_get_scheduler_id() > 0 || erts_thr_progress_lc_is_delaying());
-    return erts_module_table_find(module_tables[code_ix], atom_val(mod));
+
+    mod_tab = &module_tables[code_ix];
+
+    e.module = atom_val(mod);
+    index = index_get(mod_tab, (void*) &e);
+    if (index == -1) {
+	return NULL;
+    } else {
+	return (Module*) erts_index_lookup(mod_tab, index);
+    }
 }
 
 
-Module *erts_module_table_put(ErtsModuleTable *owner, int atom_index)
+static Module* put_module(Eterm mod, IndexTable* mod_tab)
 {
-    IndexTable *mod_tab = &owner->index;
     Module e;
     int oldsz, newsz;
     Module* res;
 
-    if (atom_index < 0)
-        return NULL;
-    e.module = atom_index;
-    e.table_owner = owner;
-    res = (Module *) hash_get(&mod_tab->htable, &e);
-    if (res)
-        return res;
-    if (mod_tab->entries >= mod_tab->limit)
-        return NULL;
+    ASSERT(is_atom(mod));
+    e.module = atom_val(mod);
     oldsz = index_table_sz(mod_tab);
     res = (Module*) index_put_entry(mod_tab, (void*) &e);
     newsz = index_table_sz(mod_tab);
-    erts_atomic_add_nob(&owner->bytes, (newsz - oldsz));
+    erts_atomic_add_nob(&tot_module_bytes, (newsz - oldsz));
     return res;
 }
 
 Module*
 erts_put_module(Eterm mod)
 {
-    Module *result;
     ERTS_LC_ASSERT(erts_initialized == 0 || erts_has_code_load_permission());
-    ASSERT(is_atom(mod));
-    result = erts_module_table_put(module_tables[erts_staging_code_ix()], atom_val(mod));
-    if (!result)
-        erts_exit(ERTS_DUMP_EXIT, "no more index entries in module_code (max=%d)\n",
-                  module_tables[erts_staging_code_ix()]->index.limit);
-    DBG_TRACE_MFA(mod, 0, 0, "module_put");
-    return result;
+
+    return put_module(mod, &module_tables[erts_staging_code_ix()]);
 }
 
 void *erts_writable_code_ptr(struct erl_module_instance *modi,
@@ -306,8 +209,16 @@ void *erts_writable_code_ptr(struct erl_module_instance *modi,
     }
 }
 
-int erts_module_namespace_unseal(ErtsModuleNamespace *owner, struct erl_module_instance *modi) {
-    if (owner->unsealed || modi->unsealed) return 1;
+#ifdef DEBUG
+/* Protected by code mod permission. */
+static struct erl_module_instance *unsealed_module = NULL;
+#endif
+
+void erts_unseal_module(struct erl_module_instance *modi) {
+    ERTS_LC_ASSERT(erts_initialized == 0 ||
+                   erts_thr_progress_is_blocking() ||
+                   erts_has_code_mod_permission());
+    ASSERT(unsealed_module == NULL && !modi->unsealed);
 
 #ifdef BEAMASM
     beamasm_unseal_module(modi->executable_region,
@@ -315,14 +226,18 @@ int erts_module_namespace_unseal(ErtsModuleNamespace *owner, struct erl_module_i
                           modi->code_length);
 #endif
 
-    owner->unsealed = modi;
+#ifdef DEBUG
+    unsealed_module = modi;
+#endif
     modi->unsealed = 1;
-    return 0;
 }
 
-int erts_module_namespace_seal(ErtsModuleNamespace *owner, struct erl_module_instance *modi)
+void erts_seal_module(struct erl_module_instance *modi)
 {
-    if (owner->unsealed != modi || modi->unsealed != 1) return 1;
+    ERTS_LC_ASSERT(erts_initialized == 0 ||
+                   erts_thr_progress_is_blocking() ||
+                   erts_has_code_mod_permission());
+    ASSERT(unsealed_module == modi && modi->unsealed == 1);
 
 #ifdef BEAMASM
     beamasm_flush_icache(modi->executable_region, modi->code_length);
@@ -331,46 +246,37 @@ int erts_module_namespace_seal(ErtsModuleNamespace *owner, struct erl_module_ins
                         modi->code_length);
 #endif
 
-    owner->unsealed = NULL;
+#ifdef DEBUG
+    unsealed_module = NULL;
+#endif
     modi->unsealed = 0;
-    return 0;
-}
-void erts_unseal_module(struct erl_module_instance *modi)
-{
-    ERTS_LC_ASSERT(!erts_initialized || erts_thr_progress_is_blocking() || erts_has_code_mod_permission());
-    if (erts_module_namespace_unseal(diagnostic_modules, modi))
-        erts_exit(ERTS_ABORT_EXIT, "Cannot unseal diagnostic module\n");
-}
-void erts_seal_module(struct erl_module_instance *modi)
-{
-    ERTS_LC_ASSERT(!erts_initialized || erts_thr_progress_is_blocking() || erts_has_code_mod_permission());
-    if (erts_module_namespace_seal(diagnostic_modules, modi))
-        erts_exit(ERTS_ABORT_EXIT, "Cannot seal diagnostic module\n");
 }
 
 Module *module_code(int i, ErtsCodeIndex code_ix)
 {
-    return (Module*) erts_index_lookup(&module_tables[code_ix]->index, i);
+    return (Module*) erts_index_lookup(&module_tables[code_ix], i);
 }
 
 int module_code_size(ErtsCodeIndex code_ix)
 {
-    return module_tables[code_ix]->index.entries;
+    return module_tables[code_ix].entries;
 }
 
 int erts_module_table_limit(void)
 {
-    return module_tables[erts_active_code_ix()]->index.limit;
+    return module_tables[erts_active_code_ix()].limit;
 }
 
 int module_table_sz(void)
 {
-    int i;
-    erts_aint_t bytes = 0;
-    for (i = 0; i < ERTS_NUM_CODE_IX; i++)
-        bytes += erts_atomic_read_nob(&module_tables[i]->bytes);
-    return bytes;
+    return erts_atomic_read_nob(&tot_module_bytes);
 }
+
+#ifdef DEBUG
+static ErtsCodeIndex dbg_load_code_ix = 0;
+#endif
+
+static int entries_at_start_staging = 0;
 
 static ERTS_INLINE void copy_module(Module* dst_mod, Module* src_mod)
 {
@@ -379,25 +285,16 @@ static ERTS_INLINE void copy_module(Module* dst_mod, Module* src_mod)
     dst_mod->on_load = src_mod->on_load;
 }
 
-static int module_start(ErtsModuleNamespace *owner, ErtsCodeIndex source, ErtsCodeIndex destination, int apply)
+void module_start_staging(void)
 {
-    IndexTable *src, *dst;
-    ErtsModuleTable *dst_owner;
-    Module *src_mod, *dst_mod;
+    IndexTable* src = &module_tables[erts_active_code_ix()];
+    IndexTable* dst = &module_tables[erts_staging_code_ix()];
+    Module* src_mod;
+    Module* dst_mod;
     int i, oldsz, newsz;
-    if (source >= ERTS_NUM_CODE_IX || destination >= ERTS_NUM_CODE_IX || source == destination ||
-        owner->staging != NO_MODULE_STAGE || owner->unsealed) return 1;
-    src = &owner->tables[source]->index;
-    dst_owner = owner->tables[destination];
-    dst = &dst_owner->index;
 
-    if (dst->entries > src->entries || src->entries > dst->limit) return 1;
-    for (i = 0; i < dst->entries; ++i) {
-        src_mod = (Module *)erts_index_lookup(src, i);
-        dst_mod = (Module *)erts_index_lookup(dst, i);
-        if (src_mod->module != dst_mod->module) return 1;
-    }
-    if (!apply) return 0;
+    ASSERT(dbg_load_code_ix == -1);
+    ASSERT(dst->entries <= src->entries);
 
     /*
      * Make sure our existing modules are up-to-date
@@ -414,71 +311,33 @@ static int module_start(ErtsModuleNamespace *owner, ErtsCodeIndex source, ErtsCo
      */
     oldsz = index_table_sz(dst);
     for (i = dst->entries; i < src->entries; i++) {
-        Module template;
 	src_mod = (Module*) erts_index_lookup(src, i);
-        template.module = src_mod->module;
-        template.table_owner = dst_owner;
-	dst_mod = (Module*) index_put_entry(dst, &template);
+	dst_mod = (Module*) index_put_entry(dst, src_mod);
 	ASSERT(dst_mod != src_mod);
 
         copy_module(dst_mod, src_mod);
     }
     newsz = index_table_sz(dst);
-    erts_atomic_add_nob(&dst_owner->bytes, (newsz - oldsz));
+    erts_atomic_add_nob(&tot_module_bytes, (newsz - oldsz));
 
-    owner->entries_at_start = dst->entries;
-    owner->staging = destination;
-    return 0;
+    entries_at_start_staging = dst->entries;
+    IF_DEBUG(dbg_load_code_ix = erts_staging_code_ix());
 }
 
-int erts_module_namespace_check_staging(ErtsModuleNamespace *owner, ErtsCodeIndex src, ErtsCodeIndex dst)
+void module_end_staging(int commit)
 {
-    return module_start(owner, src, dst, 0);
-}
-int erts_module_namespace_start_staging(ErtsModuleNamespace *owner, ErtsCodeIndex src, ErtsCodeIndex dst)
-{
-    return module_start(owner, src, dst, 1);
-}
-int erts_module_namespace_check_end(ErtsModuleNamespace *state, ErtsCodeIndex destination, int commit)
-{
-    if (destination >= ERTS_NUM_CODE_IX || state->staging != destination || state->unsealed) return 1;
-    if (!commit) {
-        IndexTable *table = &state->tables[destination]->index;
-        for (int i = state->entries_at_start; i < table->entries; ++i) {
-            Module *mod = (Module *)erts_index_lookup(table, i);
-            if (mod->on_load || module_instance_has_resources(&mod->curr) || module_instance_has_resources(&mod->old))
-                return 1;
-        }
-    }
-    return 0;
-}
-int erts_module_namespace_end_staging(ErtsModuleNamespace *state, ErtsCodeIndex destination, int commit)
-{
-    if (erts_module_namespace_check_end(state, destination, commit)) return 1;
+    ASSERT(dbg_load_code_ix == erts_staging_code_ix());
 
     if (!commit) { /* abort */
-        ErtsModuleTable *owner = state->tables[destination];
-	IndexTable* tab = &owner->index;
+	IndexTable* tab = &module_tables[erts_staging_code_ix()];
 	int oldsz, newsz;
 
-	ASSERT(state->entries_at_start <= tab->entries);
+	ASSERT(entries_at_start_staging <= tab->entries);
 	oldsz = index_table_sz(tab);
-	index_erase_latest_from(tab, state->entries_at_start);
+	index_erase_latest_from(tab, entries_at_start_staging);
 	newsz = index_table_sz(tab);
-	erts_atomic_add_nob(&owner->bytes, (newsz - oldsz));
+	erts_atomic_add_nob(&tot_module_bytes, (newsz - oldsz));
     }
 
-    state->staging = NO_MODULE_STAGE;
-    return 0;
-}
-int erts_module_namespace_can_discard(ErtsModuleNamespace *owner)
-{
-    return owner && !owner->bound && !owner->unsealed && owner->staging == NO_MODULE_STAGE;
-}
-int erts_module_namespace_discard(ErtsModuleNamespace *owner)
-{
-    if (!erts_module_namespace_can_discard(owner)) return 1;
-    for (int i = 0; i < ERTS_NUM_CODE_IX; ++i) erts_rwmtx_destroy(&owner->old_code_locks[i]);
-    erts_free(ERTS_ALC_T_MODULE_TABLE, owner);
-    return 0;
+    IF_DEBUG(dbg_load_code_ix = -1);
 }

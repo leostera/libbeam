@@ -34,9 +34,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 #include <sys/uio.h>
-#ifdef HAVE_FCNTL_H
-#include <fcntl.h>
-#endif
+#include <termios.h>
 #include <ctype.h>
 #include <sys/utsname.h>
 #include <sys/select.h>
@@ -45,10 +43,20 @@
 #include <sys/bsdtypes.h>
 #endif
 
+#include <termios.h>
+#ifdef HAVE_FCNTL_H
+#include <fcntl.h>
+#endif
+#ifdef HAVE_SYS_IOCTL_H
+#include <sys/ioctl.h>
+#endif
+
 #ifdef ADDRESS_SANITIZER
 #  include <sanitizer/asan_interface.h>
 #endif
 
+#define ERTS_WANT_BREAK_HANDLING
+#define WANT_NONBLOCKING    /* must define this to pull in defs from sys.h */
 #include "sys.h"
 #include "erl_thr_progress.h"
 
@@ -75,11 +83,13 @@
 #include "erl_osenv.h"
 #include "erl_dyn_lock_check.h"
 extern int  driver_interrupt(int, int);
+extern void do_break(void);
 
 extern void erl_sys_args(int*, char**);
 
 /* The following two defs should probably be moved somewhere else */
 
+extern void erts_sys_init_float(void);
 
 #ifdef DEBUG
 static int debug_log = 0;
@@ -91,6 +101,8 @@ static erts_atomic32_t have_prepared_crash_dump;
 
 erts_atomic_t sys_misc_mem_sz;
 
+static void smp_sig_notify(int signum);
+static int sig_notify_fds[2] = {-1, -1};
 
 #ifdef ERTS_SYS_SUSPEND_SIGNAL
 static int sig_suspend_fds[2] = {-1, -1};
@@ -105,6 +117,22 @@ static int crashdump_companion_cube_fd = -1;
 
 /* This is used by both the drivers and general I/O, must be set early */
 static int max_files = -1;
+
+/* 
+ * a few variables used by the break handler 
+ */
+erts_atomic32_t erts_break_requested;
+#define ERTS_SET_BREAK_REQUESTED \
+  erts_atomic32_set_nob(&erts_break_requested, (erts_aint32_t) 1)
+#define ERTS_UNSET_BREAK_REQUESTED \
+  erts_atomic32_set_nob(&erts_break_requested, (erts_aint32_t) 0)
+
+
+/* set early so the break handler has access to initial mode */
+struct termios erl_sys_initial_tty_mode;
+static int replace_intr = 0;
+/* assume yes initially, ttsl_init will clear it */
+int using_oldshell = 1;
 
 UWord sys_page_size;
 UWord sys_large_page_size;
@@ -146,6 +174,19 @@ erts_sys_misc_mem_sz(void)
     Uint res = erts_check_io_size();
     res += erts_atomic_read_mb(&sys_misc_mem_sz);
     return res;
+}
+
+/*
+ * reset the terminal to the original settings on exit
+ */
+void sys_tty_reset(int exit_code)
+{
+  if (using_oldshell && !replace_intr) {
+    SET_BLOCKING(0);
+  }
+  else if (isatty(0) && isatty(1)) {
+    tcsetattr(0,TCSANOW,&erl_sys_initial_tty_mode);
+  }
 }
 
 #ifdef __tile__
@@ -334,6 +375,7 @@ erts_sys_pre_init(void)
     erts_init_sys_time_sup();
 
 
+    erts_atomic32_init_nob(&erts_break_requested, 0);
     erts_atomic32_init_nob(&have_prepared_crash_dump, 0);
 
 
@@ -381,7 +423,13 @@ erl_sys_init(void)
     setvbuf(stdout, (char *)NULL, _IOLBF, BUFSIZ);
 #endif
 
+    erts_sys_init_float();
 
+    /* we save this so the break handler can set and reset it properly */
+    /* also so that we can reset on exit (break handler or not) */
+    if (isatty(0)) {
+	tcgetattr(0,&erl_sys_initial_tty_mode);
+    }
 }
 
 /* signal handling */
@@ -538,6 +586,48 @@ int erts_sys_prepare_crash_dump(int secs)
     return prepare_crash_dump(secs);
 }
 
+static void signal_notify_requested(Eterm type) {
+    Process* p = NULL;
+    Eterm msg, *hp;
+    ErtsProcLocks locks = 0;
+    ErlOffHeap *ohp;
+
+    Eterm id = erts_whereis_name_to_id(NULL, am_erl_signal_server);
+
+    if ((p = (erts_pid2proc_opt(NULL, 0, id, 0, ERTS_P2P_FLG_INC_REFC))) != NULL) {
+        ErtsMessage *msgp = erts_alloc_message_heap(p, &locks, 3, &hp, &ohp);
+
+        /* erl_signal_server ! {notify, sighup} */
+        msg = TUPLE2(hp, am_notify, type);
+        erts_queue_message(p, locks, msgp, msg, am_system);
+
+        if (locks)
+            erts_proc_unlock(p, locks);
+        erts_proc_dec_refc(p);
+    }
+}
+
+
+static ERTS_INLINE void
+break_requested(void)
+{
+  /*
+   * just set a flag - checked for and handled by
+   * scheduler threads erts_check_io() (not signal handler).
+   */
+  if (ERTS_BREAK_REQUESTED)
+      erts_exit(ERTS_INTR_EXIT, "");
+
+  ERTS_SET_BREAK_REQUESTED;
+  /* Wake aux thread to get handle break */
+  erts_aux_thread_poke();
+}
+
+static RETSIGTYPE request_break(int signum)
+{
+    smp_sig_notify(signum);
+}
+
 #ifdef ETHR_UNUSABLE_SIGUSRX
 #warning "Unusable SIGUSR1 & SIGUSR2. Disabling use of these signals"
 
@@ -604,11 +694,132 @@ static RETSIGTYPE suspend_signal(int signum)
 */
 
 
+static ERTS_INLINE int
+signalterm_to_signum(Eterm signal)
+{
+    switch (signal) {
+    case am_sighup:  return SIGHUP;
+    /* case am_sigint:  return SIGINT; */
+    case am_sigquit: return SIGQUIT;
+    /* case am_sigill:  return SIGILL; */
+    case am_sigabrt: return SIGABRT;
+    /* case am_sigsegv: return SIGSEGV; */
+    case am_sigalrm: return SIGALRM;
+    case am_sigterm: return SIGTERM;
+    case am_sigusr1: return SIGUSR1;
+    case am_sigusr2: return SIGUSR2;
+    case am_sigchld: return SIGCHLD;
+    case am_sigstop: return SIGSTOP;
+    case am_sigtstp: return SIGTSTP;
+    case am_sigcont: return SIGCONT;
+    case am_sigwinch: return SIGWINCH;
+#ifdef SIGINFO
+    case am_siginfo: return SIGINFO;
+#endif /* defined(SIGINFO) */
+    default:         return 0;
+    }
+}
+
+static ERTS_INLINE Eterm
+signum_to_signalterm(int signum)
+{
+    switch (signum) {
+    case SIGHUP:  return am_sighup;
+    /* case SIGINT:  return am_sigint; */    /* ^c */
+    case SIGQUIT: return am_sigquit;   /* ^\ */
+    /* case SIGILL:  return am_sigill; */
+    case SIGABRT: return am_sigabrt;
+    /* case SIGSEGV: return am_sigsegv; */
+    case SIGALRM: return am_sigalrm;
+    case SIGTERM: return am_sigterm;
+    case SIGUSR1: return am_sigusr1;
+    case SIGUSR2: return am_sigusr2;
+    case SIGCHLD: return am_sigchld;
+    case SIGSTOP: return am_sigstop;
+    case SIGTSTP: return am_sigtstp;   /* ^z */
+    case SIGCONT: return am_sigcont;
+    case SIGWINCH: return am_sigwinch;
+#ifdef SIGINFO
+    case SIGINFO: return am_siginfo;  /* ^t */
+#endif /* defined(SIGINFO) */
+    default:      return am_error;
+    }
+}
+
+static RETSIGTYPE generic_signal_handler(int signum)
+{
+    smp_sig_notify(signum);
+}
+
+int erts_set_signal(Eterm signal, Eterm type) {
+    int signum;
+    if ((signum = signalterm_to_signum(signal)) > 0) {
+        if (type == am_ignore) {
+            sys_signal(signum, SIG_IGN);
+        } else if (type == am_default) {
+            sys_signal(signum, SIG_DFL);
+        } else {
+            sys_signal(signum, generic_signal_handler);
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/* Disable break */
+void erts_set_ignore_break(void) {
+    /*
+     * Ignore signals that can be sent to the VM by
+     * typing certain key combinations at the
+     * controlling terminal...
+     */
+    sys_signal(SIGINT,  SIG_IGN);       /* Ctrl+C */
+    sys_signal(SIGQUIT, SIG_IGN);       /* Ctrl+\ */
+    sys_signal(SIGTSTP, SIG_IGN);       /* Ctrl+Z */
+}
+
+/* Don't use Ctrl+C for break handler but let it be
+   used by the shell instead (see user_drv.erl) */
+void erts_replace_intr(void) {
+  struct termios mode;
+
+  if (isatty(0)) {
+    tcgetattr(0, &mode);
+
+    /* here's an example of how to replace Ctrl+C with Ctrl+U */
+    /* mode.c_cc[VKILL] = 0;
+       mode.c_cc[VINTR] = CKILL; */
+
+    mode.c_cc[VINTR] = 0;	/* disable Ctrl+C */
+    tcsetattr(0, TCSANOW, &mode);
+    replace_intr = 1;
+  }
+}
+
+void init_break_handler(void)
+{
+   sys_signal(SIGINT,  request_break);
+   sys_signal(SIGQUIT, generic_signal_handler);
+}
+
 void sys_init_suspend_handler(void)
 {
 #ifdef ERTS_SYS_SUSPEND_SIGNAL
    sys_signal(ERTS_SYS_SUSPEND_SIGNAL, suspend_signal);
 #endif
+}
+
+void
+erts_sys_unix_later_init(void)
+{
+    sys_signal(SIGTERM, generic_signal_handler);
+#ifndef ETHR_UNUSABLE_SIGUSRX
+   sys_signal(SIGUSR1, generic_signal_handler);
+#endif /* #ifndef ETHR_UNUSABLE_SIGUSRX */
+
+    /* Ignore SIGCHLD to ensure orphaned processes don't turn into zombies on
+     * death when we're pid 1. */
+    sys_signal(SIGCHLD, SIG_IGN);
 }
 
 int sys_max_files(void)
@@ -672,6 +883,48 @@ void os_version(int *pMajor, int *pMinor, int *pBuild) {
     *pBuild = get_number(&release); /* Pointer to build number. */
 #endif
 }
+
+void erts_do_break_handling(void)
+{
+    struct termios temp_mode;
+    int saved = 0;
+
+    /*
+     * Most functions that do_break() calls are intentionally not thread safe;
+     * therefore, make sure that all threads but this one are blocked before
+     * proceeding!
+     */
+    erts_thr_progress_block();
+
+    /* during break we revert to initial settings */
+    /* this is done differently for oldshell */
+    if (using_oldshell && !replace_intr) {
+      SET_BLOCKING(1);
+    }
+    else if (isatty(0)) {
+      tcgetattr(0,&temp_mode);
+      tcsetattr(0,TCSANOW,&erl_sys_initial_tty_mode);
+      saved = 1;
+    }
+
+    /* call the break handling function, reset the flag */
+    do_break();
+
+    ERTS_UNSET_BREAK_REQUESTED;
+
+    fflush(stdout);
+
+    /* after break we go back to saved settings */
+    if (using_oldshell && !replace_intr) {
+      SET_NONBLOCKING(1);
+    }
+    else if (saved) {
+      tcsetattr(0,TCSANOW,&temp_mode);
+    }
+
+    erts_thr_progress_unblock();
+}
+
 
 /* Fills in the systems representation of the Beam process identifier.
 ** The Pid is put in STRING representation in the supplied buffer,
@@ -791,6 +1044,33 @@ void sys_preload_end(Preload* p)
     /* Nothing */
 }
 
+/* Read a key from console, used by break.c
+   Here we assume that all schedulers are stopped so that erl_poll
+   does not interfere with the select below.
+*/
+int sys_get_key(int fd) {
+    int c, ret;
+    unsigned char rbuf[64] = {0};
+    fd_set fds;
+
+    fflush(stdout);		/* Flush query ??? */
+
+    FD_ZERO(&fds);
+    FD_SET(fd,&fds);
+
+    ret = select(fd+1, &fds, NULL, NULL, NULL);
+
+    if (ret == 1) {
+        do {
+            c = read(fd,rbuf,64);
+        } while (c < 0 && errno == EAGAIN);
+        if (c <= 0)
+            return c;
+    }
+    return rbuf[0];
+}
+
+
 extern int erts_initialized;
 void
 erl_assert_error(const char* expr, const char* func, const char* file, int line)
@@ -820,6 +1100,106 @@ erl_debug(char* fmt, ...)
 
 #endif /* DEBUG */
 
+static erts_tid_t sig_dispatcher_tid;
+
+static void
+smp_sig_notify(int signum)
+{
+    int res;
+    do {
+	/* write() is async-signal safe (according to posix) */
+	res = write(sig_notify_fds[1], &signum, sizeof(int));
+    } while (res < 0 && errno == EINTR);
+    if (res != sizeof(int)) {
+	char msg[] =
+	    "smp_sig_notify(): Failed to notify signal-dispatcher thread "
+	    "about received signal";
+	erts_silence_warn_unused_result(write(2, msg, sizeof(msg)));
+	abort();
+    }
+}
+
+static void *
+signal_dispatcher_thread_func(void *unused)
+{
+#ifdef ERTS_ENABLE_LOCK_CHECK
+    erts_lc_set_thread_name("signal_dispatcher");
+#endif
+    while (1) {
+        union {int signum; char buf[4];} sb;
+        Eterm signal;
+	int res, i = 0;
+	/* Block on read() waiting for a signal notification to arrive... */
+
+        do {
+            res = read(sig_notify_fds[0], (void *) &sb.buf[i], sizeof(int) - i);
+            i += res > 0 ? res : 0;
+        } while ((i < sizeof(int) && res >= 0) || (res < 0 && errno == EINTR));
+
+	if (res < 0) {
+	    erts_exit(ERTS_ABORT_EXIT,
+		     "signal-dispatcher thread got unexpected error: %s (%d)\n",
+		     erl_errno_id(errno),
+		     errno);
+	}
+        /*
+         * NOTE 1: The signal dispatcher thread should not do work
+         *         that takes a substantial amount of time (except
+         *         perhaps in test and debug builds). It needs to
+         *         be responsive, i.e, it should only dispatch work
+         *         to other threads.
+         *
+         * NOTE 2: The signal dispatcher thread is not a blockable
+         *         thread (i.e., not a thread managed by the
+         *         erl_thr_progress module). This is intentional.
+         *         We want to be able to interrupt writing of a crash
+         *         dump by hitting C-c twice. Since it isn't a
+         *         blockable thread it is important that it doesn't
+         *         change the state of any data that a blocking thread
+         *         expects to have exclusive access to (unless the
+         *         signal dispatcher itself explicitly is blocking all
+         *         blockable threads).
+         */
+        switch (sb.signum) {
+            case 0: continue;
+            case SIGINT:
+                break_requested();
+                break;
+            default:
+                if ((signal = signum_to_signalterm(sb.signum)) == am_error) {
+                    erts_exit(ERTS_ABORT_EXIT,
+                            "signal-dispatcher thread received unknown "
+                            "signal notification: '%d'\n",
+                            sb.signum);
+                }
+                signal_notify_requested(signal);
+        }
+        ERTS_LC_ASSERT(!erts_thr_progress_is_blocking());
+    }
+    return NULL;
+}
+
+static void
+init_smp_sig_notify(void)
+{
+    erts_thr_opts_t thr_opts = ERTS_THR_OPTS_DEFAULT_INITER;
+    thr_opts.detached = 1;
+    thr_opts.name = "erts_ssig_disp";
+
+    if (pipe(sig_notify_fds) < 0) {
+	erts_exit(ERTS_ABORT_EXIT,
+		 "Failed to create signal-dispatcher pipe: %s (%d)\n",
+		 erl_errno_id(errno),
+		 errno);
+    }
+
+    /* Start signal handler thread */
+    erts_thr_create(&sig_dispatcher_tid,
+			signal_dispatcher_thread_func,
+			NULL,
+			&thr_opts);
+}
+
 static void
 init_smp_sig_suspend(void) {
 #ifdef ERTS_SYS_SUSPEND_SIGNAL
@@ -832,11 +1212,67 @@ init_smp_sig_suspend(void) {
 #endif
 }
 
-/* A minimal executable host used by compiler/bootstrap tooling. No signal
- * dispatcher, terminal policy or Darwin driver pump is installed. */
+#ifdef __DARWIN__
+
+int erts_darwin_main_thread_pipe[2];
+int erts_darwin_main_thread_result_pipe[2];
+
+static void initialize_darwin_main_thread_pipes(void)
+{
+    if (pipe(erts_darwin_main_thread_pipe) < 0 ||
+	pipe(erts_darwin_main_thread_result_pipe) < 0) {
+	erts_exit(ERTS_ERROR_EXIT,"Fatal error initializing Darwin main thread stealing");
+    }
+}
+
+#endif
 void
 erts_sys_main_thread(void)
 {
+#ifdef __DARWIN__
+    initialize_darwin_main_thread_pipes();
+#else
+    /* Become signal receiver thread... */
+#ifdef ERTS_ENABLE_LOCK_CHECK
+    erts_lc_set_thread_name("main");
+#endif
+#endif
+    smp_sig_notify(0); /* Notify initialized */
+
+    /* Wait for a signal to arrive... */
+
+#ifdef __DARWIN__
+    while (1) {
+	/*
+	 * The wx driver needs to be able to steal the main thread for Cocoa to
+	 * work properly.
+	 */
+	fd_set readfds;
+	int res;
+
+	FD_ZERO(&readfds);
+	FD_SET(erts_darwin_main_thread_pipe[0], &readfds);
+	res = select(erts_darwin_main_thread_pipe[0] + 1, &readfds, NULL, NULL, NULL);
+	if (res > 0 && FD_ISSET(erts_darwin_main_thread_pipe[0],&readfds)) {
+	    void* (*func)(void*);
+	    void* arg;
+	    void *resp;
+            res = read(erts_darwin_main_thread_pipe[0],&func,sizeof(void* (*)(void*)));
+            if (res != sizeof(void* (*)(void*)))
+                break;
+            res = read(erts_darwin_main_thread_pipe[0],&arg,sizeof(void*));
+            if (res != sizeof(void*))
+                break;
+	    resp = (*func)(arg);
+	    write(erts_darwin_main_thread_result_pipe[1],&resp,sizeof(void *));
+	}
+
+        if (res == -1 && errno != EINTR)
+            break;
+    }
+    /* Something broke with the main thread pipe, so we ignore it for now.
+       Most probably erts has closed this pipe and is about to exit. */
+#endif /* #ifdef __DARWIN__ */
 
     while (1) {
 #ifdef DEBUG
@@ -857,7 +1293,7 @@ erl_sys_args(int* argc, char** argv)
 
     max_files = erts_check_io_max_files();
 
-    /* Still used by legacy fatal crash dumping, not by normal execution. */
+    init_smp_sig_notify();
     init_smp_sig_suspend();
 
     erts_sys_env_init();

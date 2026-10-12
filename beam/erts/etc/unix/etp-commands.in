@@ -4443,7 +4443,7 @@ define etp-search-alloc
   etp-1 ($arg0) 0
   set $etp_flat = 0
   printf ":...\n"
-  set $etp_search_alloc_n = erts_allocator_count
+  set $etp_search_alloc_n = sizeof(erts_allctrs) / sizeof(*erts_allctrs)
   set $etp_search_alloc_i = 0
   while $etp_search_alloc_i < $etp_search_alloc_n
     if erts_allctrs[$etp_search_alloc_i].alloc
@@ -4546,7 +4546,7 @@ define etp-alloc-stats
   set $etp_tot_crr_no = 0
   set $etp_tot_crr_sz = 0
   set $etp_ERTS_ALC_A_MIN = 1
-  set $etp_ERTS_ALC_A_MAX = erts_allocator_count - 1
+  set $etp_ERTS_ALC_A_MAX = (sizeof(erts_allctrs) / sizeof(*erts_allctrs)) - 1
 
   set $etp_ix = $etp_ERTS_ALC_A_MIN
   while $etp_ix <= $etp_ERTS_ALC_A_MAX
@@ -4637,7 +4637,7 @@ end
 
 define etp-alloc-instances
   set $etp_ERTS_ALC_A_MIN = 1
-  set $etp_ERTS_ALC_A_MAX = erts_allocator_count - 1
+  set $etp_ERTS_ALC_A_MAX = (sizeof(erts_allctrs) / sizeof(*erts_allctrs)) - 1
 
   set $etp_ix = $arg0
   if $etp_ix >= $etp_ERTS_ALC_A_MIN && $etp_ix <= $etp_ERTS_ALC_A_MAX
@@ -5075,7 +5075,7 @@ define _etp-fd-print-events
 end
 
 define etp-fd
-    set $etp_fd_state = &erts_io_event_state->v[$arg0]
+    set $etp_fd_state = &drv_ev_state.v[$arg0]
     printf "fd: %d\n", $arg0
     
     printf "  type: "
@@ -5173,9 +5173,9 @@ end
 
 define etp-fd-dump
     set $etp_fd_dump_i = 0
-    set $etp_fd_dump_len = erts_io_event_state->len.counter
+    set $etp_fd_dump_len = drv_ev_state.len.counter
     while $etp_fd_dump_i < $etp_fd_dump_len
-        set $etp_fd_dump_state = &erts_io_event_state->v[$etp_fd_dump_i]
+        set $etp_fd_dump_state = &drv_ev_state.v[$etp_fd_dump_i]
         set $should_display = $etp_fd_dump_state->flags != 0
         set $should_display |= $etp_fd_dump_state->events != etp_poll_ev_none && $etp_fd_dump_state->events != 0
         set $should_display |= $etp_fd_dump_state->active_events != etp_poll_ev_none && $etp_fd_dump_state->active_events != 0

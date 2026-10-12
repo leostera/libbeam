@@ -40,7 +40,6 @@
 #include "erl_binary.h"
 #include "erl_bits.h"
 #include "erl_bif_unique.h"
-#include "erl_global_literals.h"
 
 #if defined(__SSE2__) || defined(_M_X64) || \
     (defined(_M_IX86) && defined(_M_IX86_FP) && _M_IX86_FP >= 2)
@@ -2067,7 +2066,7 @@ static Eterm do_split_global_result(Process *p, Eterm subject, BinaryFindContext
         if (!(extracted_size == 0 && do_trim)) {
             if (extracted_size == 0) {
                 if (is_non_value(empty_extracted)) {
-                    empty_extracted = ERTS_GLOBAL_LIT_EMPTY_BINARY;
+                    empty_extracted = atom_tab(atom_val(am_Empty))->u.bin;
                 }
                 extracted = empty_extracted;
             } else {
@@ -2096,7 +2095,7 @@ static Eterm do_split_global_result(Process *p, Eterm subject, BinaryFindContext
     if (!(extracted_size == 0 && do_trim)) {
         if (extracted_size == 0) {
             if (is_non_value(empty_extracted)) {
-                empty_extracted = ERTS_GLOBAL_LIT_EMPTY_BINARY;
+                empty_extracted = atom_tab(atom_val(am_Empty))->u.bin;
             }
             extracted = empty_extracted;
         } else {

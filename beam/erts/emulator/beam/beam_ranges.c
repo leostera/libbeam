@@ -29,19 +29,24 @@
 #include "global.h"
 #include "beam_code.h"
 #include "erl_unicode.h"
-#include "beam_ranges.h"
 
 typedef struct {
     ErtsCodePtr start; /* Pointer to start of module. */
     erts_atomic_t end; /* Points one word beyond last function in module. */
 } Range;
 
+/*
+ * Used for crash dumping of literals. The size of erts_dump_lit_areas is
+ * always at least the number of active ranges.
+ */
+ErtsLiteralArea** erts_dump_lit_areas;
+Uint erts_dump_num_lit_areas;
 
 /* Range 'end' needs to be atomic as we purge module
     by setting end=start in active code_ix */
 #define RANGE_END(R) ((ErtsCodePtr)erts_atomic_read_nob(&(R)->end))
 
-static Range* find_range(ErtsRangeNamespace *, ErtsCodeIndex, ErtsCodePtr);
+static Range* find_range(ErtsCodePtr pc);
 static void lookup_loc(FunctionInfo* fi, ErtsCodePtr pc,
                        const BeamCodeHeader*, int idx);
 
@@ -56,18 +61,9 @@ struct ranges {
     Sint allocated;	       /* Number of allocated entries. */
     erts_atomic_t mid;     /* Cached search start point */
 };
-struct ErtsRangeNamespace {
-    struct ranges slots[ERTS_NUM_CODE_IX];
-    erts_atomic_t mem_used;
-    Range *write_ptr;
-    ErtsCodeIndex source, destination;
-    Sint insert_limit, inserted;
-    int bound;
-    ErtsLiteralArea **dump_areas;
-    Uint dump_capacity;
-};
-static ErtsRangeNamespace *diagnostic_ranges;
-#define NO_RANGE_STAGE (~(ErtsCodeIndex)0)
+static struct ranges r[ERTS_NUM_CODE_IX];
+static erts_atomic_t mem_used;
+static Range* write_ptr;
 
 #ifdef HARD_DEBUG
 static void check_consistency(struct ranges* p)
@@ -99,17 +95,12 @@ rangecompare(Range* a, Range* b)
     }
 }
 
-ErtsRangeNamespace *
-erts_range_namespace_create(void)
+void
+erts_init_ranges(void)
 {
-    ErtsRangeNamespace *owner = erts_alloc(ERTS_ALC_T_MODULE_REFS, sizeof(*owner));
-    struct ranges *r = owner->slots;
     Sint i;
-    owner->bound = 0;
-    owner->source = owner->destination = NO_RANGE_STAGE;
-    owner->write_ptr = NULL;
-    owner->insert_limit = owner->inserted = 0;
-    erts_atomic_init_nob(&owner->mem_used, 0);
+
+    erts_atomic_init_nob(&mem_used, 0);
     for (i = 0; i < ERTS_NUM_CODE_IX; i++) {
 	r[i].modules = 0;
 	r[i].n = 0;
@@ -117,58 +108,38 @@ erts_range_namespace_create(void)
 	erts_atomic_init_nob(&r[i].mid, 0);
     }
 
-    owner->dump_capacity = 8;
-    owner->dump_areas = (ErtsLiteralArea **)
-        erts_alloc(ERTS_ALC_T_CRASH_DUMP, owner->dump_capacity * sizeof(ErtsLiteralArea*));
-    return owner;
+    erts_dump_num_lit_areas = 8;
+    erts_dump_lit_areas = (ErtsLiteralArea **)
+        erts_alloc(ERTS_ALC_T_CRASH_DUMP,
+                   erts_dump_num_lit_areas * sizeof(ErtsLiteralArea*));
 }
 
-static int
-range_start(ErtsRangeNamespace *owner, ErtsCodeIndex src,
-             ErtsCodeIndex dst, int num_new, int apply)
+void
+erts_start_staging_ranges(int num_new)
 {
-    struct ranges *r = owner->slots;
+    ErtsCodeIndex src = erts_active_code_ix();
+    ErtsCodeIndex dst = erts_staging_code_ix();
     Sint need;
-    if (owner->destination != NO_RANGE_STAGE || src >= ERTS_NUM_CODE_IX ||
-        dst >= ERTS_NUM_CODE_IX || src == dst || num_new < 0)
-        return 1;
-    if ((UWord)num_new > ((UWord)ERTS_SINT_MAX / sizeof(Range)) - (UWord)r[src].n)
-        return 1;
-    if (!apply) return 0;
+
     if (r[dst].modules) {
-	erts_atomic_add_nob(&owner->mem_used, -r[dst].allocated);
+	erts_atomic_add_nob(&mem_used, -r[dst].allocated);
 	erts_free(ERTS_ALC_T_MODULE_REFS, r[dst].modules);
     }
 
     need = r[dst].allocated = r[src].n + num_new;
-    erts_atomic_add_nob(&owner->mem_used, need);
-    owner->write_ptr = erts_alloc(ERTS_ALC_T_MODULE_REFS, need * sizeof(Range));
-    r[dst].modules = owner->write_ptr;
-    r[dst].n = 0;
-    owner->source = src;
-    owner->destination = dst;
-    owner->insert_limit = num_new;
-    owner->inserted = 0;
-    return 0;
+    erts_atomic_add_nob(&mem_used, need);
+    write_ptr = erts_alloc(ERTS_ALC_T_MODULE_REFS,
+			   need * sizeof(Range));
+    r[dst].modules = write_ptr;
 }
 
-int erts_range_namespace_check_staging(ErtsRangeNamespace *owner, ErtsCodeIndex src, ErtsCodeIndex dst, int count)
+void
+erts_end_staging_ranges(int commit)
 {
-    return range_start(owner, src, dst, count, 0);
-}
-int erts_range_namespace_start_staging(ErtsRangeNamespace *owner, ErtsCodeIndex src, ErtsCodeIndex dst, int count)
-{
-    return range_start(owner, src, dst, count, 1);
-}
-int
-erts_range_namespace_end_staging(ErtsRangeNamespace *owner, int commit)
-{
-    struct ranges *r = owner->slots;
-    Range *write_ptr = owner->write_ptr;
-    ErtsCodeIndex src = owner->source, dst = owner->destination;
-    if (dst == NO_RANGE_STAGE) return 1;
     if (commit) {
 	Sint i;
+	ErtsCodeIndex src = erts_active_code_ix();
+	ErtsCodeIndex dst = erts_staging_code_ix();
 	Range* mp;
 	Sint num_inserted;
 
@@ -209,28 +180,21 @@ erts_range_namespace_end_staging(ErtsRangeNamespace *owner, int commit)
 				(erts_aint_t) (r[dst].modules +
 					       r[dst].n / 2));
 
-        if (r[dst].allocated > owner->dump_capacity) {
-            owner->dump_capacity = r[dst].allocated * 2;
-            owner->dump_areas = (ErtsLiteralArea **)
-                erts_realloc(ERTS_ALC_T_CRASH_DUMP, owner->dump_areas,
-                             owner->dump_capacity * sizeof(ErtsLiteralArea*));
+        if (r[dst].allocated > erts_dump_num_lit_areas) {
+            erts_dump_num_lit_areas = r[dst].allocated * 2;
+            erts_dump_lit_areas = (ErtsLiteralArea **)
+                erts_realloc(ERTS_ALC_T_CRASH_DUMP,
+                             (void *) erts_dump_lit_areas,
+                             erts_dump_num_lit_areas * sizeof(ErtsLiteralArea*));
         }
-    } else {
-        r[dst].n = 0;
-        erts_atomic_set_nob(&r[dst].mid, 0);
     }
-    owner->source = owner->destination = NO_RANGE_STAGE;
-    owner->write_ptr = NULL;
-    return 0;
 }
 
-int
-erts_range_namespace_update(ErtsRangeNamespace *owner, const BeamCodeHeader* code, Uint size)
+void
+erts_update_ranges(const BeamCodeHeader* code, Uint size)
 {
-    struct ranges *r = owner->slots;
-    ErtsCodeIndex dst = owner->destination, src = owner->source;
-    Range *write_ptr = owner->write_ptr;
-    if (dst == NO_RANGE_STAGE || owner->inserted >= owner->insert_limit) return 1;
+    ErtsCodeIndex dst = erts_staging_code_ix();
+    ErtsCodeIndex src = erts_active_code_ix();
 
     if (src == dst) {
 	ASSERT(!erts_initialized);
@@ -241,7 +205,7 @@ erts_range_namespace_update(ErtsRangeNamespace *owner, const BeamCodeHeader* cod
 	 */
 	if (r[dst].modules == NULL) {
 	    Sint need = 128;
-	    erts_atomic_add_nob(&owner->mem_used, need);
+	    erts_atomic_add_nob(&mem_used, need);
 	    r[dst].modules = erts_alloc(ERTS_ALC_T_MODULE_REFS,
 					need * sizeof(Range));
 	    r[dst].allocated = need;
@@ -253,24 +217,20 @@ erts_range_namespace_update(ErtsRangeNamespace *owner, const BeamCodeHeader* cod
     write_ptr->start = code;
     erts_atomic_init_nob(&(write_ptr->end),
 			     (erts_aint_t)(((byte *)code) + size));
-    owner->write_ptr = write_ptr + 1;
-    ++owner->inserted;
-    return 0;
+    write_ptr++;
 }
 
-int
-erts_range_namespace_remove(ErtsRangeNamespace *owner, ErtsCodeIndex ix, const BeamCodeHeader* code)
+void
+erts_remove_from_ranges(const BeamCodeHeader* code)
 {
-    Range* rp = find_range(owner, ix, code);
-    if (!rp) return 1;
+    Range* rp = find_range(code);
     erts_atomic_set_nob(&rp->end, (erts_aint_t)rp->start);
-    return 0;
 }
 
 UWord
-erts_range_namespace_size(ErtsRangeNamespace *owner)
+erts_ranges_sz(void)
 {
-    return erts_atomic_read_nob(&owner->mem_used) * sizeof(Range);
+    return erts_atomic_read_nob(&mem_used) * sizeof(Range);
 }
 
 /*
@@ -293,7 +253,7 @@ erts_lookup_function_info(FunctionInfo* fi, ErtsCodePtr pc, int full_info)
     fi->mfa = NULL;
     fi->needed = 5;
     fi->loc = LINE_INVALID_LOCATION;
-    rp = find_range(diagnostic_ranges, erts_active_code_ix(), pc);
+    rp = find_range(pc);
     if (rp == 0) {
 	return;
     }
@@ -345,14 +305,12 @@ erts_find_function_from_pc(ErtsCodePtr pc)
 }
 
 static Range*
-find_range(ErtsRangeNamespace *owner, ErtsCodeIndex active, ErtsCodePtr pc)
+find_range(ErtsCodePtr pc)
 {
-    struct ranges *r = owner->slots;
-    Range *low, *high, *mid;
-    if (active >= ERTS_NUM_CODE_IX || !r[active].n) return NULL;
-    low = r[active].modules;
-    high = low + r[active].n;
-    mid = (Range *) erts_atomic_read_nob(&r[active].mid);
+    ErtsCodeIndex active = erts_active_code_ix();
+    Range* low = r[active].modules;
+    Range* high = low + r[active].n;
+    Range* mid = (Range *) erts_atomic_read_nob(&r[active].mid);
 
     CHECK(&r[active]);
     while (low < high) {
@@ -458,50 +416,3 @@ erts_find_next_code_for_line(const BeamCodeHeader* code_hdr,
 
     return lt->func_tab[0][line_index];
 }
-
-const BeamCodeHeader *erts_range_namespace_find(ErtsRangeNamespace *owner, ErtsCodeIndex ix, ErtsCodePtr pc)
-{
-    Range *range = find_range(owner, ix, pc);
-    return range ? range->start : NULL;
-}
-int erts_range_namespace_can_discard(ErtsRangeNamespace *owner)
-{
-    if (!owner || owner->bound || owner->destination != NO_RANGE_STAGE) return 0;
-    for (int ix = 0; ix < ERTS_NUM_CODE_IX; ++ix)
-        for (Sint i = 0; i < owner->slots[ix].n; ++i) {
-            Range *range = &owner->slots[ix].modules[i];
-            if (range->start < RANGE_END(range)) return 0;
-        }
-    return 1;
-}
-int erts_range_namespace_discard(ErtsRangeNamespace *owner)
-{
-    if (!erts_range_namespace_can_discard(owner)) return 1;
-    for (int ix = 0; ix < ERTS_NUM_CODE_IX; ++ix)
-        if (owner->slots[ix].modules)
-            erts_free(ERTS_ALC_T_MODULE_REFS, owner->slots[ix].modules);
-    erts_free(ERTS_ALC_T_CRASH_DUMP, owner->dump_areas);
-    erts_free(ERTS_ALC_T_MODULE_REFS, owner);
-    return 0;
-}
-void erts_init_ranges(ErtsRangeNamespace *owner)
-{
-    ASSERT(owner && !diagnostic_ranges);
-    diagnostic_ranges = owner;
-    owner->bound = 1;
-    owner->source = owner->destination = 0;
-    owner->insert_limit = 128;
-}
-void erts_update_ranges(const BeamCodeHeader *code, Uint size)
-{
-    if (erts_range_namespace_update(diagnostic_ranges, code, size))
-        erts_exit(ERTS_ABORT_EXIT, "Cannot insert diagnostic range\n");
-}
-void erts_remove_from_ranges(const BeamCodeHeader *code)
-{
-    if (erts_range_namespace_remove(diagnostic_ranges, erts_active_code_ix(), code))
-        erts_exit(ERTS_ABORT_EXIT, "Cannot remove diagnostic range\n");
-}
-UWord erts_ranges_sz(void) { return erts_range_namespace_size(diagnostic_ranges); }
-ErtsLiteralArea **erts_diagnostic_dump_literal_areas(void) { return diagnostic_ranges->dump_areas; }
-Uint erts_diagnostic_dump_literal_capacity(void) { return diagnostic_ranges->dump_capacity; }

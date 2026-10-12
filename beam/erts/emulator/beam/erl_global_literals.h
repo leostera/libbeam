@@ -20,35 +20,27 @@
  * %CopyrightEnd%
  */
 
-/* Immutable canonical values and platform constants, owned by an Engine.
- * Atom names, export literals and persistent terms have separate owners.
- * Allocating a constant once does not make its backing process-lifetime storage.
+/* Global literals are used to store Erlang terms that are never modified or 
+ * deleted. They are commonly-used constants at compile or run-time. This is 
+ * similar in spirit to persistent_term but for internal usage.
+ *
+ * Examples include lambdas associated with export entries, the bitstring
+ * representation of atoms, and certain constants.
  */
 
 #ifndef __ERL_GLOBAL_LITERALS_H__
 #define __ERL_GLOBAL_LITERALS_H__
-#include "erl_embed.h"
-typedef struct ErtsGlobalLiteralArena ErtsGlobalLiteralArena;
-/* Independent unpublished storage. Paired allocate/register holds a lock.
- * Discard requires exclusive ownership and no escaped terms; bound arenas refuse. */
-ErtsGlobalLiteralArena *erts_global_literal_arena_create(Uint initial_size);
-Eterm *erts_global_literal_arena_allocate(ErtsGlobalLiteralArena *, Uint,
-                                         struct erl_off_heap_header ***);
-void erts_global_literal_arena_register(ErtsGlobalLiteralArena *, Eterm *);
-Uint erts_global_literal_arena_bytes(ErtsGlobalLiteralArena *);
-int erts_global_literal_arena_discard(ErtsGlobalLiteralArena *);
 
 extern Eterm ERTS_GLOBAL_LIT_OS_TYPE;
 extern Eterm ERTS_GLOBAL_LIT_OS_VERSION;
 extern Eterm ERTS_GLOBAL_LIT_DFLAGS_RECORD;
 extern Eterm ERTS_GLOBAL_LIT_ERL_FILE_SUFFIX;
 extern Eterm ERTS_GLOBAL_LIT_EMPTY_TUPLE;
-extern Eterm ERTS_GLOBAL_LIT_EMPTY_BINARY;
 
 /* Initializes global literals. Note that the literals terms mentioned in the 
  * examples above may be created elsewhere, and are only kept here for clarity.
  */
-void init_global_literals(ErtsEngine *);
+void init_global_literals(void);
 
 /* Allocates space for global literals. Users must call erts_global_literal_register
  * when done creating the literal. 

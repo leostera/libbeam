@@ -26,14 +26,13 @@
 #  include "config.h"
 #endif
 
+#define ERTS_WANT_BREAK_HANDLING
 
 #include <stddef.h> /* offsetof() */
 #include "sys.h"
 #include "erl_vm.h"
 #include "global.h"
 #include "erl_process.h"
-#include "erl_isolate_state.h"
-#include "erl_engine.h"
 #include "error.h"
 #include "bif.h"
 #include "erl_db.h"
@@ -3249,6 +3248,10 @@ aux_thread(void *vix)
 
 	if (!aux_work) {
 
+#ifdef ERTS_BREAK_REQUESTED
+            if (ix == 0 && ERTS_BREAK_REQUESTED)
+                erts_do_break_handling();
+#endif
 
 	    if (thr_prgr_active)
 		erts_thr_progress_active(tpd, thr_prgr_active = 0);
@@ -5988,14 +5991,13 @@ init_scheduler_registers(ErtsSchedulerData* esdp) {
 }
 
 static void
-init_scheduler_data(ErtsEngine *engine, ErtsSchedulerData* esdp, int num,
+init_scheduler_data(ErtsSchedulerData* esdp, int num,
 		    ErtsSchedulerSleepInfo* ssi,
 		    ErtsRunQueue* runq,
 		    char** daww_ptr, size_t daww_sz,
 		    Process *shadow_proc,
                     Uint64 time_stamp)
 {
-    esdp->engine = engine;
     esdp->timer_wheel = NULL;
     esdp->match_pseudo_process = NULL;
     esdp->free_process = NULL;
@@ -6085,7 +6087,7 @@ init_scheduler_data(ErtsEngine *engine, ErtsSchedulerData* esdp, int num,
 }
 
 void
-erts_init_scheduling(ErtsEngine *engine, int no_schedulers, int no_schedulers_online, int no_poll_threads,
+erts_init_scheduling(int no_schedulers, int no_schedulers_online, int no_poll_threads,
 		     int no_dirty_cpu_schedulers, int no_dirty_cpu_schedulers_online,
 		     int no_dirty_io_schedulers
 		     )
@@ -6277,7 +6279,7 @@ erts_init_scheduling(ErtsEngine *engine, int no_schedulers, int no_schedulers_on
 
     for (ix = 0; ix < n; ix++) {
 	ErtsSchedulerData *esdp = ERTS_SCHEDULER_IX(ix);
-	init_scheduler_data(engine, esdp, ix+1, ERTS_SCHED_SLEEP_INFO_IX(ix),
+	init_scheduler_data(esdp, ix+1, ERTS_SCHED_SLEEP_INFO_IX(ix),
 			    ERTS_RUNQ_IX(ix), &daww_ptr, daww_sz,
                             NULL, 0);
     }
@@ -6301,13 +6303,13 @@ erts_init_scheduling(ErtsEngine *engine, int no_schedulers, int no_schedulers_on
 
 	for (ix = 0; ix < no_dirty_cpu_schedulers; ix++) {
 	    ErtsSchedulerData *esdp = ERTS_DIRTY_CPU_SCHEDULER_IX(ix);
-	    init_scheduler_data(engine, esdp, ix+1, ERTS_DIRTY_CPU_SCHED_SLEEP_INFO_IX(ix),
+	    init_scheduler_data(esdp, ix+1, ERTS_DIRTY_CPU_SCHED_SLEEP_INFO_IX(ix),
 				ERTS_DIRTY_CPU_RUNQ, NULL, 0,
 				&adsp[adspix++].dsp, ts);
 	}
 	for (ix = 0; ix < no_dirty_io_schedulers; ix++) {
 	    ErtsSchedulerData *esdp = ERTS_DIRTY_IO_SCHEDULER_IX(ix);
-	    init_scheduler_data(engine, esdp, ix+1, ERTS_DIRTY_IO_SCHED_SLEEP_INFO_IX(ix),
+	    init_scheduler_data(esdp, ix+1, ERTS_DIRTY_IO_SCHED_SLEEP_INFO_IX(ix),
 				ERTS_DIRTY_IO_RUNQ, NULL, 0,
                                 &adsp[adspix++].dsp, ts);
 	}
@@ -6472,7 +6474,6 @@ make_proxy_proc(Process *prev_proxy, Process *proc, erts_aint32_t prio)
         erts_init_runq_proc(proxy, rq, bound);
     }
 
-    proxy->namespace_owner = proc->namespace_owner; /* Borrowed via real-proc ref. */
     proxy->common.id = proc->common.id;
     ASSERT(proxy->u.real_proc == NULL);
     proxy->u.real_proc = proc;
@@ -8904,79 +8905,17 @@ sched_dirty_io_thread_func(void *vesdp)
     return NULL;
 }
 
-/* One runtime's retained thread handles. Previously auxiliary/poll thread IDs
- * were discarded and all these threads were detached. This is the ownership
- * foundation for coordinated shutdown, NOT an implemented stop/join protocol.
- * Only the startup/control thread writes/reads this registry. It remains alive
- * with the current process-lifetime runtime; never free it while threads run.
- */
-typedef struct {
-    ethr_tid tid;
-    enum ErlSchedulerThreadKind kind;
-    int detached;
-} ErtsRuntimeThreadHandle;
-
-typedef struct ErtsSchedulerThreadGroup {
-    size_t count;
-    size_t capacity;
-    ErtsRuntimeThreadHandle handles[];
-} ErtsSchedulerThreadGroup;
-
-static void
-retain_runtime_thread(ErtsSchedulerThreadGroup *threads, ethr_tid tid,
-                      enum ErlSchedulerThreadKind kind, int detached)
-{
-    ErtsRuntimeThreadHandle *handle;
-    ASSERT(threads->count < threads->capacity);
-    handle = &threads->handles[threads->count++];
-    handle->tid = tid;
-    handle->kind = kind;
-    handle->detached = detached;
-}
-
 void
-erl_scheduler_thread_inventory(const ErtsEngine *engine, ErlSchedulerThreadInventory *out)
+erts_start_schedulers(void)
 {
-    const ErtsSchedulerThreadGroup *threads = engine->scheduler_threads;
-    size_t i;
-    sys_memset(out, 0, sizeof(*out));
-    out->all_joinable = 1;
-    if (!threads)
-        return;
-    out->total = threads->count;
-    for (i = 0; i < threads->count; i++) {
-        const ErtsRuntimeThreadHandle *handle = &threads->handles[i];
-        out->counts[handle->kind]++;
-        if (handle->detached)
-            out->all_joinable = 0;
-    }
-}
-
-void
-erts_start_schedulers(ErtsEngine *engine)
-{
-    ErtsSchedulerThreadGroup *threads;
-    size_t capacity;
     ethr_tid tid;
     int res = 0;
     char name[ETHR_THR_NAME_MAX + 1];
     ethr_thr_opts opts = ETHR_THR_OPTS_DEFAULT_INITER;
     int ix;
 
-    ASSERT(engine && !engine->scheduler_threads);
-    capacity = (size_t) erts_no_schedulers
-        + erts_no_dirty_cpu_schedulers + erts_no_dirty_io_schedulers
-        + erts_no_poll_threads + (erts_runq_supervision_interval != 0);
-    for (ix = 0; ix < erts_no_aux_work_threads;
-         ix = ix == 0 ? 1 + (int) erts_no_schedulers : ix + 1)
-        capacity++;
-    threads = erts_alloc(ERTS_ALC_T_RUNTIME_THREAD_HANDLES,
-        sizeof(*threads) + capacity * sizeof(ErtsRuntimeThreadHandle));
-    threads->count = 0;
-    threads->capacity = capacity;
-    engine->scheduler_threads = threads;
+    opts.detached = 1;
 
-    opts.detached = 0;
     opts.name = name;
 
     if (erts_runq_supervision_interval) {
@@ -8992,8 +8931,7 @@ erts_start_schedulers(ErtsEngine *engine)
 	if (0 != res)
 	    erts_exit(ERTS_ABORT_EXIT, "Failed to create run-queue supervision thread, "
                       "error = %d\n", res);
-        retain_runtime_thread(threads, runq_supervisor_tid, ERL_THREAD_RUNQ_SUPERVISOR,
-                              opts.detached);
+
     }
 
     opts.suggested_stack_size = erts_sched_thread_suggested_stack_size;
@@ -9003,13 +8941,11 @@ erts_start_schedulers(ErtsEngine *engine)
     for (ix = 0; ix < erts_no_schedulers; ix++) {
 	ErtsSchedulerData *esdp = ERTS_SCHEDULER_IX(ix);
 	ASSERT(ix == esdp->no - 1);
-        ASSERT(esdp->engine == engine);
 	erts_snprintf(opts.name, sizeof(name), "erts_sched_%d", ix + 1);
 	res = ethr_thr_create(&esdp->tid, sched_thread_func, (void*)esdp, &opts);
 	if (res != 0) {
            erts_exit(ERTS_ABORT_EXIT, "Failed to create scheduler thread %d, error = %d\n", ix, res);
 	}
-        retain_runtime_thread(threads, esdp->tid, ERL_THREAD_SCHEDULER, opts.detached);
     }
 
     /* Probably not needed as thread create will imply a memory barrier,
@@ -9019,23 +8955,19 @@ erts_start_schedulers(ErtsEngine *engine)
     {
 	for (ix = 0; ix < erts_no_dirty_cpu_schedulers; ix++) {
 	    ErtsSchedulerData *esdp = ERTS_DIRTY_CPU_SCHEDULER_IX(ix);
-            ASSERT(esdp->engine == engine);
 	    erts_snprintf(opts.name, sizeof(name), "erts_dcpus_%d", ix + 1);
             opts.suggested_stack_size = erts_dcpu_sched_thread_suggested_stack_size;
 	    res = ethr_thr_create(&esdp->tid,sched_dirty_cpu_thread_func,(void*)esdp,&opts);
 	    if (res != 0)
 		erts_exit(ERTS_ABORT_EXIT, "Failed to create dirty cpu scheduler thread %d, error = %d\n", ix, res);
-            retain_runtime_thread(threads, esdp->tid, ERL_THREAD_DIRTY_CPU, opts.detached);
 	}
 	for (ix = 0; ix < erts_no_dirty_io_schedulers; ix++) {
 	    ErtsSchedulerData *esdp = ERTS_DIRTY_IO_SCHEDULER_IX(ix);
-            ASSERT(esdp->engine == engine);
 	    erts_snprintf(opts.name, sizeof(name), "erts_dios_%d", ix + 1);
             opts.suggested_stack_size = erts_dio_sched_thread_suggested_stack_size;
 	    res = ethr_thr_create(&esdp->tid,sched_dirty_io_thread_func,(void*)esdp,&opts);
 	    if (res != 0)
 		erts_exit(ERTS_ABORT_EXIT, "Failed to create dirty io scheduler thread %d, error = %d\n", ix, res);
-            retain_runtime_thread(threads, esdp->tid, ERL_THREAD_DIRTY_IO, opts.detached);
 	}
     }
 
@@ -9046,8 +8978,7 @@ erts_start_schedulers(ErtsEngine *engine)
 
 	res = ethr_thr_create(&tid, aux_thread, (void *) (Sint) ix, &opts);
 	if (res != 0)
-	    erts_exit(ERTS_ABORT_EXIT, "Failed to create aux thread %d, error = %d\n", ix, res);
-        retain_runtime_thread(threads, tid, ERL_THREAD_AUXILIARY, opts.detached);
+	    erts_exit(ERTS_ABORT_EXIT, "Failed to create aux thread %d, error = %d\n", res);
 	if (ix == 0)
 	    ix = (int) (1 + erts_no_schedulers);
 	else
@@ -9075,9 +9006,7 @@ erts_start_schedulers(ErtsEngine *engine)
         res = ethr_thr_create(&tid, poll_thread, (void*) bpt, &opts);
         if (res != 0)
             erts_exit(ERTS_ABORT_EXIT, "Failed to create poll thread\n");
-        retain_runtime_thread(threads, tid, ERL_THREAD_POLL, opts.detached);
     }
-    ASSERT(threads->count == threads->capacity);
 }
 
 BIF_RETTYPE
@@ -12212,14 +12141,12 @@ static void delete_process(Process* p);
 void
 erts_free_proc(Process *p)
 {
-    ErtsIsolateNamespaceState *owner = p->namespace_owner;
     erts_proc_lock_fin(p);
     ASSERT(erts_atomic32_read_nob(&p->state) & ERTS_PSFLG_FREE);
     ASSERT(0 == erts_proc_read_refc(p));
     if (p->flags & F_DELAYED_DEL_PROC)
 	delete_process(p);
     erts_free(ERTS_ALC_T_PROC, (void *) p);
-    erts_isolate_namespace_release(owner);
 }
 
 typedef struct {
@@ -12250,7 +12177,7 @@ static void early_init_process_struct(void *varg, Eterm data)
 ** Allocate process and find out where to place next process.
 */
 static Process*
-alloc_process(ErtsIsolateNamespaceState *owner, ErtsRunQueue *rq, int bound, erts_aint32_t state)
+alloc_process(ErtsRunQueue *rq, int bound, erts_aint32_t state)
 {
     ErtsEarlyProcInit init_arg;
     Process *p;
@@ -12259,9 +12186,7 @@ alloc_process(ErtsIsolateNamespaceState *owner, ErtsRunQueue *rq, int bound, ert
     if (!p)
 	return NULL;
 
-    ASSERT(rq && owner);
-    p->namespace_owner = owner;
-    erts_isolate_namespace_acquire(owner);
+    ASSERT(rq);
 
     init_arg.proc = (Process *) p;
     init_arg.state = state;
@@ -12275,7 +12200,6 @@ alloc_process(ErtsIsolateNamespaceState *owner, ErtsRunQueue *rq, int bound, ert
 			       (void *) &init_arg,
 			       early_init_process_struct)) {
 	erts_free(ERTS_ALC_T_PROC, p);
-        erts_isolate_namespace_release(owner);
 	return NULL;
     }
 
@@ -12510,7 +12434,7 @@ erts_parse_spawn_opts(ErlSpawnOpts *sop, Eterm opts_list, Eterm *tag,
 }
 
 Eterm
-erl_create_process(ErtsIsolateNamespaceState *owner, Process* parent, /* Parent of process (default group leader). */
+erl_create_process(Process* parent, /* Parent of process (default group leader). */
 		   Eterm mod,	/* Tagged atom for module. */
 		   Eterm func,	/* Tagged atom for function. */
 		   Eterm args,	/* Arguments for function (must be well-formed list). */
@@ -12563,14 +12487,6 @@ erl_create_process(ErtsIsolateNamespaceState *owner, Process* parent, /* Parent 
      * Check for errors.
      */
 
-    /* Execution still uses diagnostic dispatch boundaries. Do not admit a
-     * private process until those boundaries carry the owner as well. */
-    if (!owner || owner != erts_diagnostic_namespace() ||
-        (parent && parent->namespace_owner != owner)) {
-        so->error_code = BADARG;
-        goto error;
-    }
-
     if (is_not_atom(mod) || is_not_atom(func) || ((arity = erts_list_length(args)) < 0)) {
 	so->error_code = BADARG;
 	goto error;
@@ -12616,8 +12532,7 @@ erl_create_process(ErtsIsolateNamespaceState *owner, Process* parent, /* Parent 
     }
     ASSERT(rq);
 
-    ASSERT(owner && (!parent || parent->namespace_owner == owner));
-    p = alloc_process(owner, rq, bound, state); /* All proc locks are locked by this thread
+    p = alloc_process(rq, bound, state); /* All proc locks are locked by this thread
                                             on success */
     if (!p) {
 	erts_send_error_to_logger_str(group_leader, "Too many processes\n");
@@ -13286,7 +13201,6 @@ erts_send_local_spawn_reply(Process *parent, ErtsProcLocks parent_locks,
 
 void erts_init_empty_process(Process *p)
 {
-    p->namespace_owner = NULL; /* Non-world scratch process until explicitly bound. */
     p->htop = NULL;
     p->stop = NULL;
     p->hend = NULL;

@@ -34,7 +34,6 @@
 #include "beam_common.h"
 #include "erl_map.h"
 #include "big.h"
-#include "erl_code_table.h"
 
 #define RECORD_INITIAL_SIZE   4000
 #define RECORD_LIMIT          (512*1024)
@@ -49,24 +48,20 @@
 #endif
 
 static HashValue
-record_hash(const void *object)
+record_hash(ErtsRecordEntry *str)
 {
-    const ErtsRecordEntry *str = object;
     return RECORD_HASH(str->module, str->name);
 }
 
 static int
-record_cmp(const void *a, const void *b) {
-    const ErtsRecordEntry *tmpl = a, *obj = b;
+record_cmp(const ErtsRecordEntry *tmpl, const ErtsRecordEntry *obj) {
     return !(tmpl->module == obj->module &&
              tmpl->name == obj->name);
 }
 
 static void
-record_init(void *target, const void *source)
+record_init(ErtsRecordEntry *obj, const ErtsRecordEntry *tmpl)
 {
-    ErtsRecordEntry *obj = target;
-    const ErtsRecordEntry *tmpl = source;
     obj->module = tmpl->module;
     obj->name = tmpl->name;
 
@@ -76,31 +71,31 @@ record_init(void *target, const void *source)
 }
 
 static void
-record_stage(void *object, ErtsCodeIndex src_ix, ErtsCodeIndex dst_ix) {
-    ErtsRecordEntry *obj = object;
+record_stage(ErtsRecordEntry *obj,
+             ErtsCodeIndex src_ix,
+             ErtsCodeIndex dst_ix) {
     obj->definitions[dst_ix] = obj->definitions[src_ix];
 }
 
-static int record_unpublished(const void *object)
+#define ERTS_CODE_STAGED_PREFIX record
+#define ERTS_CODE_STAGED_OBJECT_TYPE ErtsRecordEntry
+#define ERTS_CODE_STAGED_OBJECT_HASH record_hash
+#define ERTS_CODE_STAGED_OBJECT_COMPARE record_cmp
+#define ERTS_CODE_STAGED_OBJECT_INITIALIZE record_init
+#define ERTS_CODE_STAGED_OBJECT_STAGE record_stage
+#define ERTS_CODE_STAGED_OBJECT_ALLOC_TYPE ERTS_ALC_T_RECORD
+#define ERTS_CODE_STAGED_TABLE_ALLOC_TYPE ERTS_ALC_T_RECORD_TABLE
+#define ERTS_CODE_STAGED_TABLE_INITIAL_SIZE RECORD_INITIAL_SIZE
+#define ERTS_CODE_STAGED_TABLE_LIMIT RECORD_LIMIT
+
+#define ERTS_CODE_STAGED_WANT_GET
+#define ERTS_CODE_STAGED_WANT_FOREACH
+
+#include "erl_code_staged.h"
+
+void erts_record_init_table(void)
 {
-    const ErtsRecordEntry *entry = object;
-    for (int ix = 0; ix < ERTS_NUM_CODE_IX; ++ix)
-        if (!is_non_value(entry->definitions[ix])) return 0;
-    return 1;
-}
-ErtsCodeTable *erts_record_namespace_create(int limit)
-{
-    ErtsCodeTableOps ops = {record_hash, record_cmp, record_init, record_stage, record_unpublished, NULL};
-    return erts_code_table_create(sizeof(ErtsRecordEntry), RECORD_INITIAL_SIZE,
-        limit > 0 ? limit : RECORD_LIMIT, ERTS_ALC_T_RECORD, ERTS_ALC_T_RECORD_TABLE,
-        "record_staging_lock", ops);
-}
-static ErtsCodeTable *diagnostic_records;
-void erts_record_init_table(ErtsCodeTable *owner)
-{
-    ASSERT(owner && !diagnostic_records);
-    diagnostic_records = owner;
-    erts_code_table_bind(owner);
+    record_staged_init();
 }
 
 /* Declared extern in header */
@@ -158,8 +153,8 @@ Eterm erts_canonical_record_def(ErtsRecordDefinition *defp) {
 }
 
 static void
-init_record_template(ErtsRecordEntry *template, Eterm module, Eterm name) {
-    ErtsRecordEntry *object = template;
+init_record_template(record_template_t *template, Eterm module, Eterm name) {
+    ErtsRecordEntry *object = record_staged_init_template(template);
 
     object->module = module;
     object->name = name;
@@ -168,18 +163,18 @@ init_record_template(ErtsRecordEntry *template, Eterm module, Eterm name) {
 const ErtsRecordEntry *erts_record_find_entry(Eterm module,
                                               Eterm name,
                                               ErtsCodeIndex code_ix) {
-    ErtsRecordEntry template;
+    record_template_t template;
 
     init_record_template(&template, module, name);
-    return erts_code_table_get(diagnostic_records, &template, code_ix);
+    return record_staged_get(&template, code_ix);
 }
 
 ErtsRecordEntry *
 erts_record_put(Eterm module, Eterm name) {
-    ErtsRecordEntry template;
+    record_template_t template;
 
     init_record_template(&template, module, name);
-    return erts_code_table_diagnostic_upsert(diagnostic_records, &template);
+    return record_staged_upsert(&template);
 }
 
 struct record_module_delete_args {
@@ -187,9 +182,8 @@ struct record_module_delete_args {
     ErtsCodeIndex code_ix;
 };
 
-static void record_module_delete_foreach(void *object, void *args_)
+static void record_module_delete_foreach(ErtsRecordEntry *obj, void *args_)
 {
-    ErtsRecordEntry *obj = object;
     struct record_module_delete_args *args = args_;
 
     if (obj->module == args->module) {
@@ -204,7 +198,17 @@ void erts_record_module_delete(Eterm module)
 
     ERTS_LC_ASSERT(erts_has_code_stage_permission());
 
-    erts_code_table_foreach(diagnostic_records, staging_ix, record_module_delete_foreach, &args);
+    record_staged_foreach(record_module_delete_foreach, &args, staging_ix);
+}
+
+void erts_record_start_staging(void)
+{
+    record_staged_start_staging();
+}
+
+void erts_record_end_staging(int commit)
+{
+    record_staged_end_staging(commit);
 }
 
 bool erl_is_native_record(Eterm src, Eterm mod, Eterm name) {

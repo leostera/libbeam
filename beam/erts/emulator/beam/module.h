@@ -24,7 +24,6 @@
 #define __MODULE_H__
 
 #include "index.h"
-#include "erl_module_table.h"
 #include "beam_code.h"
 
 struct erl_module_instance {
@@ -51,7 +50,6 @@ typedef struct erl_module {
     struct erl_module_instance curr;
     struct erl_module_instance old; /* active protected by "old_code" rwlock */
     struct erl_module_instance* on_load;
-    ErtsModuleTable *table_owner; /* Immutable record allocation/accounting owner. */
 } Module; 
 
 void erts_module_instance_init(struct erl_module_instance* modi);
@@ -77,8 +75,9 @@ void erts_unseal_module(struct erl_module_instance *modi);
  * setting up a code barrier. */
 void erts_seal_module(struct erl_module_instance *modi);
 
-typedef struct ErtsModuleNamespace ErtsModuleNamespace;
-void init_module_table(ErtsModuleNamespace *);
+void init_module_table(int limit);
+void module_start_staging(void);
+void module_end_staging(int commit);
 void module_info(fmtfn_t, void *);
 
 Module *module_code(int, ErtsCodeIndex);
@@ -94,31 +93,31 @@ ERTS_GLB_INLINE void erts_runlock_old_code(ErtsCodeIndex);
 int erts_is_old_code_rlocked(ErtsCodeIndex);
 #endif
 
-erts_rwmtx_t *erts_diagnostic_old_code_lock(ErtsCodeIndex);
-
 #if ERTS_GLB_INLINE_INCL_FUNC_DEF
+
+extern erts_rwmtx_t the_old_code_rwlocks[ERTS_NUM_CODE_IX];
 
 ERTS_GLB_INLINE void erts_rwlock_old_code(ErtsCodeIndex code_ix)
 {
-    erts_rwmtx_rwlock(erts_diagnostic_old_code_lock(code_ix));
+    erts_rwmtx_rwlock(&the_old_code_rwlocks[code_ix]);
 }
 ERTS_GLB_INLINE void erts_rwunlock_old_code(ErtsCodeIndex code_ix)
 {
-    erts_rwmtx_rwunlock(erts_diagnostic_old_code_lock(code_ix));
+    erts_rwmtx_rwunlock(&the_old_code_rwlocks[code_ix]);
 }
 ERTS_GLB_INLINE void erts_rlock_old_code(ErtsCodeIndex code_ix)
 {
-    erts_rwmtx_rlock(erts_diagnostic_old_code_lock(code_ix));
+    erts_rwmtx_rlock(&the_old_code_rwlocks[code_ix]);
 }
 ERTS_GLB_INLINE void erts_runlock_old_code(ErtsCodeIndex code_ix)
 {
-    erts_rwmtx_runlock(erts_diagnostic_old_code_lock(code_ix));
+    erts_rwmtx_runlock(&the_old_code_rwlocks[code_ix]);
 }
 
 #ifdef ERTS_ENABLE_LOCK_CHECK
 ERTS_GLB_INLINE int erts_is_old_code_rlocked(ErtsCodeIndex code_ix)
 {
-    return erts_lc_rwmtx_is_rlocked(erts_diagnostic_old_code_lock(code_ix));
+    return erts_lc_rwmtx_is_rlocked(&the_old_code_rwlocks[code_ix]);
 }
 #endif
 

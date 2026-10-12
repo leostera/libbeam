@@ -946,15 +946,11 @@ void erts_debug_foreach_release_literal_area_off_heap(void (*func)(ErlOffHeap *,
                                                       void *arg);
 
 typedef struct ErtsLiteralArea_ {
-    /* Lease follows detached code/persistent literals through deferred release.
-     * NULL for engine constants and separately parent-owned literal pools. */
-    struct ErtsIsolateNamespaceState *retained_namespace;
     struct erl_off_heap_header *off_heap;
     Eterm *end;
     Eterm start[]; /* beginning of area */
 } ErtsLiteralArea;
 
-void erts_literal_area_init_owner(ErtsLiteralArea *, struct ErtsIsolateNamespaceState *);
 void erts_queue_release_literals(Process *c_p, ErtsLiteralArea* literals);
 
 #define ERTS_LITERAL_AREA_ALLOC_SIZE(N) \
@@ -978,7 +974,7 @@ typedef struct {
     const Eterm* fname_ptr;     /* Pointer to fname table */
 } FunctionInfo;
 
-Binary* erts_alloc_loader_state(ErtsIsolateNamespaceState *);
+Binary* erts_alloc_loader_state(void);
 
 /* Return the module name (a tagged atom) for the prepared code in the magic
  * binary, or NIL if the binary does not contain prepared code. */
@@ -996,8 +992,7 @@ Eterm erts_finish_loading(Binary *loader_state, Process *c_p,
 Eterm erts_preload_module(Process *c_p, ErtsProcLocks c_p_locks,
                           Eterm group_leader, Eterm *mod,
                           const byte *code, Uint size);
-typedef struct ErtsIsolateNamespaceState ErtsIsolateNamespaceState;
-void init_load(ErtsIsolateNamespaceState *);
+void init_load(void);
 const ErtsCodeMFA* erts_find_function_from_pc(ErtsCodePtr pc);
 ErtsCodePtr erts_find_next_code_for_line(const BeamCodeHeader* code_hdr,
                                          unsigned int line,
@@ -1008,16 +1003,17 @@ void erts_set_current_function(FunctionInfo* fi, const ErtsCodeMFA* mfa);
 Eterm erts_make_stub_module(Process* p, Eterm Mod, Eterm Beam, Eterm Info);
 
 /* beam_ranges.c */
-typedef struct ErtsRangeNamespace ErtsRangeNamespace;
-void erts_init_ranges(ErtsRangeNamespace *);
+void erts_init_ranges(void);
+void erts_start_staging_ranges(int num_new);
+void erts_end_staging_ranges(int commit);
 void erts_update_ranges(const BeamCodeHeader* code, Uint size);
 void erts_remove_from_ranges(const BeamCodeHeader* code);
 UWord erts_ranges_sz(void);
 void erts_lookup_function_info(FunctionInfo* fi,
                                ErtsCodePtr pc,
                                int full_info);
-ErtsLiteralArea **erts_diagnostic_dump_literal_areas(void);
-Uint erts_diagnostic_dump_literal_capacity(void);
+extern ErtsLiteralArea** erts_dump_lit_areas;
+extern Uint erts_dump_num_lit_areas;
 
 /* export.c */
 
@@ -1026,6 +1022,9 @@ Uint erts_diagnostic_dump_literal_capacity(void);
 ErtsLiteralArea *erts_get_next_lambda_lit_area(ErtsLiteralArea *prev);
 
 /* break.c */
+void init_break_handler(void);
+void erts_set_ignore_break(void);
+void erts_replace_intr(void);
 void process_info(fmtfn_t, void *);
 void print_process_info(fmtfn_t, void *, Process*, ErtsProcLocks);
 void info(fmtfn_t, void *);
@@ -1033,6 +1032,7 @@ void loaded(fmtfn_t, void *);
 void erts_print_base64(fmtfn_t to, void *to_arg, const byte* src, Uint size);
 
 /* sighandler sys.c */
+int erts_set_signal(Eterm signal, Eterm type);
 
 /* erl_arith.c */
 
@@ -1452,7 +1452,7 @@ void erts_init_bif_binary(void);
 Sint erts_binary_set_loop_limit(Sint limit);
 
 /* erl_bif_persistent.c */
-Eterm erts_persistent_term_get(struct ErtsIsolateNamespaceState *owner, Eterm key);
+Eterm erts_persistent_term_get(Eterm key);
 void erts_init_bif_persistent_term(void);
 void erts_init_persistent_dumping(void);
 extern ErtsLiteralArea** erts_persistent_areas;
@@ -1652,6 +1652,8 @@ extern void erts_match_prog_foreach_offheap(Binary *b,
 #define MATCH_SET_EXCEPTION_TRACE (0x4) /* exception trace requested */
 #define MATCH_SET_RX_TRACE (MATCH_SET_RETURN_TRACE|MATCH_SET_EXCEPTION_TRACE)
 
+extern erts_driver_t spawn_driver;
+extern erts_driver_t forker_driver;
 extern erts_driver_t fd_driver;
 
 int erts_beam_jump_table(void);

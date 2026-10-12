@@ -27,9 +27,6 @@
 #include "sys.h"
 #include <ctype.h>
 #include "erl_vm.h"
-#include "erl_engine.h"
-#include "erl_engine_thread_keys.h"
-#include "erl_isolate_state.h"
 #include "global.h"
 #include "erl_process.h"
 #include "error.h"
@@ -88,7 +85,7 @@ extern void ConNormalExit(void);
 extern void ConWaitForExit(void);
 #endif
 
-static void erl_init(ErtsEngine *engine, int ncpu,
+static void erl_init(int ncpu,
 		     int proc_tab_sz,
 		     int legacy_proc_tab,
 		     int port_tab_sz,
@@ -101,21 +98,6 @@ static void erl_init(ErtsEngine *engine, int ncpu,
                      ErtsDbSpinCount db_spin_count,
                      int module_tab_sz,
                      int export_tab_sz);
-
-/* Internal startup phases, not reentrant embedding APIs. */
-static void start_otp_world(ErtsEngine *engine, char *init, int boot_argc, char **boot_argv);
-static void start_runtime_threads(ErtsEngine *engine);
-static void prepare_runtime(ErtsEngine *engine, int argc, char **argv);
-/* Temporary guard/retained owner for the still-global substrate. Runtime
- * operations receive their owner explicitly; this is not a current-engine API.
- * Remove the one-runtime restriction only as the remaining globals migrate. */
-static ErtsEngine *claimed_engine;
-/* Fixed bootstrap boundary. The engine owns this namespace; never use this
- * accessor to select among private worlds. */
-ErtsIsolateNamespaceState *erts_diagnostic_namespace(void)
-{
-    return claimed_engine ? claimed_engine->diagnostic_namespace : NULL;
-}
 
 static erts_atomic_t exiting;
 
@@ -192,6 +174,8 @@ ErtsModifiedTimings erts_modified_timings[] = {
 
 Export *erts_delay_trap = NULL;
 
+int ignore_break;
+int replace_intr;
 
 static ERTS_INLINE int
 has_prefix(const char *prefix, const char *string)
@@ -260,10 +244,10 @@ void erl_error(const char *fmt, va_list args)
     erts_vfprintf(stderr, fmt, args);
 }
 
-static int early_init(ErtsEngine *, int *argc, char **argv);
+static int early_init(int *argc, char **argv);
 
 static void
-erl_init(ErtsEngine *engine, int ncpu,
+erl_init(int ncpu,
 	 int proc_tab_sz,
 	 int legacy_proc_tab,
 	 int port_tab_sz,
@@ -277,15 +261,14 @@ erl_init(ErtsEngine *engine, int ncpu,
          int module_tab_sz,
          int export_tab_sz)
 {
-    ErtsIsolateNamespaceState *diagnostic_namespace;
-    init_global_literals(engine);
+    init_global_literals();
     erts_monitor_link_init();
     erts_bif_unique_init();
     erts_proc_sig_queue_init(); /* Must be after erts_bif_unique_init(); */
     erts_init_time(time_correction, time_warp_mode);
     erts_init_sys_common_misc();
     erts_init_process(ncpu, proc_tab_sz, legacy_proc_tab);
-    erts_init_scheduling(engine, no_schedulers,
+    erts_init_scheduling(no_schedulers,
 			 no_schedulers_online,
                          erts_no_poll_threads,
 			 no_dirty_cpu_schedulers,
@@ -301,17 +284,13 @@ erl_init(ErtsEngine *engine, int ncpu,
     BIN_VH_MIN_SIZE = erts_next_heap_size(BIN_VH_MIN_SIZE, 0);
 
     erts_init_debugger();
-    diagnostic_namespace = erts_isolate_namespace_create_diagnostic(
-        engine, erts_atom_table_size, module_tab_sz, export_tab_sz);
-    if (!diagnostic_namespace)
-        erts_exit(ERTS_ERROR_EXIT, "Cannot construct diagnostic namespace state\n");
-    erts_code_ix_init(erts_isolate_namespace_code_space(diagnostic_namespace));
-    init_atom_table(erts_isolate_namespace_atoms(diagnostic_namespace));
-    init_export_table(erts_isolate_namespace_exports(diagnostic_namespace));
-    erts_init_fun_table(erts_isolate_namespace_funs(diagnostic_namespace));
-    erts_record_init_table(erts_isolate_namespace_records(diagnostic_namespace));
-    init_module_table(erts_isolate_namespace_module_state(diagnostic_namespace));
-    init_register_table(erts_isolate_namespace_registry(diagnostic_namespace));
+    erts_code_ix_init();
+    erts_init_fun_table();
+    init_atom_table();
+    init_export_table(export_tab_sz);
+    erts_record_init_table();
+    init_module_table(module_tab_sz);
+    init_register_table();
     init_message();
 #ifdef BEAMASM
     beamasm_init();
@@ -328,8 +307,9 @@ erl_init(ErtsEngine *engine, int ncpu,
     erts_init_node_tables(node_tab_delete_delay);
     init_dist();
     erl_drv_thr_init();
+    erts_init_async();
     erts_init_io(port_tab_sz, port_tab_sz_ignore_files, legacy_port_tab);
-    init_load(diagnostic_namespace);
+    init_load();
     erts_init_bif();
     erts_init_bif_chksum();
     erts_init_bif_binary();
@@ -346,6 +326,7 @@ erl_init(ErtsEngine *engine, int ncpu,
     erts_mseg_late_init(); /* Must be after timer (erts_init_time()) and thread
 			      initializations */
 #endif
+    erl_sys_late_init();
     packet_parser_init();
     erl_nif_init();
     erts_msacc_init();
@@ -370,7 +351,7 @@ erl_spawn_system_process(Process* parent, Eterm mod, Eterm func, Eterm args,
 
     so->flags |= SPO_SYSTEM_PROC;
 
-    res = erl_create_process(erts_diagnostic_namespace(), parent, mod, func, args, so);
+    res = erl_create_process(parent, mod, func, args, so);
 
     return res;
 }
@@ -391,7 +372,6 @@ erl_first_process_otp(char* mod_name, int argc, char** argv)
      */
 
     erts_init_empty_process(&parent);
-    parent.namespace_owner = erts_diagnostic_namespace(); /* Borrowed bootstrap parent. */
     erts_proc_lock(&parent, ERTS_PROC_LOCK_MAIN);
 
     hp = HAlloc(&parent, argc*2 + 4);
@@ -571,6 +551,12 @@ __decl_noreturn void __noreturn  erts_usage(void)
     erts_fprintf(stderr, "-A number      set number of threads in async thread pool;\n");
     erts_fprintf(stderr, "               valid range is [1-%d]\n",
 		 ERTS_MAX_NO_OF_ASYNC_THREADS);
+    erts_fprintf(stderr, "\n");
+
+    erts_fprintf(stderr, "-B[c|d|i]      set break (Ctrl+C) behavior; valid letters are:\n");
+    erts_fprintf(stderr, "                  'c' to have Ctrl+C interrupt the Erlang shell;\n");
+    erts_fprintf(stderr, "                  'd' (or no extra option) to disable the break handler;\n");
+    erts_fprintf(stderr, "                  'i' to ignore break signals\n");
     erts_fprintf(stderr, "\n");
 
     erts_fprintf(stderr, "-c bool        enable or disable time correction\n");
@@ -786,7 +772,7 @@ static void ethr_ll_free(void *ptr)
 
 
 static int
-early_init(ErtsEngine *engine, int *argc, char **argv) /*
+early_init(int *argc, char **argv) /*
 				   * Only put things here which are
 				   * really important initialize
 				   * early!
@@ -839,6 +825,8 @@ early_init(ErtsEngine *engine, int *argc, char **argv) /*
 				     &ncpuavail,
 				     &ncpuquota);
 
+    ignore_break = 0;
+    replace_intr = 0;
     program = argv[0];
 
     erts_modified_timing_level = -1;
@@ -847,10 +835,7 @@ early_init(ErtsEngine *engine, int *argc, char **argv) /*
 
     erts_sys_pre_init();
     erts_atomic_init_nob(&exiting, 0);
-    {
-        int error = erts_thr_progress_pre_init(engine);
-        if (error) erts_exit(ERTS_ERROR_EXIT, "Cannot initialize thread progress: %d\n", error);
-    }
+    erts_thr_progress_pre_init();
 
     erts_atomic32_init_nob(&erts_writing_erl_crash_dump, 0L);
     erts_tsd_key_create(&erts_is_crash_dumping_key,"erts_is_crash_dumping_key");
@@ -1230,13 +1215,13 @@ early_init(ErtsEngine *engine, int *argc, char **argv) /*
     erts_early_init_scheduling(no_schedulers + 1 + dirty_cpu_scheds);
 
     alloc_opts.ncpu = ncpu;
-    erts_alloc_init(engine, argc, argv, &alloc_opts); /* Handles (and removes)
+    erts_alloc_init(argc, argv, &alloc_opts); /* Handles (and removes)
 						 -M flags. */
     aux_threads += erts_no_dirty_alloc_instances;
     /* Require allocators */
     erts_errno_init();
 
-    erts_init_check_io(engine, argc, argv);
+    erts_init_check_io(argc, argv);
 
     /*
      * Thread progress management:
@@ -1251,13 +1236,14 @@ early_init(ErtsEngine *engine, int *argc, char **argv) /*
      * ** Async threads (see erl_async.c)
      * ** Dirty scheduler threads
      */
-    {
-        int error = erts_thr_progress_init(engine, no_schedulers,
-                           no_schedulers + aux_threads + 1 + erts_no_poll_threads,
-                           erts_async_max_threads + erts_no_dirty_cpu_schedulers +
-                           erts_no_dirty_io_schedulers);
-        if (error) erts_exit(ERTS_ERROR_EXIT, "Cannot allocate thread progress: %d\n", error);
-    }
+    erts_thr_progress_init(no_schedulers,
+			   (no_schedulers
+			    + aux_threads
+			    + 1
+			    + erts_no_poll_threads),
+			   (erts_async_max_threads
+			    + erts_no_dirty_cpu_schedulers
+			    + erts_no_dirty_io_schedulers));
     erts_thr_q_init();
     erts_init_utils();
     erts_early_init_cpu_topology(no_schedulers,
@@ -1309,92 +1295,15 @@ early_init(ErtsEngine *engine, int *argc, char **argv) /*
 }
 
 
-static int
-claim_runtime(ErtsEngine *engine)
-{
-    if (!engine)
-        return 2;
-    if (claimed_engine || engine->startup_phase != ERL_RUNTIME_UNCLAIMED)
-        return 1;
-    if (erts_engine_init_thread_keys(engine))
-        return 2;
-    claimed_engine = engine;
-    engine->startup_phase = ERL_RUNTIME_PREPARING;
-    return 0;
-}
-
 void
 erl_start(int argc, char **argv)
 {
-    ErtsEngine *engine = erl_engine_alloc();
-    if (claim_runtime(engine) != 0)
-        erts_exit(ERTS_ERROR_EXIT, "Cannot allocate or claim runtime engine\n");
-    prepare_runtime(engine, argc, argv);
-    start_otp_world(engine, init, boot_argc, boot_argv);
-    start_runtime_threads(engine);
-    /* Temporary command-line tool host: keep the process alive until halt.
-     * This is the same runtime contract, not an unrestricted legacy mode. */
-    erts_sys_main_thread();
-}
-
-#ifndef __WIN32__
-/* Experimental unbooted preparation. No OTP bootstrap or thread launch. */
-int
-erl_prepare_runtime(ErtsEngine *engine, int argc, char **argv)
-{
-    int result = claim_runtime(engine);
-    if (result != 0)
-        return result;
-    prepare_runtime(engine, argc, argv);
-    return 0;
-}
-
-/* Process-lifetime diagnostic host, not the Engine constructor. */
-int
-erl_start_embedded(ErtsEngine *engine, int argc, char **argv)
-{
-    int result = erl_prepare_runtime(engine, argc, argv);
-    if (result != 0)
-        return result;
-    start_otp_world(engine, init, boot_argc, boot_argv);
-    start_runtime_threads(engine);
-    return 0;
-}
-#endif
-
-int
-erl_runtime_is_claimed(void)
-{
-    return claimed_engine != NULL;
-}
-
-int
-erl_prepared_runtime_inventory(const ErtsEngine *engine, ErlPreparedRuntimeInventory *out)
-{
-    if (!engine || engine != claimed_engine || engine->startup_phase != ERL_RUNTIME_PREPARED)
-        return 1;
-    out->processes = erts_ptab_count(&erts_proc);
-    out->ports = erts_ptab_count(&erts_port);
-    out->loaded_code_bytes = erts_total_code_size;
-    out->init_process_created = erts_init_process_id != ERTS_INVALID_PID;
-    out->system_process_roots = !!erts_code_purger + !!erts_literal_area_collector
-        + !!erts_dirty_process_signal_handler + !!erts_dirty_process_signal_handler_high
-        + !!erts_dirty_process_signal_handler_max + !!erts_trace_cleaner;
-    return 0;
-}
-
-/* Legacy argument parsing is retained temporarily for native diagnostics.
- * This prepares global substrate/tables, NOT an isolate, and never bootstraps OTP.
- * A typed, recoverable initializer and ownership-aware cleanup are still needed.
- */
-static void
-prepare_runtime(ErtsEngine *engine, int argc, char **argv)
-{
     int i = 1;
     char* arg=NULL;
+    int have_break_handler = 1;
     char envbuf[21]; /* enough for any 64-bit integer */
     size_t envbufsz;
-    int ncpu = early_init(engine, &argc, argv);
+    int ncpu = early_init(&argc, argv);
     int proc_tab_sz = ERTS_DEFAULT_MAX_PROCESSES;
     int port_tab_sz = ERTS_DEFAULT_MAX_PORTS;
     int port_tab_sz_ignore_files = 0;
@@ -1910,6 +1819,29 @@ prepare_runtime(ErtsEngine *engine, int argc, char **argv)
         erts_usage();
 #endif
         break;
+
+	case 'B':
+	  if (argv[i][2] == 'i')          /* +Bi */
+	    ignore_break = 1;
+	  else if (argv[i][2] == 'c')     /* +Bc */
+	    replace_intr = 1;
+	  else if (argv[i][2] == 'd')     /* +Bd */
+	    have_break_handler = 0;
+	  else if (argv[i+1][0] == 'i') { /* +B i */
+	    get_arg(argv[i]+2, argv[i+1], &i);
+	    ignore_break = 1;
+	  }
+	  else if (argv[i+1][0] == 'c') { /* +B c */
+	    get_arg(argv[i]+2, argv[i+1], &i);
+	    replace_intr = 1;
+	  }
+	  else if (argv[i+1][0] == 'd') { /* +B d */
+	    get_arg(argv[i]+2, argv[i+1], &i);
+	    have_break_handler = 0;
+	  }
+	  else			          /* +B */
+	    have_break_handler = 0;
+	  break;
 
 	case 'n':
 	    arg = get_arg(argv[i]+2, argv[i+1], &i);
@@ -2592,6 +2524,23 @@ prepare_runtime(ErtsEngine *engine, int argc, char **argv)
     _set_output_format(_TWO_DIGIT_EXPONENT);
 #endif
 
+   /* Restart will not reinstall the break handler */
+#ifdef __WIN32__
+    if (ignore_break)
+	erts_set_ignore_break();
+    else if (replace_intr)
+	erts_replace_intr();
+    else
+	init_break_handler();
+#else
+    if (ignore_break)
+	erts_set_ignore_break();
+    else if (have_break_handler)
+	init_break_handler();
+    if (replace_intr)
+	erts_replace_intr();
+#endif
+
     boot_argc = argc - i;  /* Number of arguments to init */
     boot_argv = &argv[i];
 
@@ -2602,7 +2551,7 @@ prepare_runtime(ErtsEngine *engine, int argc, char **argv)
     if (erts_dio_sched_thread_suggested_stack_size < ERTS_SCHED_THREAD_MIN_STACK_SIZE)
         erts_dio_sched_thread_suggested_stack_size = ERTS_SCHED_THREAD_MIN_STACK_SIZE;
 
-    erl_init(engine, ncpu,
+    erl_init(ncpu,
 	     proc_tab_sz,
 	     legacy_proc_tab,
 	     port_tab_sz,
@@ -2616,17 +2565,6 @@ prepare_runtime(ErtsEngine *engine, int argc, char **argv)
              module_tab_sz,
              export_tab_sz);
 
-    engine->startup_phase = ERL_RUNTIME_PREPARED;
-}
-
-/* Populate the conventional, global OTP world before any scheduler runs.
- * Only the legacy diagnostic/command-line host requests this phase. Runtime
- * preparation never calls it. It is not an isolate constructor: code indices,
- * init and housekeeping pointers are still global. */
-static void
-start_otp_world(ErtsEngine *engine, char *init, int boot_argc, char **boot_argv)
-{
-    ASSERT(engine->startup_phase == ERL_RUNTIME_PREPARED);
     load_preloaded();
     erts_end_staging_code_ix();
     erts_commit_staging_code_ix();
@@ -2702,24 +2640,15 @@ start_otp_world(ErtsEngine *engine, char *init, int boot_argc, char **boot_argv)
         erts_proc_inc_refc(erts_trace_cleaner);
 
     }
-    engine->startup_phase = ERL_RUNTIME_OTP_BOOTSTRAPPED;
-}
 
-/* Thread launch is separate from OTP-world construction and frontend handoff.
- * Scheduler/auxiliary/poll thread handles are retained and created joinable.
- * A coordinated stop/join protocol and empty-world startup remain unimplemented. */
-static void
-start_runtime_threads(ErtsEngine *engine)
-{
-    /* Neither message dispatch nor async workers belong to preparation. */
-    erts_start_sys_msg_dispatcher();
-    erts_start_async_workers();
-    erts_start_schedulers(engine);
-    engine->startup_phase = ERL_RUNTIME_THREADS_STARTED;
+    erts_start_schedulers();
 
 #ifdef ERTS_ENABLE_LOCK_COUNT
     erts_lcnt_post_startup();
 #endif
+
+    /* Let system specific code decide what to do with the main thread... */
+    erts_sys_main_thread(); /* May or may not return! */
 }
 
 
@@ -2832,6 +2761,7 @@ __decl_noreturn void __noreturn erts_exit_epilogue(int flush)
 {
     int n = erts_exit_code;
 
+    sys_tty_reset(n);
 
 #ifdef ERTS_GCOV
     flush = !0; /* otherwise we get no results... */

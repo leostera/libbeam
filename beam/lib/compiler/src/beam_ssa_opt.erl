@@ -66,6 +66,11 @@
    %% when dealing with co-recursive functions.
    arg_types = [] :: list(arg_type_map()),
 
+   %% The joined arg_types from the previous round. Used for verifying
+   %% that we have not done any improper widening of the argument
+   %% types.
+   prev_joined_args = #{} :: #{#b_var{} => term()},
+
    %% The success types of this function, grouping return values by their
    %% argument types at the time of return.
    %%
@@ -3816,9 +3821,14 @@ is_viable_match(#b_set{op=bs_match,args=Args}) ->
         [#b_literal{val=binary},Ctx,_,#b_literal{val=Size},#b_literal{val=U}]
           when is_integer(Size) ->
             {yes,{Ctx,Size*U,1}};
-        [#b_literal{val=integer},Ctx,_,#b_literal{val=Size},#b_literal{val=U}]
+        [#b_literal{val=integer},Ctx,#b_literal{val=Flags},#b_literal{val=Size},#b_literal{val=U}]
           when is_integer(Size) ->
-            {yes,{Ctx,Size*U,1}};
+            case member(native, Flags) of
+                true ->
+                    no;
+                false ->
+                    {yes,{Ctx,Size*U,1}}
+            end;
         [#b_literal{val=skip},Ctx,_,_,#b_literal{val=all},#b_literal{val=U}] ->
             {yes,{Ctx,0,U}};
         [#b_literal{val=skip},Ctx,_,_,#b_literal{val=Size},#b_literal{val=U}]

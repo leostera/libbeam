@@ -41,6 +41,7 @@
              erl_erts_errors,
 	     erl_reply,
              erl_kernel_errors,
+             erl_signal_handler,
 	     erpc,
 	     error_handler,
 	     error_logger,
@@ -168,7 +169,7 @@
          {shell_history_drop,[]}
         ]},
   {mod, {kernel, []}},
-  {runtime_dependencies, ["erts-17.0", "stdlib-@OTP-20412@",
+  {runtime_dependencies, ["erts-@OTP-20406@", "stdlib-@OTP-20412@",
                           "sasl-3.0", "crypto-5.8"]}
   ]
 }.

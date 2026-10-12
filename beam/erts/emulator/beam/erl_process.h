@@ -40,7 +40,6 @@
 #endif
 
 typedef struct process Process;
-typedef struct ErtsIsolateNamespaceState ErtsIsolateNamespaceState;
 
 #define ERTS_PROCESS_LOCK_ONLY_PROC_LOCK_TYPE__
 #include "erl_process_lock.h" /* Only pull out important types... */
@@ -412,7 +411,6 @@ typedef enum {
 } ErtsSchedType;
 
 typedef struct ErtsSchedulerData_ ErtsSchedulerData;
-struct ErtsEngine;
 
 typedef struct ErtsRunQueue_ ErtsRunQueue;
 
@@ -749,9 +747,6 @@ struct ErtsSchedulerData_ {
     erts_alloc_verify_func_t verify_unused_temp_alloc;
     Allctr_t *verify_unused_temp_alloc_data;
 #endif
-    /* Set once during construction, before publication. Scheduling is engine-
-     * owned; the process's future isolate owner is a distinct association. */
-    struct ErtsEngine *engine;
 };
 
 typedef union {
@@ -1104,9 +1099,6 @@ struct process {
     Sint return_trace_frames;   /* Number of return trace frames on stack */
     Uint reds;                  /* No of reductions for this process  */
     Eterm group_leader;         /* Pid in charge (can be boxed) */
-    /* Set before PID publication, inherited at spawn, immutable until final
-     * process destruction. Dirty shadows borrow their real process's lease. */
-    ErtsIsolateNamespaceState *namespace_owner;
     Eterm ftrace;               /* Latest exception stack trace dump */
 
     Process *next;              /* Pointer to next process in run queue */
@@ -1913,7 +1905,7 @@ extern int erts_system_profile_ts_type;
 void erts_pre_init_process(void);
 void erts_late_init_process(void);
 void erts_early_init_scheduling(int);
-void erts_init_scheduling(struct ErtsEngine *, int, int, int, int, int, int);
+void erts_init_scheduling(int, int, int, int, int, int);
 void erts_execute_dirty_system_task(Process *c_p);
 int erts_set_gc_state(Process *c_p, int enable);
 Eterm erts_sched_wall_time_request(Process *c_p, int set, int enable,
@@ -2130,7 +2122,7 @@ ErtsSchedSuspendResult
 erts_block_multi_scheduling(Process *, ErtsProcLocks, int, int, int);
 int erts_is_multi_scheduling_blocked(void);
 Eterm erts_multi_scheduling_blockers(Process *, int);
-void erts_start_schedulers(struct ErtsEngine *engine);
+void erts_start_schedulers(void);
 void erts_alloc_notify_delayed_dealloc(int);
 void erts_alloc_ensure_handle_delayed_dealloc_call(int);
 void erts_notify_canceled_timer(ErtsSchedulerData *, int);
@@ -2168,7 +2160,7 @@ void
 erts_send_local_spawn_reply(Process *parent, ErtsProcLocks parent_locks,
                             Process *child, Eterm tag, Eterm ref,
                             Eterm result, Eterm token);
-Eterm erl_create_process(ErtsIsolateNamespaceState*, Process*, Eterm, Eterm, Eterm, ErlSpawnOpts*);
+Eterm erl_create_process(Process*, Eterm, Eterm, Eterm, ErlSpawnOpts*);
 void erts_set_self_exiting(Process *, Eterm);
 void erts_do_exit_process(Process*, Eterm);
 void erts_continue_exit_process(Process *);

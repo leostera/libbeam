@@ -275,7 +275,6 @@ struct ERTS_POLL_EXPORT(erts_pollset) {
     int id;
     int internal_fd_limit;
     erts_atomic_t no_of_user_fds;
-    erts_atomic32_t wait_started;
 
 #if ERTS_POLL_USE_KERNEL_POLL
     int kp_fd;
@@ -320,7 +319,6 @@ struct ERTS_POLL_EXPORT(erts_pollset) {
 
 void erts_silence_warn_unused_result(long unused);
 static void fatal_error(char *format, ...);
-static void destroy_unstarted_pollset(ErtsPollSet *ps);
 
 static int max_fds = -1;
 
@@ -487,7 +485,7 @@ cleanup_wakeup_pipe(ErtsPollSet *ps)
 	erts_atomic32_set_nob(&ps->wakeup_state, ERTS_POLL_WOKEN_INTR);
 }
 
-static int
+static void
 create_wakeup_pipe(ErtsPollSet *ps)
 {
     int do_wake = 0;
@@ -497,20 +495,21 @@ create_wakeup_pipe(ErtsPollSet *ps)
     if (!ERTS_POLL_USE_WAKEUP(ps)) {
         erts_atomic32_init_nob(&ps->wakeup_state,
                                (erts_aint32_t) ERTS_POLL_WSTATE_UNUSED);
-        return 1;
+        return;
     }
     erts_atomic32_init_nob(&ps->wakeup_state,
                            (erts_aint32_t) ERTS_POLL_NOT_WOKEN);
-    if (pipe(wake_fds) < 0)
-        return 0;
-
-    if (SET_NONBLOCKING(wake_fds[0]) < 0 || SET_NONBLOCKING(wake_fds[1]) < 0) {
-        int error = errno;
-        (void) close(wake_fds[0]);
-        (void) close(wake_fds[1]);
-        errno = error;
-        return 0;
+    if (pipe(wake_fds) < 0) {
+	fatal_error("%s:%d:create_wakeup_pipe(): "
+		    "Failed to create pipe: %s (%d)\n",
+		    __FILE__,
+		    __LINE__,
+		    erl_errno_id(errno),
+		    errno);
     }
+
+    SET_NONBLOCKING(wake_fds[0]);
+    SET_NONBLOCKING(wake_fds[1]);
 
     DEBUG_PRINT("wakeup fds = {%d, %d}", ps, wake_fds[0], wake_fds[1]);
 
@@ -525,7 +524,6 @@ create_wakeup_pipe(ErtsPollSet *ps)
 	ps->internal_fd_limit = wake_fds[0] + 1;
     ps->wake_fds[0] = wake_fds[0];
     ps->wake_fds[1] = wake_fds[1];
-    return 1;
 }
 
 /*
@@ -537,13 +535,11 @@ create_wakeup_pipe(ErtsPollSet *ps)
 /* We use the timerfd when using epoll_wait to get high accuracy
    timeouts, i.e. we want to sleep with < ms accuracy. */
 
-static int
+static void
 create_timerfd(ErtsPollSet *ps)
 {
     int do_wake = 0;
     int timer_fd = timerfd_create(CLOCK_MONOTONIC,0);
-    if (timer_fd < 0)
-        return 0;
     ERTS_POLL_EXPORT(erts_poll_control)(ps,
 					timer_fd,
                                         ERTS_POLL_OP_ADD,
@@ -552,7 +548,6 @@ create_timerfd(ErtsPollSet *ps)
     if (ps->internal_fd_limit <= timer_fd)
 	ps->internal_fd_limit = timer_fd + 1;
     ps->timer_fd = timer_fd;
-    return 1;
 }
 
 static ERTS_INLINE void
@@ -1934,7 +1929,6 @@ ERTS_POLL_EXPORT(erts_poll_wait)(ErtsPollSet *ps,
     int ps_locked = 0;
     ERTS_MSACC_DECLARE_CACHE();
 
-    erts_atomic32_set_nob(&ps->wait_started, 1);
     no_fds = *len;
     *len = 0;
     ASSERT(no_fds > 0);
@@ -2133,16 +2127,11 @@ ERTS_POLL_EXPORT(erts_poll_create_pollset)(int id)
 #if ERTS_POLL_USE_KERNEL_POLL
     int kp_fd;
 #endif
-    ErtsPollSet *ps = erts_alloc_fnf(ERTS_ALC_T_POLLSET,
+    ErtsPollSet *ps = erts_alloc(ERTS_ALC_T_POLLSET,
 				sizeof(struct ERTS_POLL_EXPORT(erts_pollset)));
-    if (!ps) {
-        errno = ENOMEM;
-        return NULL;
-    }
     ps->id = id;
     ps->internal_fd_limit = 0;
     erts_atomic_init_nob(&ps->no_of_user_fds, 0);
-    erts_atomic32_init_nob(&ps->wait_started, 0);
 #if ERTS_POLL_USE_KERNEL_POLL
     ps->kp_fd = -1;
 #if ERTS_POLL_USE_EPOLL
@@ -2152,12 +2141,17 @@ ERTS_POLL_EXPORT(erts_poll_create_pollset)(int id)
 #elif ERTS_POLL_USE_KQUEUE
     kp_fd = kqueue();
 #endif
-    if (kp_fd < 0) {
-        int error = errno;
-        erts_free(ERTS_ALC_T_POLLSET, ps);
-        errno = error;
-        return NULL;
-    }
+    if (kp_fd < 0)
+	fatal_error("erts_poll_create_pollset(): Failed to "
+#if ERTS_POLL_USE_EPOLL
+		    "create epoll set"
+#elif ERTS_POLL_USE_DEVPOLL
+		    "to open /dev/poll"
+#elif ERTS_POLL_USE_KQUEUE
+		    "create kqueue"
+#endif
+		    ": %s (%d)\n",
+		    erl_errno_id(errno), errno);
 #endif /* ERTS_POLL_USE_KERNEL_POLL */
 #if ERTS_POLL_USE_POLL
     ps->next_poll_fds_ix = 0;
@@ -2202,15 +2196,10 @@ ERTS_POLL_EXPORT(erts_poll_create_pollset)(int id)
         ps->oneshot = 1;
 #endif
 
-#if ERTS_POLL_USE_TIMERFD
-    ps->timer_fd = -1;
-#endif
-    if (!create_wakeup_pipe(ps))
-        goto resource_error;
+    create_wakeup_pipe(ps);
 
 #if ERTS_POLL_USE_TIMERFD
-    if (!create_timerfd(ps))
-        goto resource_error;
+    create_timerfd(ps);
 #endif
 
 #if !ERTS_POLL_USE_CONCURRENT_UPDATE
@@ -2257,76 +2246,6 @@ ERTS_POLL_EXPORT(erts_poll_create_pollset)(int id)
     erts_atomic_set_nob(&ps->no_of_user_fds, 0); /* Don't count wakeup pipe and fallback fd */
 
     return ps;
-
- resource_error:
-    {
-        int error = errno;
-        destroy_unstarted_pollset(ps);
-        errno = error;
-    }
-    return NULL;
-}
-
-/* This is deliberately narrower than shutdown: a poll wait permanently marks
- * the set started. Engine rollback must run before worker admission, and must
- * remove any internal cross-pollset registrations before releasing the sets. */
-int
-ERTS_POLL_EXPORT(erts_poll_can_discard_unstarted)(ErtsPollSet *ps)
-{
-    if (!ps || erts_atomic32_read_nob(&ps->wait_started) ||
-        erts_atomic_read_nob(&ps->no_of_user_fds))
-        return 0;
-#if !ERTS_POLL_USE_CONCURRENT_UPDATE
-    if (erts_atomic32_read_nob(&ps->have_update_requests))
-        return 0;
-#endif
-    return 1;
-}
-
-int
-ERTS_POLL_EXPORT(erts_poll_discard_unstarted)(ErtsPollSet *ps)
-{
-    if (!ERTS_POLL_EXPORT(erts_poll_can_discard_unstarted)(ps))
-        return 1;
-    destroy_unstarted_pollset(ps);
-    return 0;
-}
-
-/* Also used for failed construction: no caller or worker can see the object. */
-static void destroy_unstarted_pollset(ErtsPollSet *ps)
-{
-#if !ERTS_POLL_USE_CONCURRENT_UPDATE
-    ErtsPollSetUpdateRequestsBlock *block, *next;
-#endif
-    /* Do not retry close on EINTR: the descriptor may already have been closed
-     * and reused by another host thread. These descriptors are private to ps. */
-#if ERTS_POLL_USE_KERNEL_POLL
-    (void) close(ps->kp_fd);
-#endif
-#if ERTS_POLL_USE_TIMERFD
-    if (ps->timer_fd >= 0) (void) close(ps->timer_fd);
-#endif
-    if (ps->wake_fds[0] >= 0) (void) close(ps->wake_fds[0]);
-    if (ps->wake_fds[1] >= 0) (void) close(ps->wake_fds[1]);
-#if ERTS_POLL_USE_POLL
-    if (ps->poll_fds) erts_free(ERTS_ALC_T_POLL_FDS, ps->poll_fds);
-#elif ERTS_POLL_USE_SELECT && defined(_DARWIN_UNLIMITED_SELECT)
-    if (ps->input_fds.ptr) erts_free(ERTS_ALC_T_SELECT_FDS, ps->input_fds.ptr);
-    if (ps->output_fds.ptr) erts_free(ERTS_ALC_T_SELECT_FDS, ps->output_fds.ptr);
-    if (ps->res_input_fds.ptr) erts_free(ERTS_ALC_T_SELECT_FDS, ps->res_input_fds.ptr);
-    if (ps->res_output_fds.ptr) erts_free(ERTS_ALC_T_SELECT_FDS, ps->res_output_fds.ptr);
-#endif
-#if !ERTS_POLL_USE_CONCURRENT_UPDATE
-    if (ps->fds_status) erts_free(ERTS_ALC_T_FD_STATUS, ps->fds_status);
-    block = ps->curr_upd_req_block;
-    while (block != &ps->update_requests) {
-        next = block->next;
-        erts_free(ERTS_ALC_T_POLLSET_UPDREQ, block);
-        block = next;
-    }
-    erts_mtx_destroy(&ps->mtx);
-#endif
-    erts_free(ERTS_ALC_T_POLLSET, ps);
 }
 
 /*

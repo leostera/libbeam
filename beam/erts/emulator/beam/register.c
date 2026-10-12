@@ -33,37 +33,24 @@
 #include "hash.h"
 #include "atom.h"
 #include "register.h"
-#include "erl_registry.h"
-#include "erl_isolate_state.h"
 
-struct ErtsRegistry {
-    Hash table;
-    erts_rwmtx_t lock;
-    ErtsIsolateNamespaceState *namespace_owner;
-    int bound;
-};
-
-static ErtsRegistry *registry_for(Process *p)
-{
-    /* NULL is a fixed bootstrap/system-service boundary, not a world selector. */
-    return erts_isolate_namespace_registry(p ? p->namespace_owner : erts_diagnostic_namespace());
-}
+static Hash process_reg;
 
 #define PREG_HASH_SIZE 10
 
 #define REG_HASH(term) ((HashValue) atom_val(term))
 
-/* Each operation keeps one explicitly chosen registry across lock release and
- * restart. These shorthands refer to its local argument, never a global root. */
-#define reg_try_read_lock()  erts_rwmtx_tryrlock(&registry->lock)
-#define reg_try_write_lock() erts_rwmtx_tryrwlock(&registry->lock)
-#define reg_read_lock()      erts_rwmtx_rlock(&registry->lock)
-#define reg_write_lock()     erts_rwmtx_rwlock(&registry->lock)
-#define reg_read_unlock()    erts_rwmtx_runlock(&registry->lock)
-#define reg_write_unlock()   erts_rwmtx_rwunlock(&registry->lock)
+static erts_rwmtx_t regtab_rwmtx;
+
+#define reg_try_read_lock()		erts_rwmtx_tryrlock(&regtab_rwmtx)
+#define reg_try_write_lock()		erts_rwmtx_tryrwlock(&regtab_rwmtx)
+#define reg_read_lock()			erts_rwmtx_rlock(&regtab_rwmtx)
+#define reg_write_lock()		erts_rwmtx_rwlock(&regtab_rwmtx)
+#define reg_read_unlock()		erts_rwmtx_runlock(&regtab_rwmtx)
+#define reg_write_unlock()		erts_rwmtx_rwunlock(&regtab_rwmtx)
 
 static ERTS_INLINE void
-reg_safe_read_lock(ErtsRegistry *registry, Process *c_p, ErtsProcLocks *c_p_locks)
+reg_safe_read_lock(Process *c_p, ErtsProcLocks *c_p_locks)
 {
     if (*c_p_locks) {
 	ASSERT(c_p);
@@ -86,7 +73,7 @@ reg_safe_read_lock(ErtsRegistry *registry, Process *c_p, ErtsProcLocks *c_p_lock
 }
 
 static ERTS_INLINE void
-reg_safe_write_lock(ErtsRegistry *registry, Process *c_p, ErtsProcLocks *c_p_locks)
+reg_safe_write_lock(Process *c_p, ErtsProcLocks *c_p_locks)
 {
     if (*c_p_locks) {
 	ASSERT(c_p);
@@ -117,12 +104,10 @@ is_proc_alive(Process *p)
 
 void register_info(fmtfn_t to, void *to_arg)
 {
-    ErtsRegistry *registry = registry_for(NULL);
     int lock = !ERTS_IS_CRASH_DUMPING;
-    if (!registry) return;
     if (lock)
 	reg_read_lock();
-    hash_info(to, to_arg, &registry->table);
+    hash_info(to, to_arg, &process_reg);
     if (lock)
 	reg_read_unlock();
 }
@@ -142,7 +127,6 @@ static RegProc* reg_alloc(RegProc *tmpl)
     if (!obj) {
 	erts_exit(ERTS_ERROR_EXIT, "Can't allocate %d bytes of memory\n", sizeof(RegProc));
     }
-    obj->owner = tmpl->owner;
     obj->name = tmpl->name;
     obj->p = tmpl->p;
     obj->pt = tmpl->pt;
@@ -154,20 +138,15 @@ static void reg_free(RegProc *obj)
     erts_free(ERTS_ALC_T_REG_PROC, (void*) obj);
 }
 
-ErtsRegistry *erts_registry_create(ErtsIsolateNamespaceState *owner)
+void init_register_table(void)
 {
-    ErtsRegistry *registry;
     HashFunctions f;
     erts_rwmtx_opt_t rwmtx_opt = ERTS_RWMTX_OPT_DEFAULT_INITER;
-    ASSERT(owner);
-    registry = erts_alloc(ERTS_ALC_T_REG_TABLE, sizeof(*registry));
-    registry->namespace_owner = owner;
-    registry->bound = 0;
     rwmtx_opt.type = ERTS_RWMTX_TYPE_FREQUENT_READ;
     rwmtx_opt.lived = ERTS_RWMTX_LONG_LIVED;
 
-    erts_rwmtx_init_opt(&registry->lock, &rwmtx_opt, "reg_tab", NIL,
-        ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
+    erts_rwmtx_init_opt(&regtab_rwmtx, &rwmtx_opt, "reg_tab", NIL,
+        ERTS_LOCK_FLAGS_PROPERTY_STATIC | ERTS_LOCK_FLAGS_CATEGORY_GENERIC);
 
     f.hash = (H_FUN) reg_hash;
     f.cmp  = (HCMP_FUN) reg_cmp;
@@ -177,38 +156,8 @@ ErtsRegistry *erts_registry_create(ErtsIsolateNamespaceState *owner)
     f.meta_free = (HMFREE_FUN) erts_free;
     f.meta_print = (HMPRINT_FUN) erts_print;
 
-    hash_init(ERTS_ALC_T_REG_TABLE, &registry->table, "process_reg",
+    hash_init(ERTS_ALC_T_REG_TABLE, &process_reg, "process_reg",
 	      PREG_HASH_SIZE, f);
-    return registry;
-}
-
-void init_register_table(ErtsRegistry *registry)
-{
-    ASSERT(registry && !registry->bound && registry->namespace_owner == erts_diagnostic_namespace());
-    registry->bound = 1;
-}
-
-int erts_registry_can_discard(ErtsRegistry *registry)
-{
-    return registry && !registry->bound && registry->table.nobjs == 0;
-}
-
-int erts_registry_discard(ErtsRegistry *registry)
-{
-    if (!erts_registry_can_discard(registry)) return 1;
-    hash_delete(&registry->table);
-    erts_rwmtx_destroy(&registry->lock);
-    erts_free(ERTS_ALC_T_REG_TABLE, registry);
-    return 0;
-}
-
-Uint erts_registry_count(ErtsRegistry *registry)
-{
-    Uint count;
-    reg_read_lock();
-    count = registry->table.nobjs;
-    reg_read_unlock();
-    return count;
 }
 
 /*
@@ -225,16 +174,14 @@ Uint erts_registry_count(ErtsRegistry *registry)
  */
 int erts_register_name(Process *c_p, Eterm name, Eterm id)
 {
-    int res = 0, reg_locked = 0;
-    ErtsRegistry *registry = registry_for(c_p);
+    int res = 0;
     Process *proc = NULL;
     Port *port = NULL;
     RegProc r, *rp;
     ERTS_CHK_HAVE_ONLY_MAIN_PROC_LOCK(c_p);
 
     c_p->fvalue = am_none;
-    if (!registry || is_not_atom(name) || name == am_undefined ||
-        (is_internal_port(id) && c_p->namespace_owner != erts_diagnostic_namespace()))
+    if (is_not_atom(name) || name == am_undefined)
 	return res;
 
     if (c_p->common.id == id) /* A very common case I think... */
@@ -252,8 +199,7 @@ int erts_register_name(Process *c_p, Eterm name, Eterm id)
 
     {
 	ErtsProcLocks proc_locks = proc ? ERTS_PROC_LOCK_MAIN : 0;
-	reg_safe_write_lock(registry, proc, &proc_locks);
-        reg_locked = 1;
+	reg_safe_write_lock(proc, &proc_locks);
 
 	if (proc && !proc_locks)
 	    erts_proc_lock(c_p, ERTS_PROC_LOCK_MAIN);
@@ -267,8 +213,6 @@ int erts_register_name(Process *c_p, Eterm name, Eterm id)
             c_p->fvalue = am_notalive;
 	    goto done;
 	}
-        if (proc->namespace_owner != registry->namespace_owner)
-            goto done;
         if (proc->common.u.alive.reg) {
             c_p->fvalue = am_registered_name;
 	    goto done;
@@ -287,8 +231,8 @@ int erts_register_name(Process *c_p, Eterm name, Eterm id)
     }
 
     r.name = name;
-    r.owner = registry;
-    rp = (RegProc*) hash_put(&registry->table, (void*) &r);
+    
+    rp = (RegProc*) hash_put(&process_reg, (void*) &r);
     if (proc && rp->p == proc) {
 	if (ERTS_IS_P_TRACED_FL(proc, F_TRACE_PROCS)) {
 	    trace_proc(proc, ERTS_PROC_LOCK_MAIN,
@@ -309,7 +253,7 @@ int erts_register_name(Process *c_p, Eterm name, Eterm id)
     }
 
  done:
-    if (reg_locked) reg_write_unlock();
+    reg_write_unlock();
     if (port)
 	erts_port_release(port);
     if (c_p != proc) {
@@ -334,20 +278,18 @@ erts_whereis_name_to_id(Process *c_p, Eterm name)
 {
     Eterm res = am_undefined;
     ErtsProcLocks c_p_locks = 0;
-    ErtsRegistry *registry = registry_for(c_p);
     RegProc *rp, tmpl;
-    if (!registry) return am_undefined;
     if (c_p) {
         c_p_locks = ERTS_PROC_LOCK_MAIN;
         ERTS_CHK_HAVE_ONLY_MAIN_PROC_LOCK(c_p);
     }
-    reg_safe_read_lock(registry, c_p, &c_p_locks);
+    reg_safe_read_lock(c_p, &c_p_locks);
 
     if (c_p && !c_p_locks)
         erts_proc_lock(c_p, ERTS_PROC_LOCK_MAIN);
 
     tmpl.name = name;
-    rp = hash_fetch(&registry->table, &tmpl, (H_FUN)reg_hash, (HCMP_FUN)reg_cmp);
+    rp = hash_fetch(&process_reg, &tmpl, (H_FUN)reg_hash, (HCMP_FUN)reg_cmp);
 
     if (rp) {
         if (rp->p)
@@ -375,22 +317,16 @@ erts_whereis_name(Process *c_p,
                   int lock_port)
 {
     RegProc* rp = NULL, tmpl;
-    ErtsRegistry *registry = registry_for(c_p);
     ErtsProcLocks current_c_p_locks;
     Port *pending_port = NULL;
 
-    if (!registry) {
-        if (proc) *proc = NULL;
-        if (port) *port = NULL;
-        return;
-    }
     if (!c_p)
 	c_p_locks = 0;
     current_c_p_locks = c_p_locks;
 
  restart:
 
-    reg_safe_read_lock(registry, c_p, &current_c_p_locks);
+    reg_safe_read_lock(c_p, &current_c_p_locks);
 
     /* Locked locks:
      * - port lock on pending_port if pending_port != NULL
@@ -399,7 +335,7 @@ erts_whereis_name(Process *c_p,
      */
 
     tmpl.name = name;
-    rp = hash_fetch(&registry->table, &tmpl, (H_FUN)reg_hash, (HCMP_FUN)reg_cmp);
+    rp = hash_fetch(&process_reg, &tmpl, (H_FUN)reg_hash, (HCMP_FUN)reg_cmp);
 
     if (proc) {
 	if (!rp)
@@ -496,7 +432,6 @@ int erts_unregister_name(Process *c_p,
 			 Eterm name)
 {
     int res = 0;
-    ErtsRegistry *registry = registry_for(c_p);
     RegProc r, *rp;
     Port *port = c_prt;
     ErtsProcLocks current_c_p_locks = 0;
@@ -511,15 +446,10 @@ int erts_unregister_name(Process *c_p,
 	c_p_locks = 0;
     }
     current_c_p_locks = c_p_locks;
-    if (c_prt && c_prt->common.u.alive.reg) {
-        if (!c_p) registry = c_prt->common.u.alive.reg->owner;
-        else if (registry != c_prt->common.u.alive.reg->owner) return 0;
-    }
-    if (!registry) return 0;
 
  restart:
 
-    reg_safe_write_lock(registry, c_p, &current_c_p_locks);
+    reg_safe_write_lock(c_p, &current_c_p_locks);
 
     r.name = name;
     if (is_non_value(name)) {
@@ -538,7 +468,7 @@ int erts_unregister_name(Process *c_p,
 	}
     }
 
-    if ((rp = (RegProc*) hash_get(&registry->table, (void*) &r)) != NULL) {
+    if ((rp = (RegProc*) hash_get(&process_reg, (void*) &r)) != NULL) {
 	if (rp->pt) {
 	    if (port != rp->pt) {
 		if (port) {
@@ -592,7 +522,7 @@ int erts_unregister_name(Process *c_p,
 		erts_proc_unlock(rp->p, ERTS_PROC_LOCK_MAIN);
 	    }
 	}
-	hash_erase(&registry->table, (void*) &r);
+	hash_erase(&process_reg, (void*) &r);
 	res = 1;
     }
 
@@ -615,13 +545,11 @@ int erts_unregister_name(Process *c_p,
 
 int process_reg_sz(void)
 {
-    ErtsRegistry *registry = registry_for(NULL);
     int sz;
     int lock = !ERTS_IS_CRASH_DUMPING;
-    if (!registry) return 0;
     if (lock)
 	reg_read_lock();
-    sz = sizeof(*registry) + hash_table_sz(&registry->table);
+    sz = hash_table_sz(&process_reg);
     if (lock)
 	reg_read_unlock();
     return sz;
@@ -648,18 +576,16 @@ registered_foreach(RegProc *reg, struct registered_foreach_arg *arg)
 BIF_RETTYPE registered_0(BIF_ALIST_0)
 {
     struct registered_foreach_arg arg;
-    ErtsRegistry *registry = registry_for(BIF_P);
     Uint need;
     ErtsProcLocks proc_locks = ERTS_PROC_LOCK_MAIN;
 
     ERTS_CHK_HAVE_ONLY_MAIN_PROC_LOCK(BIF_P);
-    if (!registry) BIF_ERROR(BIF_P, BADARG);
-    reg_safe_read_lock(registry, BIF_P, &proc_locks);
+    reg_safe_read_lock(BIF_P, &proc_locks);
     if (!proc_locks)
 	erts_proc_lock(BIF_P, ERTS_PROC_LOCK_MAIN);
 
     /* work out how much heap we need */
-    need = registry->table.nobjs * 2;
+    need = process_reg.nobjs * 2;
 
     if (need == 0) {
 	reg_read_unlock();
@@ -670,7 +596,7 @@ BIF_RETTYPE registered_0(BIF_ALIST_0)
     arg.hp = HAlloc(BIF_P, need);
     arg.res = NIL;
 
-    hash_foreach(&registry->table, (HFOREACH_FUN)registered_foreach, &arg);
+    hash_foreach(&process_reg, (HFOREACH_FUN)registered_foreach, &arg);
 
     reg_read_unlock();
 

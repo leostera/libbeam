@@ -54,12 +54,11 @@ typedef struct atom {
     int ord0;        /* ordinal value of first 3 bytes + 7 bits */
     union{
         byte* name;      /* name of atom, used by templates */
+        Eterm bin;       /* name of atom, used when atom is in table*/
     } u;
 } Atom;
 
-/* Fixed diagnostic adapters. Private execution must receive its own context. */
-Atom *erts_diagnostic_atom_at(Uint i);
-int erts_diagnostic_atom_index_ok(Uint i);
+extern IndexTable erts_atom_table;
 
 ERTS_GLB_INLINE Atom* atom_tab(Uint i);
 ERTS_GLB_INLINE int erts_is_atom_utf8_bytes(byte *text, size_t len, Eterm term);
@@ -72,7 +71,7 @@ const byte *erts_atom_get_name(const Atom *atom);
 ERTS_GLB_INLINE Atom*
 atom_tab(Uint i)
 {
-    return erts_diagnostic_atom_at(i);
+    return (Atom *) erts_index_lookup(&erts_atom_table, i);
 }
 
 ERTS_GLB_INLINE int erts_is_atom_utf8_bytes(byte *text, size_t len, Eterm term)
@@ -132,7 +131,7 @@ ERTS_GLB_INLINE int erts_is_atom_index_ok(Uint ix)
      *
      * So we don't care if we race and miss some unrelated increments.
      */
-    return erts_diagnostic_atom_index_ok(ix);
+    return ix < (Uint)erts_atom_table.entries;
 }
 
 
@@ -160,8 +159,7 @@ int atom_table_sz(void);	/* table size in bytes, excluding stored objects */
 Eterm am_atom_put(const char*, Sint); /* ONLY 7-bit ascii! */
 Eterm erts_atom_put(const byte *name, Sint len, ErtsAtomEncoding enc, int trunc);
 int erts_atom_put_index(const byte *name, Sint len, ErtsAtomEncoding enc, int trunc);
-struct ErtsAtomNamespace;
-void init_atom_table(struct ErtsAtomNamespace *);
+void init_atom_table(void);
 void atom_info(fmtfn_t, void *);
 void dump_atoms(fmtfn_t, void *);
 Uint erts_get_atom_limit(void);
