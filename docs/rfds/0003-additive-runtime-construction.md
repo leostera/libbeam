@@ -3,7 +3,7 @@
 
 # RFD 0003: Build libbeam additively from BEAM components
 
-Status: **Accepted direction; unchanged lifecycle/stateful acceptance and bounded-profile ownership hardening demonstrated. Broader M3 exception paths remain under construction.**
+Status: **Accepted direction; unchanged lifecycle/stateful acceptance and bounded-profile ownership hardening demonstrated. Required uncaught monitor errors now carry real traces; broader exception semantics remain unadmitted.**
 
 The [first-execution record](0003-first-execution.md) connects the earlier
 [A03–A07 checkpoint](0003-loader-program.md) to real generated transformations,
@@ -38,13 +38,17 @@ and remaining scope.
 The [additive runtime inventory](0003-additive-runtime-inventory.md) records the
 remaining dependency clusters, fixture-derived requirements and implementation
 order. Stateful Isolate acceptance now passes unchanged in Debug, Release and UBSan.
-`/tmp/libbeam-stateful-matching-hardened-first/summary.json` records 32 replacements,
-4096 correlated requests, boot allocation prefixes, actor GC, queued retirement,
+`/tmp/libbeam-monitor-errors-integrated-final/summary.json` records 32 replacements,
+4096 correlated requests, 32 real duplicate-bootstrap exceptions with the original
+actor surviving, boot allocation prefixes, actor GC, queued retirement,
 detached host reply ownership, peer progress and exact final allocation balance.
 Pinned preloaded spawn wrappers, registry, receive markers/deadlines, local monitors
 and bounded native binary matching supply the actual fixture dependencies.
-Error-class DOWN still refuses without real stacktrace capture; wider exception,
-signal and opcode capabilities remain unadmitted. This does not establish general
+Error-class DOWN now captures actual functions, arguments, error metadata and
+saved non-tail continuations with the pinned default trace depth and the existing
+explicit no-line-info policy. Worker tests include BIF badarg, guest error/3 and
+capture/copy allocation prefixes. Wider exception, signal and opcode capabilities,
+source locations, raw saved-ftrace packaging and catch/unwind remain unadmitted. This does not establish general
 Erlang/Elixir execution, security, performance or quota guarantees, and is not RFD
 completion. Midgard compilation/execution has not yet been attempted.
 

@@ -289,7 +289,7 @@ static void spawned_children(LbBytesView code)
         CHECK(status==LB_WORLD_NO_MEMORY || status==LB_WORLD_OK); expect(call,status);
         if(status==LB_WORLD_OK) break;
     }
-    const char *monitored[]={"monitored_normal","monitored_kill","monitored_flush"};
+    const char *monitored[]={"monitored_normal","monitored_kill","monitored_flush","monitored_error","monitored_error_info","monitored_bif_error","monitored_error_call"};
     for(size_t i=0;i<sizeof(monitored)/sizeof(monitored[0]);++i) for(size_t prefix=1;;++prefix) {
         CHECK(prefix<300);
         lb_engine_enter(engine); m.fail_worker=m.worker_calls+prefix; lb_engine_leave(engine);
@@ -301,6 +301,7 @@ static void spawned_children(LbBytesView code)
         CHECK(status==LB_WORLD_NO_MEMORY || status==LB_WORLD_OK); expect(call,status);
         if(status==LB_WORLD_OK) break;
     }
+    puts("CORE_WORLD_MONITOR_ERRORS_OK real_mfa_args=true saved_continuations=true error_info=true capture_prefix_rollback=true no_line_info=true");
     const char *errors[]={"named_duplicate","missing_name","guest_error"};
     for(size_t i=0;i<sizeof(errors)/sizeof(errors[0]);++i) {
         CHECK(lb_world_call(world,text("fun_slice"),text(errors[i]),text("reason"),&call)==LB_WORLD_OK);
@@ -427,6 +428,12 @@ static void stateful_probes(LbBytesView a_code,LbBytesView b_code)
             expect(probe_call(world,"request","next",reply),LB_WORLD_OK);
             expect(probe_call(world,"request","read",reply),LB_WORLD_OK);
         }
+        /* Unchanged boot's exceptional branch: the second child fails real
+         * register/2, sends native error DOWN with a trace, and the parent
+         * raises bootstrap_failed. The original named actor must survive. */
+        LbCall *duplicate=NULL;
+        CHECK(lb_world_call(world,text("probe"),text("boot"),text(""),&duplicate)==LB_WORLD_OK);
+        expect(duplicate,LB_WORLD_EXCEPTION);
         retained=probe_call(world,"request","read","A:64");
         CHECK(lb_call_poll(retained,&detached)==LB_WORLD_OK);
         lb_engine_enter(engine);
@@ -456,7 +463,7 @@ static void stateful_probes(LbBytesView a_code,LbBytesView b_code)
     lb_reclamation_release(r); lb_world_release(peer);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     CHECK(!m.live && !m.bytes);
-    printf("CORE_WORLD_STATEFUL_OK boot_failure_prefixes=%zu churn=32 correlated_calls=4096 queued_stop=true detached_reply=true peer_survives=true exact_final_balance=true\n",prefix);
+    printf("CORE_WORLD_STATEFUL_OK boot_failure_prefixes=%zu churn=32 correlated_calls=4096 duplicate_boot_errors=32 queued_stop=true detached_reply=true peer_survives=true exact_final_balance=true\n",prefix);
 }
 int main(int argc,char **argv)
 {

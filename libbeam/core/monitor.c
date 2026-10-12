@@ -5,6 +5,7 @@
  * Only ordinary local process monitors; no aliases, distribution or tracing.
  */
 #include "monitor.h"
+#include "stacktrace.h"
 #include "process_internal.h"
 #define TARGET (UINT32_C(1)<<7)
 #define IN_TABLE (UINT32_C(1)<<8)
@@ -105,6 +106,9 @@ void lb_monitor_exit(LbProcess *p,int notify)
 {
     /* An exiting origin cannot receive DOWN and owns no surviving halves. */
     while(p->monitors_origin) detach(owner(p->monitors_origin));
+    Eterm error_reason=THE_NON_VALUE; LbProcessStatus captured=LB_PROCESS_READY;
+    if(notify && p->monitors_target && p->status==LB_PROCESS_EXCEPTION && LB_GET_EXC_CLASS(p->freason)==LB_EXTAG_ERROR)
+        captured=lb_error_down_reason(p,&error_reason);
     while(p->monitors_target) {
         LbMonitor *m=owner(p->monitors_target); LbProcess *origin=m->origin_process;
         if(notify) {
@@ -112,10 +116,9 @@ void lb_monitor_exit(LbProcess *p,int notify)
             Eterm reason=am_normal;
             if(p->status==LB_PROCESS_EXCEPTION && LB_GET_EXC_CLASS(p->freason)==LB_EXTAG_EXIT)
                 reason=p->exception_value;
-            else if(p->status!=LB_PROCESS_DONE) {
-                /* Error-class DOWN needs a real stacktrace, not a fabricated []. */
-                status=p->status==LB_PROCESS_EXCEPTION?LB_PROCESS_REFUSED:p->status;
-            }
+            else if(p->status==LB_PROCESS_EXCEPTION && LB_GET_EXC_CLASS(p->freason)==LB_EXTAG_ERROR) {
+                status=captured; reason=error_reason;
+            } else if(p->status!=LB_PROCESS_DONE) status=p->status==LB_PROCESS_EXCEPTION?LB_PROCESS_REFUSED:p->status;
             if(status==LB_PROCESS_READY) {
                 Eterm tuple[6]={make_arityval(5),am_DOWN,m->ref,am_process,p->identity.id,reason};
                 LbMessage *message; Uint cost;

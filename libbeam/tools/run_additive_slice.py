@@ -437,6 +437,14 @@ def main():
                 native = run(variant+'-program', [out / 'build/core_beam_program_test', probe])
                 compare_functions(variant, probe, native)
                 run(variant+'-executable-refusal', [out / 'build/core_code_test', '--reject', probe])
+            trace_reference = out / 'monitor-trace-reference'
+            trace_reference.mkdir()
+            run('monitor-trace-reference-erlc', [args.erlc, '+no_line_info', '-o', trace_reference,
+                 root / 'libbeam/tests/fixtures/fun_slice.erl'])
+            run('monitor-trace-reference', [args.erl, '-noshell', '-pa', trace_reference, '-eval',
+                 'lists:foreach(fun(F) -> <<"monitored reply">> = apply(fun_slice,F,[<<"monitored reply">>]) end,'
+                 '[monitored_error,monitored_error_info,monitored_bif_error,monitored_error_call]), '
+                 'io:format("MONITOR_TRACE_REFERENCE_OK~n"), halt().'])
             run('stateful-world-execution', [out / 'build/core_world_test', async_fixture, fun_fixture, *probes])
             # Restore the image dump used by the independent metadata check below.
             native = (out / 'native-fixture.log').read_text()
@@ -548,7 +556,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','pid_table','bif_process','fun','message','receive','registry','receive_marker','monitor','preloaded','binary_match']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','stacktrace','pid_table','bif_process','fun','message','receive','registry','receive_marker','monitor','preloaded','binary_match']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),

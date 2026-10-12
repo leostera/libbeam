@@ -47,6 +47,7 @@ struct LbProcess {
     LbDecimal *decimal; /* sole pending native continuation; independent scratch */
     Uint freason; /* Native encoded scalar, never a GC root. */
     Eterm fvalue,exception_value; /* Pending payload and expanded terminal value. */
+    const BeamInstr *native_callsite,*native_trace_previous; /* owned code leases, not heap aliases */
     Uint arity, last_gc_cost, last_native_cost;
     size_t collections, heap_reserved;
     size_t last_binary_bytes; /* zero/copy work reported by one storage operation */

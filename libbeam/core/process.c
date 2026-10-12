@@ -23,6 +23,7 @@ typedef unsigned char byte;
 #include "writable.h"
 #include "binary_build.h"
 #include "reference.h"
+#include "stacktrace.h"
 #include "receive.h"
 #define is_not_ref(term) (!lb_is_reference(term))
 #define erl_send lb_erl_send
@@ -237,7 +238,7 @@ static int32_t lb_packed_label(const BeamInstr *table,size_t index)
 #define cp_val(word) ((const BeamInstr *)(word))
 #define make_blank(slot) ((slot)=NIL)
 #define ADD_BYTE_OFFSET(pointer,offset) ((Eterm *)((unsigned char *)(pointer)+(offset)))
-#define SET_I(pc) do { I=(pc); } while(0)
+#define SET_I(pc) do { const BeamInstr *next_pc=(pc); lb_trace_callsite(c_p,I,next_pc); I=next_pc; } while(0)
 #define VALID_INSTR(op) ((op)<NUM_SPECIFIC_OPS)
 #define CHECK_TERM(term) ASSERT(!is_non_value(term))
 #define CHECK_ARGS(pc) ASSERT(pc_valid(c_p,(pc)))
@@ -358,6 +359,10 @@ memory_failure:
 malformed_code:
     c_p->status=LB_PROCESS_INVALID;
 stop:
+    /* Terminal monitor capture may collect. Publish the active heap/stack/PC
+     * first and reload afterward; local interpreter aliases are not roots. */
+    SWAPOUT;
+    c_p->flags &= ~(1u<<13);
     /* Guest exit removes identity before publishing completion. The retained
      * process/result allocation may outlive that logical death. */
     if(c_p->status!=LB_PROCESS_YIELDED) {
@@ -369,5 +374,6 @@ stop:
     if(c_p->status!=LB_PROCESS_YIELDED && c_p->identity.owner &&
        lb_pid_remove(c_p->identity.owner,&c_p->identity)!=LB_PID_OK) abort();
     c_p->bitdata=bitdata;
+    SWAPIN;
     SWAPOUT; c_p->running=0; return c_p->status;
 }

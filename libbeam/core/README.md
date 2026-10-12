@@ -62,7 +62,7 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   DOWN messages copy before queue publication; demonitor/2 accepts flush, repairs
   queue anchors and releases both halves. Private cancellation detaches silently.
   Allocation failures propagate infrastructure failure, not fabricated DOWN.
-  Error-class DOWN still refuses because native stacktrace capture is absent;
+  Error-class DOWN now captures real MFA/argument/continuation frames;
   aliases, distribution, info options and non-kill exit/2 are not admitted.
   Actual monitored worker actors cover normal exit, waiting-child kill, flush,
   rollback and reclamation. Unchanged two_isolates now passes Debug/Release/UBSan.
@@ -79,7 +79,17 @@ lifecycle target passes; the stateful example still refuses unsupported module i
 - `bif_process.c`: native error/1 and complete error/3 option scanning/error/2
   fallback; retain raw arglist/error-info payload and expanded reason separately.
   Empty/single-entry MAP_EXT literal flatmaps supply wrapper metadata; larger maps,
-  stacktrace capture and catch/unwind remain unadmitted.
+  line locations, saved ftrace and catch/unwind remain unadmitted.
+- `stacktrace.c`: immediate uncaught-error capture/build follows native
+  save_stacktrace/gather_stacktrace/build_stacktrace/MFA construction, with pinned
+  default depth 8 and the existing explicit no-line-info policy. Code-pointer/MFA
+  snapshots have no moving aliases; reserve before borrowing raw error payloads.
+  Real tuple4 frames preserve arglists, BIF metadata and non-tail continuations.
+  Monitor DOWN copies the expanded reason and trace, never fabricated empty frames.
+  Terminal interpreter roots publish before capture GC and reload afterward.
+  Worker allocation-prefix tests require actual frame/argument/error-info contents.
+  This is not raw ftrace/bignum packaging or catch/unwind; unsupported BIF cause
+  metadata still refuses rather than producing a success-shaped trace.
 - `binary_match.c`: native SubBits match-context flags/origin roots and complete
   start-match, ensure/read/extract/equality/tail dispatch groups. Whole native
   bs_match/selector generators are compiled, but flow admits only bounded local
