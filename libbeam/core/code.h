@@ -4,6 +4,7 @@
 #ifndef LIBBEAM_CORE_CODE_H
 #define LIBBEAM_CORE_CODE_H
 #include "beam_program.h"
+#include "load_report.h"
 #include "engine.h"
 typedef struct LbCodeSpace LbCodeSpace;
 typedef struct LbCodeModule LbCodeModule;
@@ -21,6 +22,7 @@ typedef enum { LB_CODE_OK, LB_CODE_INVALID, LB_CODE_FORMAT, LB_CODE_UNSUPPORTED,
 LbCodeStatus lb_code_space_create(LbEngine *, LbCodeSpace **);
 LbCodeStatus lb_code_space_destroy(LbCodeSpace *);
 LbAtomTable *lb_code_space_atoms(LbCodeSpace *); /* borrowed; no concurrent writer */
+LbCodeStatus lb_code_load_report(LbCodeSpace *, const void *, size_t, LbCodeModule **, LbBeamError *, LbLoadReport *);
 LbCodeStatus lb_code_load(LbCodeSpace *, const void *, size_t, LbCodeModule **, LbBeamError *);
 LbCodeStatus lb_code_unload(LbCodeModule *); /* refuses frames/entries/importers */
 LbCodeStatus lb_code_entry_acquire(LbCodeSpace *, Eterm module, Eterm function, unsigned arity, LbCodeEntry **);

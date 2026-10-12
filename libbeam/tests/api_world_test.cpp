@@ -5,7 +5,6 @@
 #include <cfenv>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <fstream>
 #include <new>
 #include <thread>
@@ -39,47 +38,15 @@ static void reclaim(Isolate& isolate) {
     auto stopped=take(isolate.stop()); CHECK(!stopped.wait_until(deadline()));
     auto again=stopped.wait_until(deadline()); CHECK(again && again->code==ErrorCode::closed);
 }
-// Generic artifact admission witness, not a manifest reader or fallback VM.
-// The caller supplies verified exact-name BEAM files and declared wire bytes.
-static int application_attempt(int argc,char** argv) {
-    CHECK(argc>=7);
-    auto input=image(argv[4]), expected=image(argv[5]);
-    auto engine=take(Engine::create());
-    unsigned loaded=0,refused=0; bool executed=false,matched=false;
-    {
-        auto world=take(engine.create_isolate());
-        for(int i=6;i<argc;++i) {
-            auto bytes=image(argv[i]); auto status=world.load_module(view(bytes));
-            if(status) {
-                ++refused;
-                std::printf("APPLICATION_LOAD path=%s code=%d error=%s\n",argv[i],static_cast<int>(status->code),status->message.c_str());
-            } else { ++loaded; std::printf("APPLICATION_LOAD path=%s admitted=true\n",argv[i]); }
-        }
-        auto initial=world.start(argv[2],argv[3],view(input));
-        if(auto* failure=std::get_if<Error>(&initial)) {
-            std::printf("APPLICATION_START module=%s function=%s code=%d error=%s\n",argv[2],argv[3],static_cast<int>(failure->code),failure->message.c_str());
-        } else {
-            auto result=std::get<Call>(initial).wait_until(deadline());
-            if(auto* failure=std::get_if<Error>(&result))
-                std::printf("APPLICATION_RESULT code=%d error=%s\n",static_cast<int>(failure->code),failure->message.c_str());
-            else {
-                executed=true; matched=std::get<Bytes>(result)==expected;
-                std::printf("APPLICATION_RESULT returned_bytes=%zu expected_match=%s\n",std::get<Bytes>(result).size(),matched?"true":"false");
-            }
-        }
-        reclaim(world);
-    }
-    CHECK(!engine.shutdown(deadline()));
-    std::printf("APPLICATION_ATTEMPT loaded=%u refused=%u returned_binary=%s expected_match=%s reclaimed=true engine_shutdown=true\n",loaded,refused,executed?"true":"false",matched?"true":"false");
-    return !refused && executed && matched?0:1;
-}
 int main(int argc,char** argv) {
-    if(argc>1 && !std::strcmp(argv[1],"--application")) return application_attempt(argc,argv);
     CHECK(argc==10); auto code=image(argv[1]), large_code=image(argv[2]), local_code=image(argv[3]), compare_code=image(argv[4]), shape_code=image(argv[5]), add_code=image(argv[6]), decimal_code=image(argv[7]), pid_code=image(argv[8]), fun_code=image(argv[9]);
     auto engine=take(Engine::create());
     Bytes kept;
     {
         auto a=take(engine.create_isolate()), b=take(engine.create_isolate());
+        Bytes invalid_image(64,0); auto refused=a.load_module(view(invalid_image));
+        CHECK(refused && refused->code==ErrorCode::invalid_beam &&
+              refused->message.find("stage=image")!=std::string::npos);
         CHECK(!a.load_module(view(code)) && !b.load_module(view(code)));
         CHECK(!a.load_module(view(pid_code)) && !b.load_module(view(pid_code)));
         CHECK(!a.load_module(view(fun_code)) && !b.load_module(view(fun_code)));

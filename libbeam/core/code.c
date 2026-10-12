@@ -127,7 +127,10 @@ static LbCodeStatus setup(LoaderState *st)
             lb_export_find(st->space,entry->module,entry->function,(unsigned)entry->arity);
         if(!e && st->space->preloading && entry->module==am_erlang)
             e=lb_export_find(st->space,entry->module,entry->function,(unsigned)entry->arity);
-        if(!e) return LB_CODE_UNRESOLVED;
+        if(!e) {
+            p->error.stage="unresolved import"; p->error.offset=i;
+            return LB_CODE_UNRESOLVED;
+        }
         if(e->owner && e->owner!=module && e->owner->importers>SIZE_MAX-module->import_count) return LB_CODE_LIMIT;
         module->imports[i]=e; module->dependencies[i]=e->owner==module?NULL:e->owner;
         if(e->bif_number>=0) st->bif_imports[i]=&st->space->engine->bifs[e->bif_number];
@@ -229,7 +232,18 @@ LbCodeStatus lb_compile_code(LbCodeModule *module)
     }
     return LB_CODE_OK;
 }
-LbCodeStatus lb_code_load(LbCodeSpace *space,const void *bytes,size_t size,LbCodeModule **out,LbBeamError *error)
+static void report_import(LbBeamProgram *p,LbLoadReport *report)
+{
+    LbBeamImport import; LbBeamBytes module,function;
+    if(lb_beam_image_import(p->image,(uint32_t)p->error.offset,&import)!=LB_BEAM_OK ||
+       lb_beam_image_atom(p->image,import.module,&module)!=LB_BEAM_OK ||
+       lb_beam_image_atom(p->image,import.function,&function)!=LB_BEAM_OK ||
+       module.size>sizeof(report->module) || function.size>sizeof(report->function)) abort();
+    report->has_import=1; report->arity=import.arity;
+    report->module_size=module.size; report->function_size=function.size;
+    memcpy(report->module,module.data,module.size); memcpy(report->function,function.data,function.size);
+}
+static LbCodeStatus load_code(LbCodeSpace *space,const void *bytes,size_t size,LbCodeModule **out,LbBeamError *error,LbLoadReport *report)
 {
     LbCodeModule *module,*peer;
     LbBeamProgram *p=NULL;
@@ -262,6 +276,7 @@ LbCodeStatus lb_code_load(LbCodeSpace *space,const void *bytes,size_t size,LbCod
         if(error) *error=(LbBeamError){result==LB_CODE_NO_MEMORY?LB_BEAM_NO_MEMORY:result==LB_CODE_LIMIT?LB_BEAM_LIMIT:
             result==LB_CODE_UNSUPPORTED?LB_BEAM_UNSUPPORTED:result==LB_CODE_UNRESOLVED?LB_BEAM_NOT_FOUND:LB_BEAM_BAD_FORMAT,
             p->error.offset,p->error.stage};
+        if(result==LB_CODE_UNRESOLVED && report) report_import(p,report);
         lb_beam_program_destroy(p); lb_release(space->domain,module->dependencies); lb_release(space->domain,module); space->loading=0; return result;
     }
     /* Publication: all allocations, resolution, dispatch admission and fixups
@@ -274,6 +289,19 @@ LbCodeStatus lb_code_load(LbCodeSpace *space,const void *bytes,size_t size,LbCod
     space->loading=0; *out=module;
     if(error) *error=(LbBeamError){LB_BEAM_OK,0,"published native BEAM words"};
     return LB_CODE_OK;
+}
+LbCodeStatus lb_code_load_report(LbCodeSpace *space,const void *bytes,size_t size,LbCodeModule **out,LbBeamError *error,LbLoadReport *report)
+{
+    LbBeamError local_error; LbCodeStatus status;
+    if(!error) error=&local_error;
+    if(report) memset(report,0,sizeof(*report));
+    status=load_code(space,bytes,size,out,error,report);
+    if(report) { report->stage=error->stage; report->offset=error->offset; }
+    return status;
+}
+LbCodeStatus lb_code_load(LbCodeSpace *space,const void *bytes,size_t size,LbCodeModule **out,LbBeamError *error)
+{
+    return lb_code_load_report(space,bytes,size,out,error,NULL);
 }
 LbCodeStatus lb_code_unload(LbCodeModule *module)
 {

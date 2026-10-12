@@ -5,7 +5,7 @@
 // EXPERIMENTAL API: signatures express the target contract below.
 // Engine construction/shutdown own the additive C execution substrate.
 // Isolate/call/reclamation operate on the explicitly admitted BEAM profile;
-// the stateful Erlang-process fixture still requires additional runtime machinery.
+// bounded stateful Erlang actors, messaging and local monitors are implemented.
 // No implicit worlds or OTP startup; no stable public ABI claim.
 #include <chrono>
 #include <cstddef>

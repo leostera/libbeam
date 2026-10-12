@@ -19,7 +19,11 @@ copying GC, literal/atom returns, `module_info/0,1`, bounded yields, exceptions 
 physical code retirement have execution consumers. This is a **limited profile**,
 not full A03–A07 coverage or full Erlang process machinery. Public Isolates now run
 this profile with copied calls and physical reclamation. The unchanged Engine
-lifecycle target passes; the stateful example still refuses unsupported module imports/instructions.
+lifecycle and unchanged stateful two-Isolate examples pass in Debug, Release and
+available UBSan. Whole Midgard/Elixir application compatibility is still being
+constructed; [the earlier application attempt](../../docs/rfds/0003-midgard-application-attempt.md)
+records a real refusal, not execution. [RFD 0004](../../docs/rfds/0004-isolate-resource-policy.md)
+selects memory/invocation policy; enforcement is not yet implemented.
 
 ## Boundaries
 
@@ -244,15 +248,17 @@ binaries also survive copying GC, read-only consumers, pinning and retirement;
 literal admission remains immutable-only. C-created small flatmaps support error
 payload dependencies and representation consumers. Empty/single-entry MAP_EXT
 literals are admitted for wrapper metadata; larger MAP_EXT and map operations are not.
-HAMT, magic/resource binaries, fun objects, PIDs, ports and refs remain unsupported. Lambda declarations
-are not closure objects. Attributes/compile ETF is decoded for executable
+HAMT, magic/resource binaries, ports and external/magic references remain unsupported.
+Local fun objects/captured environments, same-world PIDs and ordinary local references
+are implemented with owned leases and moving roots; they do not grant cross-world authority. Attributes/compile ETF is decoded for executable
 admission; ordinary line/debug/feature metadata is passive, while executable
 `DbgB` and record `Recs` metadata is refused. Source-line instrumentation is absent.
 
 Only the explicit generated dispatch profile is admitted, including unused
 functions. Other arithmetic/bases, full transform helpers,
-catch/fun/string/binary instruction consumers,
-broader exception handling, scheduling and the stateful example remain outstanding.
+general catch/unwind and broader string/binary consumers remain outstanding.
+Local fun calls, bounded binary match cursors and serialized actor scheduling are
+implemented only within their documented whole-case admission profiles.
 Retained preparation arenas include temporary operations/backing; density is not
 claimed. The bootstrap allocator supplies backing, not a replacement term format.
 
@@ -274,7 +280,8 @@ python3 -B libbeam/tools/run_additive_slice.py --output /tmp/unused-core-validat
 
 It requires `erl`, `erlc`, CMake, a C compiler, Python, Perl, zlib and `nm` (POSIX
 host tooling). Compiler-produced BEAM files remain outside source control.
-The runner requires unchanged Engine lifecycle acceptance and separately observes
-the still-failing stateful-Isolate target. Component execution alone is not either
+The runner requires unchanged Engine lifecycle and stateful two-Isolate acceptance
+in Debug/Release/available UBSan. [Runnable examples](../examples/README.md) use the
+same public Engine/Isolate API and their existing language sources as fixtures. Component execution alone is not either
 acceptance gate, complete Erlang compatibility, a security boundary, or a
 performance/platform claim.

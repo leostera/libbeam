@@ -35,6 +35,17 @@ template<class T> bool usable(const std::unique_ptr<T>& impl) {
     return impl && impl->thread == std::this_thread::get_id();
 }
 Error invalid_handle() { return {ErrorCode::invalid_state, "moved handle or wrong control thread"}; }
+std::string diagnostic_name(const unsigned char* data, std::size_t size) {
+    static const char hex[] = "0123456789abcdef";
+    std::string result;
+    for (std::size_t i = 0; i < size; ++i) {
+        const auto byte = data[i];
+        if (byte < 32 || byte == 127 || byte == '\\' || byte == '\"') {
+            result += "\\x"; result += hex[byte >> 4]; result += hex[byte & 15];
+        } else result += static_cast<char>(byte);
+    }
+    return result;
+}
 LbBytesView bytes(ByteView view) { return {view.data, view.size}; }
 LbBytesView name(std::string_view view) {
     return {reinterpret_cast<const unsigned char*>(view.data()), view.size()};
@@ -123,8 +134,22 @@ Status Engine::shutdown(Deadline deadline) {
 Status Isolate::load_module(ByteView input) {
     try {
         if (!usable(impl_)) return invalid_handle();
-        const auto status = lb_world_load(impl_->runtime, bytes(input));
-        if (status != LB_WORLD_OK) return world_error(status);
+        LbWorldLoadReport report;
+        const auto status = lb_world_load_report(impl_->runtime, bytes(input), &report);
+        if (status != LB_WORLD_OK) {
+            auto error = world_error(status);
+            if (status == LB_WORLD_BAD_BEAM || status == LB_WORLD_UNSUPPORTED) {
+                const std::string stage = report.stage ? report.stage : "unknown";
+                error.message += " (stage=" + stage +
+                    (stage == "unresolved import" ? ", import_index=" : ", offset=") +
+                    std::to_string(report.offset);
+                if (report.has_import) error.message += ", mfa=\"" +
+                    diagnostic_name(report.module, report.module_size) + "\":\"" +
+                    diagnostic_name(report.function, report.function_size) + "\"/" + std::to_string(report.arity);
+                error.message += ")";
+            }
+            return error;
+        }
         return std::nullopt;
     } catch (const std::bad_alloc&) { return Error{ErrorCode::limit, {}}; }
 }

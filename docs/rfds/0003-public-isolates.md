@@ -3,15 +3,24 @@
 
 # Public Isolates and copied calls over the selected BEAM profile
 
-Status: **M2 selected-profile public execution implemented; stateful M3/M4 remain outstanding.**
+Status: **M2 public execution and later bounded-profile stateful M3/M4 implemented.**
+
+This document's detailed construction/evidence sections record the original M2
+cutoff. Later messaging, monitors, bounded binary matching and acceptance hardening
+made the unchanged stateful target pass; see the current
+[construction record](0003-additive-runtime-construction.md) and
+[core boundary](../../libbeam/core/README.md). Resource enforcement and whole
+Midgard application execution are separate unfinished work.
 
 This follows [owned worker execution](0003-owned-executor.md), baseline `4e206202`,
 under [RFD 0003](0003-additive-runtime-construction.md). The public C++ API now
 creates real private worlds, loads ordinary BEAM, admits binary calls, waits for
 worker execution, and reclaims code/atoms/heaps while preserving closed handles.
-Neither acceptance example was changed. `engine_lifecycle` continues to pass;
-`two_isolates` now reaches loading and refuses its unsupported stateful profile.
-No PID/spawn/mailbox/monitor/registry/timer machinery is manufactured by this slice.
+Neither acceptance example was changed. At the original M2 cutoff,
+`engine_lifecycle` passed and `two_isolates` reached loading but refused its then
+unsupported stateful profile. No PID/spawn/mailbox/monitor/registry/timer machinery
+was manufactured by that slice; later native owned slices implemented those actual
+dependencies and both acceptance targets now pass.
 
 ## One ownership and execution path
 

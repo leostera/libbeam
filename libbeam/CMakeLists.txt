@@ -88,8 +88,15 @@ target_link_libraries(engine_lifecycle PRIVATE libbeam::libbeam)
 add_executable(two_isolates examples/two_isolates.cpp)
 target_link_libraries(two_isolates PRIVATE libbeam::libbeam)
 
+# Generic host example; fixture cases below use exactly this execution path.
+add_executable(run_beam examples/run_beam.cpp)
+target_link_libraries(run_beam PRIVATE libbeam::libbeam)
+
 include(CTest)
 if(BUILD_TESTING)
+    add_test(NAME beam_runner_help COMMAND run_beam --help)
+    add_test(NAME beam_runner_invalid_cli COMMAND run_beam --dependency missing.beam)
+    set_tests_properties(beam_runner_invalid_cli PROPERTIES WILL_FAIL TRUE)
     add_test(NAME engine_lifecycle_acceptance COMMAND engine_lifecycle)
     set_tests_properties(engine_lifecycle_acceptance PROPERTIES TIMEOUT 20)
     add_executable(core_pid_test tests/core_pid_test.c)

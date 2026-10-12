@@ -4,6 +4,7 @@
 #ifndef LIBBEAM_CORE_WORLD_H
 #define LIBBEAM_CORE_WORLD_H
 #include "engine.h"
+#include "load_report.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,6 +26,11 @@ typedef struct { const unsigned char *data; size_t size; } LbBytesView;
 /* Serialized host control. Actual guest execution occurs only on the Engine
  * worker. Opaque handles retain finite control state, not reclaimed VM storage. */
 LbWorldStatus lb_world_create(LbEngine *,LbWorld **);
+/* Diagnostic stage points only to static runtime metadata, never guest/arena
+ * storage. Offset is an import-table index for "unresolved import", otherwise
+ * the loader's byte/instruction location. It remains valid after rollback. */
+typedef LbLoadReport LbWorldLoadReport;
+LbWorldStatus lb_world_load_report(LbWorld *,LbBytesView,LbWorldLoadReport *);
 LbWorldStatus lb_world_load(LbWorld *,LbBytesView);
 LbWorldStatus lb_world_start(LbWorld *,LbBytesView module,LbBytesView function,LbBytesView input,LbCall **);
 LbWorldStatus lb_world_call(LbWorld *,LbBytesView module,LbBytesView function,LbBytesView input,LbCall **);

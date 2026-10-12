@@ -48,6 +48,8 @@ def main():
                            {p for p in (root / 'libbeam/core/otp/opcodes').rglob('*') if p.is_file()} |
                            {p for p in (root / 'libbeam/tests/fixtures/two_isolates').rglob('*') if p.is_file()} |
                            {root / 'libbeam/CMakeLists.txt', root / 'libbeam/src/engine.cpp',
+                            root / 'libbeam/examples/run_beam.cpp', root / 'libbeam/include/libbeam/engine.hpp',
+                            root / 'libbeam/tests/fixtures/refused_map.erl',
                             root / 'libbeam/tests/core_beam_image_test.c', root / 'libbeam/tests/core_alloc_test.c',
                             root / 'libbeam/tests/core_terms_atoms_test.c', root / 'libbeam/tools/generate_atoms.py',
                             root / 'libbeam/tools/check_term_representation.py', root / 'libbeam/tools/check_binary_representation.py',
@@ -275,12 +277,32 @@ def main():
             run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, fun_fixture])
             application_input = out / 'application-input.bin'
             application_input.write_bytes(b'generic artifact admission witness')
-            run('application-mode-supported', [out / 'build/api_world_test', '--application',
-                 'async_slice', 'identity', application_input, application_input, async_fixture])
+            run('application-mode-supported', [out / 'build/run_beam', '--entry',
+                 'async_slice', 'identity', '--call-file', application_input, '--expect-file', application_input,
+                 '--isolate', async_fixture, '--isolate', async_fixture])
+            run('runner-invalid-cli', [out / 'build/run_beam', '--dependency', async_fixture], accepted=(2,))
+            run('runner-closure', [out / 'build/run_beam', '--entry', 'fun_slice', 'nested',
+                 '--call', 'captured', '--expect', 'captured', '--isolate', fun_fixture])
+            run('runner-shapes', [out / 'build/run_beam', '--entry', 'shape_slice', 'list_binary',
+                 '--call', 'shape', '--expect', 'shape', '--isolate', shape_fixture])
+            run('runner-decimal', [out / 'build/run_beam', '--entry', 'decimal_slice', 'negative',
+                 '--call', '', '--expect', '-18446744073709551617', '--isolate', decimal_fixture])
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
             run('peer-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/code_peer.erl'])
             peer_fixture = fixture_dir / 'code_peer.beam'
+            run('runner-dependency-groups', [out / 'build/run_beam', '--entry', 'first_slice', 'identity',
+                 '--call', 'dependency', '--expect', 'dependency', '--isolate', peer_fixture,
+                 '--dependency', fixture, '--isolate', peer_fixture, '--dependency', fixture])
+            missing = run('runner-missing-dependency', [out / 'build/run_beam', '--entry', 'first_slice', 'identity',
+                 '--call', 'dependency', '--isolate', peer_fixture], accepted=(1,))
+            if 'stage=unresolved import, import_index=' not in missing or 'mfa="first_slice":"literal"/0' not in missing:
+                raise RuntimeError('missing dependency diagnostic lost its owned MFA/location')
+            run('refused-map-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/refused_map.erl'])
+            refused = run('runner-unused-unsupported', [out / 'build/run_beam', '--entry', 'refused_map', 'identity',
+                 '--call', 'must-not-run', '--isolate', fixture_dir / 'refused_map.beam'], accepted=(1,))
+            if 'stage=put_map_assoc' not in refused or 'bytes=' in refused:
+                raise RuntimeError('unused map function did not fail closed with an opcode diagnostic')
             run('binary-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/binary_slice.erl'])
             binary_fixture = fixture_dir / 'binary_slice.beam'
             run('flatmap-representation', ['python3', '-B', root / 'libbeam/tools/check_flatmap_representation.py',
@@ -450,6 +472,10 @@ def main():
                  '[monitored_error,monitored_error_info,monitored_bif_error,monitored_error_call,monitored_empty_info]), '
                  'io:format("MONITOR_TRACE_REFERENCE_OK~n"), halt().'])
             run('stateful-world-execution', [out / 'build/core_world_test', async_fixture, fun_fixture, *probes])
+            run('runner-stateful', [out / 'build/run_beam', '--entry', 'probe', 'request',
+                 '--boot', 'boot', '', '--expect-boot', 'A:ready', '--call', 'next', '--expect', 'A:1',
+                 '--call', 'next', '--expect', 'A:2', '--call', 'read', '--expect', 'A:2',
+                 '--isolate', probes[0], '--isolate', probes[0]])
             # Restore the image dump used by the independent metadata check below.
             native = (out / 'native-fixture.log').read_text()
             # Pass paths as plain arguments, never interpolate paths into Erlang code.
@@ -581,7 +607,7 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle', 'two_isolates'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle', 'two_isolates', 'run_beam'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
                 '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
@@ -616,6 +642,9 @@ def main():
                 raise RuntimeError('Native fallback bit writers differ from stock-OTP vectors')
             run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
             run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture, fun_fixture, *probes])
+            run('runner-ubsan', [out / 'engine-ubsan/run_beam', '--entry', 'probe', 'request',
+                 '--boot', 'boot', '', '--expect-boot', 'A:ready', '--call', 'next', '--expect', 'A:1',
+                 '--call', 'read', '--expect', 'A:1', '--isolate', probes[0], '--isolate', probes[0]])
             run('local-ubsan', [out / 'engine-ubsan/core_local_test', local_fixture])
             run('compare-ubsan', [out / 'engine-ubsan/core_compare_test', compare_fixture])
             run('shape-ubsan', [out / 'engine-ubsan/core_shape_test', shape_fixture])
@@ -627,6 +656,9 @@ def main():
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
             run('release-ctest', ['ctest', '--test-dir', out / 'release', '--output-on-failure'])
+            run('runner-release', [out / 'release/run_beam', '--entry', 'probe', 'request',
+                 '--boot', 'boot', '', '--expect-boot', 'A:ready', '--call', 'next', '--expect', 'A:1',
+                 '--call', 'read', '--expect', 'A:1', '--isolate', probes[0], '--isolate', probes[0]])
             if run('bit-segment-release-vectors', [out / 'release/core_bit_segment_test', '--reference']) != segment_reference:
                 raise RuntimeError('Release float segments differ from stock-OTP vectors')
             run('release-fixture', [out / 'release/core_beam_image_test', fixture])

@@ -57,16 +57,23 @@ LbWorldStatus lb_world_create(LbEngine *engine,LbWorld **out)
     world->next=engine->worlds; engine->worlds=world; *out=world;
     lb_engine_leave(engine); return LB_WORLD_OK;
 }
-LbWorldStatus lb_world_load(LbWorld *world,LbBytesView bytes)
+LbWorldStatus lb_world_load_report(LbWorld *world,LbBytesView bytes,LbWorldLoadReport *report)
 {
     LbWorldStatus status; LbCodeModule *module; LbBeamError error;
+    if(report) *report=(LbWorldLoadReport){.stage="arguments"};
     if(!world) return LB_WORLD_INVALID;
     lb_engine_enter(world->engine);
     if(closed(world)) status=LB_WORLD_CLOSED;
     else if(bytes.size && !bytes.data) status=LB_WORLD_INVALID;
     else if(world->phase!=LB_WORLD_LOADING) status=LB_WORLD_INVALID_STATE;
-    else status=code_status(lb_code_load(world->space,bytes.data,bytes.size,&module,&error));
+    else {
+        status=code_status(lb_code_load_report(world->space,bytes.data,bytes.size,&module,&error,report));
+    }
     lb_engine_leave(world->engine); return status;
+}
+LbWorldStatus lb_world_load(LbWorld *world,LbBytesView bytes)
+{
+    return lb_world_load_report(world,bytes,NULL);
 }
 static LbWorldStatus resolve(LbWorld *world,LbBytesView module,LbBytesView function,LbCodeEntry **entry)
 {
