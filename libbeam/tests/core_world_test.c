@@ -4,6 +4,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "world_internal.h"
 #include "pid_table.h"
+#include "process_internal.h"
 #include <stdio.h>
 #include <stdatomic.h>
 #include <time.h>
@@ -376,10 +377,95 @@ static void spawned_children(LbBytesView code)
     CHECK(!m.live && !m.bytes && m.worker_calls);
     puts("CORE_WORLD_CHILDREN_OK worker_execution=true prepared_before_runnable=true child_outlives_source=true stop_drains_children=true");
 }
+static LbCall *probe_call(LbWorld *world,const char *function,const char *input,const char *wanted)
+{
+    LbCall *call; LbBytesView result;
+    CHECK(lb_world_call(world,text("probe"),text(function),text(input),&call)==LB_WORLD_OK);
+    CHECK(await_call(call,&result)==LB_WORLD_OK);
+    CHECK(result.size==strlen(wanted) && !memcmp(result.data,wanted,result.size));
+    return call;
+}
+static void probe_boot(LbWorld *world,const char *wanted)
+{
+    LbCall *call; LbBytesView result;
+    CHECK(lb_world_start(world,text("probe"),text("boot"),text(""),&call)==LB_WORLD_OK);
+    CHECK(await_call(call,&result)==LB_WORLD_OK);
+    CHECK(result.size==strlen(wanted) && !memcmp(result.data,wanted,result.size)); expect(call,LB_WORLD_OK);
+}
+static void stateful_probes(LbBytesView a_code,LbBytesView b_code)
+{
+    Memory m={0}; LbEngine *engine=create(&m); LbWorld *peer;
+    CHECK(lb_world_create(engine,&peer)==LB_WORLD_OK && lb_world_load(peer,b_code)==LB_WORLD_OK);
+    probe_boot(peer,"B:ready");
+    size_t prefix;
+    /* Real monitored boot, including copied closure, register, ready receive,
+     * demonitor and result allocation. Every worker allocation prefix starts a
+     * fresh A world; a waiting B actor remains live on the same worker. */
+    for(prefix=1;;++prefix) {
+        CHECK(prefix<500); LbWorld *world; LbCall *call; LbBytesView result;
+        CHECK(lb_world_create(engine,&world)==LB_WORLD_OK && lb_world_load(world,a_code)==LB_WORLD_OK);
+        lb_engine_enter(engine); size_t before=m.worker_calls; m.fail_worker=before+prefix; lb_engine_leave(engine);
+        CHECK(lb_world_start(world,text("probe"),text("boot"),text(""),&call)==LB_WORLD_OK);
+        LbWorldStatus status=await_call(call,&result);
+        if(status!=LB_WORLD_OK && status!=LB_WORLD_NO_MEMORY) fprintf(stderr,"stateful boot prefix=%zu status=%d\n",prefix,status);
+        CHECK(status==LB_WORLD_OK || status==LB_WORLD_NO_MEMORY);
+        if(status==LB_WORLD_OK) CHECK(result.size==7 && !memcmp(result.data,"A:ready",7));
+        lb_engine_enter(engine); size_t allocations=m.worker_calls-before; m.fail_worker=0; lb_engine_leave(engine);
+        expect(call,status);
+        if(status==LB_WORLD_OK) expect(probe_call(world,"request","read","A:0"),LB_WORLD_OK);
+        LbReclamation *r; CHECK(lb_world_stop(world,&r)==LB_WORLD_OK); reclaimed(r);
+        CHECK(!world->space); lb_reclamation_release(r); lb_world_release(world);
+        expect(probe_call(peer,"request","read","B:0"),LB_WORLD_OK);
+        if(status==LB_WORLD_OK && prefix>allocations) break;
+    }
+    for(unsigned round=0;round<32;++round) {
+        LbWorld *world; LbCall *retained; LbBytesView detached;
+        CHECK(lb_world_create(engine,&world)==LB_WORLD_OK && lb_world_load(world,a_code)==LB_WORLD_OK);
+        probe_boot(world,"A:ready");
+        for(unsigned count=1;count<=64;++count) {
+            char reply[32]; CHECK(snprintf(reply,sizeof(reply),"A:%u",count)>0);
+            expect(probe_call(world,"request","next",reply),LB_WORLD_OK);
+            expect(probe_call(world,"request","read",reply),LB_WORLD_OK);
+        }
+        retained=probe_call(world,"request","read","A:64");
+        CHECK(lb_call_poll(retained,&detached)==LB_WORLD_OK);
+        lb_engine_enter(engine);
+        CHECK(world->space->registry && lb_pid_count(world->space->pids)==1);
+        CHECK(world->space->messages==0);
+        Eterm name; Uint cost=0;
+        CHECK(lb_atoms_find(world->space->atoms,"probe_state",11,&name)==LB_ATOM_OK);
+        LbProcess *actor=lb_registry_lookup(world->space,name,&cost);
+        CHECK(actor && actor->collections>0 && actor->waiting);
+        lb_engine_leave(engine);
+        /* Several correlated invocations are queued when the waiting actor is
+         * cancelled. Host reply storage outlives all guest code and heaps. */
+        LbCall *queued[8];
+        for(unsigned i=0;i<8;++i) CHECK(lb_world_call(world,text("probe"),text("request"),text("next"),&queued[i])==LB_WORLD_OK);
+        LbReclamation *r; CHECK(lb_world_stop(world,&r)==LB_WORLD_OK); reclaimed(r);
+        CHECK(!world->space && detached.size==4 && !memcmp(detached.data,"A:64",4));
+        LbCall *closed=NULL;
+        CHECK(lb_world_call(world,text("probe"),text("request"),text("read"),&closed)==LB_WORLD_CLOSED && !closed);
+        for(unsigned i=0;i<8;++i) {
+            LbBytesView result; LbWorldStatus status=await_call(queued[i],&result);
+            CHECK(status==LB_WORLD_OK || status==LB_WORLD_CANCELLED); expect(queued[i],status);
+        }
+        expect(retained,LB_WORLD_OK); lb_reclamation_release(r); lb_world_release(world);
+        expect(probe_call(peer,"request","read","B:0"),LB_WORLD_OK);
+    }
+    LbReclamation *r; CHECK(lb_world_stop(peer,&r)==LB_WORLD_OK); reclaimed(r);
+    lb_reclamation_release(r); lb_world_release(peer);
+    CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
+    CHECK(!m.live && !m.bytes);
+    printf("CORE_WORLD_STATEFUL_OK boot_failure_prefixes=%zu churn=32 correlated_calls=4096 queued_stop=true detached_reply=true peer_survives=true exact_final_balance=true\n",prefix);
+}
 int main(int argc,char **argv)
 {
     construction();
     if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
-    if(argc==3) { LbBytesView code=image(argv[2]); spawned_children(code); free((void *)code.data); }
-    CHECK(argc>=1 && argc<=3); return 0;
+    if(argc>=3) { LbBytesView code=image(argv[2]); spawned_children(code); free((void *)code.data); }
+    if(argc==5) {
+        LbBytesView a=image(argv[3]),b=image(argv[4]); stateful_probes(a,b);
+        free((void *)a.data); free((void *)b.data);
+    }
+    CHECK(argc==1 || argc==2 || argc==3 || argc==5); return 0;
 }

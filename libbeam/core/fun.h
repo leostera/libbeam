@@ -53,6 +53,8 @@ LbAllocStatus lb_fun_retain_term(LbProcess *,Eterm,Uint *cost);
  * fake process or a second runtime graph. Failure leaves owned prefix leases
  * for exact rollback through release_roots. */
 LbAllocStatus lb_fun_retain_roots(LbCodeSpace *,LbFunLease **,Eterm,Uint *cost);
+/* Same owned term walk, pinning nested writable backing before message copy. */
+LbAllocStatus lb_fun_retain_message_roots(LbCodeSpace *,LbFunLease **,Eterm,Uint *cost);
 void lb_fun_release_roots(LbCodeSpace *,LbFunLease **);
 void lb_fun_release_prefix(LbCodeSpace *,LbFunLease **,LbFunLease *stop);
 void lb_fun_leases_clear(LbProcess *);

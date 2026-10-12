@@ -180,14 +180,23 @@ static void fixture(Memory *m,LbCodeSpace *space,const char *path)
         ++count; free(copy);
     }
     CHECK(count>=5 && strings);
+    /* Prove the recursive comprehension itself: unrelated earlier exports
+     * require linked import descriptors, absent in this raw transform test. */
+    BeamOp *all=p->ops,*function=NULL;
+    for(BeamOp *op=all;op;op=op->next) {
+        if(op->op==genop_int_func_start_5) function=op;
+        if(op->op==genop_bs_start_match3_4) break;
+    }
+    CHECK(function); p->ops=function;
     LoaderState verify=state(space,p,p->ops); verify.label_count=lb_beam_image_info(p->image)->label_count;
-    LbCodeStatus proof=lb_verify_program(&verify);
-    CHECK(proof==LB_CODE_UNSUPPORTED && !strcmp(p->error.stage,gen_opc[genop_bs_start_match3_4].name));
+    LbCodeStatus proof=lb_verify_program(&verify); p->ops=all;
+    CHECK(proof==LB_CODE_FORMAT && !strcmp(p->error.stage,"private append source/consumption proof"));
     lb_beam_program_destroy(p);
     LbCodeStatus status=lb_code_load(space,data,(size_t)size,&module,&error);
-    /* The binary comprehension still requires unadmitted matching. Eager
-     * linking may independently reject erlang:error/1 first. */
-    CHECK((status==LB_CODE_UNSUPPORTED || status==LB_CODE_UNRESOLVED) && !module && !space->modules);
+    /* The comprehension lacks interprocedural private-append entry facts.
+     * Raw proof rejects its unknown writable argument; eager linking may refuse
+     * independently. Local match execution confers no append/call authority. */
+    CHECK((status==LB_CODE_UNSUPPORTED || status==LB_CODE_UNRESOLVED || status==LB_CODE_FORMAT) && !module && !space->modules);
     free(data);
     /* Preparation legitimately interns fixture atoms; complete space retirement
      * below checks that ownership, rather than pretending it never occurred. */

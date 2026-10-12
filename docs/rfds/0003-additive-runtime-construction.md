@@ -3,7 +3,7 @@
 
 # RFD 0003: Build libbeam additively from BEAM components
 
-Status: **Accepted direction; G1 lifetime and M2 selected-profile public Isolate execution demonstrated.**
+Status: **Accepted direction; unchanged lifecycle/stateful acceptance and bounded-profile ownership hardening demonstrated. Broader M3 exception paths remain under construction.**
 
 The [first-execution record](0003-first-execution.md) connects the earlier
 [A03–A07 checkpoint](0003-loader-program.md) to real generated transformations,
@@ -11,14 +11,15 @@ emission, publication, interpreter execution and copying GC for a limited profil
 Full loader/literal/instruction breadth and stateful process machinery remain
 outstanding. The subsequent [C Engine lifecycle integration](0003-engine-lifecycle.md)
 passes the unchanged create/shutdown/recreate target over this actual substrate;
-the unchanged stateful two-Isolate target still refuses unsupported module admission. The subsequent
+the unchanged stateful two-Isolate target now passes on the bounded owned profile. The subsequent
 [ordinary-binary slice](0003-owned-binaries.md) connects native payload lifetime to
 literal loading, metadata copies, collection and copied-byte invocation. The
 [owned executor](0003-owned-executor.md) now runs that actual machinery on one lazy
 shared worker, with construction rollback, cancellation and physical join.
 [Public Isolates and calls](0003-public-isolates.md) now connect it to copied transport,
-capacity, once-only results and physical selected-world reclamation. M3/M4 remain
-outstanding; real persistent Erlang processes are not implemented by call handles.
+capacity, once-only results and physical selected-world reclamation. Real persistent
+actors now execute selective receive and correlated requests on that same worker;
+call handles remain host transport, not substitute guest processes.
 [Local calls and saved Y roots](0003-local-calls.md) now extend that same generated
 execution path with private-entry yields and live continuations across collection.
 [Exact term/bitstring comparisons](0003-exact-comparison.md) add native value
@@ -36,7 +37,16 @@ and remaining scope.
 
 The [additive runtime inventory](0003-additive-runtime-inventory.md) records the
 remaining dependency clusters, fixture-derived requirements and implementation
-order. Stateful Isolate acceptance remains outstanding; G1 is not RFD completion.
+order. Stateful Isolate acceptance now passes unchanged in Debug, Release and UBSan.
+`/tmp/libbeam-stateful-matching-hardened-first/summary.json` records 32 replacements,
+4096 correlated requests, boot allocation prefixes, actor GC, queued retirement,
+detached host reply ownership, peer progress and exact final allocation balance.
+Pinned preloaded spawn wrappers, registry, receive markers/deadlines, local monitors
+and bounded native binary matching supply the actual fixture dependencies.
+Error-class DOWN still refuses without real stacktrace capture; wider exception,
+signal and opcode capabilities remain unadmitted. This does not establish general
+Erlang/Elixir execution, security, performance or quota guarantees, and is not RFD
+completion. Midgard compilation/execution has not yet been attempted.
 
 ## Decision
 

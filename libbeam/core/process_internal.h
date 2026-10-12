@@ -23,6 +23,7 @@ struct LbProcess {
     LbWorld *world; /* borrowed C task owner; task retirement precedes world destruction */
     LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
     LbMonitorNode *monitors_origin,*monitors_target;
+    Uint bitdata; /* native matching accumulator survives host-budget safepoints */
     int exit_requested;
     LbRegisteredProcess *registered; /* borrowed association owned by code space */
     LbFunLease *fun_leases; /* one lease per defining module, represented by a stable entry */

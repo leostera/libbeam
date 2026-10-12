@@ -175,7 +175,8 @@ int lb_bitstring_view(Eterm value,LbBitstringView *view)
     pointer=boxed_val(value);
     if(*pointer==LB_HEADER_SUB_BITS) {
         const LbSubBits *sub=(const LbSubBits *)pointer;
-        assert((sub->base_flags&3)!=LB_SUB_MUTABLE && sub->start<=sub->end);
+        if((sub->base_flags&3)==LB_SUB_MUTABLE) return 0; /* internal cursor, not a binary value */
+        assert(sub->start<=sub->end);
         if(sub->base_flags&LB_SUB_VOLATILE) {
             const LbBinRef *ref=(const LbBinRef *)boxed_val(sub->orig);
             assert(ref->thing_word==LB_HEADER_BIN_REF);

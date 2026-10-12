@@ -65,7 +65,7 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   Error-class DOWN still refuses because native stacktrace capture is absent;
   aliases, distribution, info options and non-kill exit/2 are not admitted.
   Actual monitored worker actors cover normal exit, waiting-child kill, flush,
-  rollback and reclamation. Unchanged two_isolates still requires binary matching.
+  rollback and reclamation. Unchanged two_isolates now passes Debug/Release/UBSan.
 - `receive_marker.c`: all four native receive-marker dispatch cases execute.
   Eight-slot reuse/reference binding owns stable ordinary-reference storage.
   Serialized tail anchors replace non-message queue insertion; message unlink
@@ -80,6 +80,19 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   fallback; retain raw arglist/error-info payload and expanded reason separately.
   Empty/single-entry MAP_EXT literal flatmaps supply wrapper metadata; larger maps,
   stacktrace capture and catch/unwind remain unadmitted.
+- `binary_match.c`: native SubBits match-context flags/origin roots and complete
+  start-match, ensure/read/extract/equality/tail dispatch groups. Whole native
+  bs_match/selector generators are compiled, but flow admits only bounded local
+  unsigned big-endian small-integer/equality packets and sparse two-small selectors.
+  Match cursors are not guest binaries: moves and GC retain them, heap-origin base
+  pointers reload after GC, and joins preserve possible-context poison to prevent
+  escape through calls or containers. Bitdata survives host-budget safepoints.
+  No binary extraction, signed/little-endian, dense/general selector or context-call
+  authority follows from generator availability. Private-append comprehension
+  still lacks interprocedural entry facts. Message copies freeze nested writers.
+  The existing stateful fixtures now execute, without source changes; tests add
+  32 replacements/4096 correlated calls, actor GC, queued stop, detached host replies,
+  boot allocation prefixes, peer progress and exact final allocation balance.
 - `alloc.c`: serialized fallible allocation domains, exact-base release and busy
   destruction. Not a guest quota or a performant carrier allocator.
 - `term.h`, `atoms.c`: selected flat 64-bit BEAM terms and private atom namespaces.

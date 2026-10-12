@@ -11,6 +11,9 @@
 #define TUPLE_SHAPE UINT32_C(0x1000000)
 #define LIST_SHAPE UINT32_C(0x2000000)
 #define APPEND_SHAPE UINT32_C(0x4000000) /* reviewed append result; not uniqueness */
+#define MATCH_CONTEXT_SHAPE UINT32_C(0x10000000)
+#define POSSIBLE_MATCH_CONTEXT UINT32_C(0x20000000)
+#define MATCH_CONTEXT_FLAGS (MATCH_CONTEXT_SHAPE|POSSIBLE_MATCH_CONTEXT)
 #define CONSUMED_VALUE UINT32_C(0x8000000) /* initialized GC root, unavailable logical value */
 #define ARITY_MASK UINT32_C(0xffffff)
 #define ANALYSIS_LIMIT (64u*1024u*1024u)
@@ -28,7 +31,7 @@ typedef struct {
 } Analysis;
 static int defined(const uint64_t *set,size_t index) { return (int)((set[index/64]>>(index%64))&1); }
 static void define(uint64_t *set,size_t index) { set[index/64]|=UINT64_C(1)<<(index%64); }
-static int source(LoaderState *st,const Flow *f,BeamOpArg arg)
+static int root_source(LoaderState *st,const Flow *f,BeamOpArg arg)
 {
     size_t reg=(Uint)arg.val&REG_MASK;
     switch(arg.type) {
@@ -52,6 +55,8 @@ static uint32_t shape(LoaderState *st,const Flow *f,BeamOpArg arg)
     }
     return 0;
 }
+static int source(LoaderState *st,const Flow *f,BeamOpArg arg)
+{ return root_source(st,f,arg) && !(shape(st,f,arg)&MATCH_CONTEXT_FLAGS); }
 static int destination(Flow *f,BeamOpArg arg,uint32_t fact)
 {
     size_t reg=(Uint)arg.val&REG_MASK;
@@ -75,7 +80,7 @@ static int roots(const Flow *f,size_t live)
 static int arguments(const Flow *f,size_t arity)
 {
     if(!roots(f,arity)) return 0;
-    for(size_t i=0;i<arity;++i) if(f->xs[i]==CONSUMED_VALUE) return 0;
+    for(size_t i=0;i<arity;++i) if(f->xs[i]==CONSUMED_VALUE || (f->xs[i]&MATCH_CONTEXT_FLAGS)) return 0;
     return 1;
 }
 static void trim_live(Flow *f,size_t live)
@@ -86,6 +91,7 @@ static void trim_live(Flow *f,size_t live)
 static uint32_t common_shape(uint32_t a,uint32_t b)
 {
     if(a==CONSUMED_VALUE || b==CONSUMED_VALUE) return CONSUMED_VALUE;
+    if((a|b)&MATCH_CONTEXT_FLAGS) return a==b?a:POSSIBLE_MATCH_CONTEXT;
     if((a&TUPLE_SHAPE) && (b&TUPLE_SHAPE)) return a<b?a:b;
     return a==b?a:0;
 }
@@ -212,14 +218,14 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:case genop_trim_2:
         case genop_jump_1:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_function_2:case genop_is_function2_3:
-        case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:
+        case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:case genop_select_val_3:
         case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_get_list_3:
         case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif2_6:
-        case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_make_fun3_3:
+        case genop_bs_match_3:case genop_bs_start_match3_4:case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_make_fun3_3:
         case genop_badmatch_1:case genop_case_end_1:break;
         default:p->error.stage=gen_opc[op->op].name; return LB_CODE_UNSUPPORTED;
         }
-        if(op->op!=genop_put_tuple2_2 && op->op!=genop_init_yregs_1 && op->op!=genop_select_tuple_arity_3 && op->op!=genop_bs_create_bin_6 && op->op!=genop_make_fun3_3)
+        if(op->op!=genop_select_val_3 && op->op!=genop_bs_match_3 && op->op!=genop_put_tuple2_2 && op->op!=genop_init_yregs_1 && op->op!=genop_select_tuple_arity_3 && op->op!=genop_bs_create_bin_6 && op->op!=genop_make_fun3_3)
             REQUIRE(op->arity==(unsigned)gen_opc[op->op].arity);
         nodes[i].op=op;
         if(op->op==genop_int_func_start_5) {
@@ -253,9 +259,9 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         switch(op->op) {
         case genop_int_func_start_5:case genop_label_1:case genop_line_1:break;
         case genop_move_2:
-            REQUIRE(source(st,&f,a[0])); s=shape(st,&f,a[0]); REQUIRE(destination(&f,a[1],s)); break;
+            REQUIRE(root_source(st,&f,a[0])); s=shape(st,&f,a[0]); REQUIRE(destination(&f,a[1],s)); break;
         case genop_swap_2:
-            REQUIRE(source(st,&f,a[0]) && source(st,&f,a[1])); s=shape(st,&f,a[0]); t=shape(st,&f,a[1]);
+            REQUIRE(root_source(st,&f,a[0]) && root_source(st,&f,a[1])); s=shape(st,&f,a[0]); t=shape(st,&f,a[1]);
             REQUIRE(destination(&f,a[0],t) && destination(&f,a[1],s)); break;
         case genop_test_heap_2:
             REQUIRE(a[0].type==TAG_u && a[1].type==TAG_u && a[0].val>=0 && a[1].val>=0);
@@ -339,6 +345,47 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             REQUIRE(a[0].type==TAG_u && (Uint)a[0].val<st->beam.imports.count);
             if(st->bif_imports[a[0].val]!=&st->space->engine->bifs[BIF_self_0]) return LB_CODE_UNSUPPORTED;
             REQUIRE(destination(&f,a[1],0)); break; /* identity storage never moves the term heap */
+        case genop_bs_match_3: {
+            REQUIRE(label(st,a[0]) && root_source(st,&f,a[1]) && shape(st,&f,a[1])==MATCH_CONTEXT_SHAPE);
+            REQUIRE(a[2].type==TAG_u && a[2].val>0 && (Uint)a[2].val==op->arity-3);
+            alternate=labels[a[0].val];
+            REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+            failed=f; failure=&failed;
+            Uint available=0,packed=0;
+            for(unsigned pos=3;pos<op->arity;) {
+                REQUIRE(a[pos].type==TAG_a);
+                Eterm command=(Eterm)a[pos].val;
+                if(command==am_ensure_at_least) {
+                    REQUIRE(op->arity-pos>=3 && a[pos+1].type==TAG_u && a[pos+2].type==TAG_u && a[pos+2].val==1);
+                    available=(Uint)a[pos+1].val; pos+=3;
+                } else if(command==am_ensure_exactly) {
+                    REQUIRE(op->arity-pos>=2 && a[pos+1].type==TAG_u);
+                    available=(Uint)a[pos+1].val; pos+=2;
+                } else if(command==am_integer) {
+                    REQUIRE(op->arity-pos>=6 && a[pos+1].type==TAG_u && roots(&f,(Uint)a[pos+1].val));
+                    REQUIRE(a[pos+2].type==TAG_n || (a[pos+2].type==TAG_q && a[pos+2].val>=0 && (Uint)a[pos+2].val<p->literal_count && is_nil(p->literals[a[pos+2].val])));
+                    REQUIRE(a[pos+3].type==TAG_u && a[pos+4].type==TAG_u && a[pos+4].val==1);
+                    Uint bits=(Uint)a[pos+3].val;
+                    REQUIRE(bits>0 && bits<SMALL_BITS && bits<=available && packed<=63-bits);
+                    REQUIRE(!(a[pos+5].type==a[1].type && a[pos+5].val==a[1].val));
+                    REQUIRE(destination(&f,a[pos+5],0)); available-=bits; packed+=bits; pos+=6;
+                } else if(command==am_Eq) {
+                    REQUIRE(op->arity-pos>=4 && a[pos+1].type==TAG_n && a[pos+2].type==TAG_u && a[pos+3].type==TAG_u);
+                    Uint bits=(Uint)a[pos+2].val;
+                    REQUIRE(bits>0 && bits<=63 && bits<=available && packed<=63-bits && ((Uint)a[pos+3].val>>bits)==0);
+                    available-=bits; packed+=bits; pos+=4;
+                } else return LB_CODE_UNSUPPORTED; /* other complete generator paths have no execution authority */
+            }
+            break;
+        }
+        case genop_bs_start_match3_4:
+            REQUIRE(label(st,a[0]) && root_source(st,&f,a[1]) && a[2].type==TAG_u && (Uint)a[2].val<MAX_REG);
+            REQUIRE(roots(&f,(Uint)a[2].val));
+            alternate=labels[a[0].val];
+            REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+            /* Failure preserves original operands; success owns a mutable cursor. */
+            trim_live(&f,(Uint)a[2].val); f.heap=0;
+            REQUIRE(destination(&f,a[3],MATCH_CONTEXT_SHAPE)); break;
         case genop_bs_init_writable_0:
             REQUIRE(f.frame!=NO_FRAME && arguments(&f,1)); trim_live(&f,1);
             REQUIRE(destination(&f,(BeamOpArg){TAG_x,0},APPEND_SHAPE)); f.heap=0; break;
@@ -374,6 +421,9 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 REQUIRE(a[1].type==TAG_u && (Uint)a[1].val<st->beam.imports.count);
                 imp=(Uint)a[1].val; REQUIRE(live==st->beam.imports.entries[imp].arity);
             }
+            for(size_t arg=0;arg<live && arg<MAX_REG;++arg) if(f.xs[arg]&MATCH_CONTEXT_FLAGS) {
+                p->error.stage="match-context argument admission"; return LB_CODE_UNSUPPORTED;
+            }
             REQUIRE(arguments(&f,live)); forget_append_facts(&f);
             if(op->op==genop_call_2 || op->op==genop_call_ext_2) {
                 REQUIRE(f.frame!=NO_FRAME); memset(f.x,0,sizeof(f.x)); memset(f.xs,0,sizeof(f.xs)); define(f.x,0); f.heap=0;
@@ -392,6 +442,21 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 terminal=1;
             }
             break;
+        case genop_select_val_3: {
+            REQUIRE(source(st,&f,a[0]) && !(shape(st,&f,a[0])&MATCH_CONTEXT_SHAPE) && label(st,a[1]));
+            REQUIRE(op->arity==7 && a[2].type==TAG_u && a[2].val==4);
+            REQUIRE(a[3].type==TAG_i && a[5].type==TAG_i && label(st,a[4]) && label(st,a[6]));
+            REQUIRE(a[3].val!=a[5].val);
+            Sint minimum=(Sint)a[3].val,maximum=(Sint)a[5].val;
+            if(minimum>maximum) { Sint t=minimum; minimum=maximum; maximum=t; }
+            if((Uint)maximum-(Uint)minimum<=4) return LB_CODE_UNSUPPORTED; /* native dense-table execution is not admitted */
+            const unsigned edges[]={1,4,6};
+            for(unsigned edge=0;edge<3;++edge) {
+                status=propagate(w,labels[a[edges[edge]].val],nodes[index].function,&f);
+                if(status!=LB_CODE_OK) return status;
+            }
+            terminal=1; break;
+        }
         case genop_select_tuple_arity_3:
             status=select_arities(st,w,index,&f,op); if(status!=LB_CODE_OK) return status; terminal=1; break;
         case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:

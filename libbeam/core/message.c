@@ -173,7 +173,7 @@ LbProcessStatus lb_message_create(LbCodeSpace *space,Eterm term,LbMessage **out,
     /* Count only an internal prepared owner, never a mailbox publication.
      * The destructor rolls back every subsequently acquired prefix resource. */
     ++space->messages;
-    LbAllocStatus held=lb_fun_retain_roots(space,&message->leases,term,cost);
+    LbAllocStatus held=lb_fun_retain_message_roots(space,&message->leases,term,cost);
     if(held!=LB_ALLOC_OK) {
         lb_message_destroy(message);
         return held==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_REFUSED;

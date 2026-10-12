@@ -8,6 +8,7 @@
  * external funs or HAMT nodes yet.
  */
 #include "process_internal.h"
+#include "binary_match.h"
 #include "binary_internal.h"
 #include "flatmap.h"
 #include "reference.h"
@@ -91,11 +92,15 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
             else {
                 if(value==LB_HEADER_SUB_BITS) {
                     LbSubBits *sub=(LbSubBits *)scan;
-                    /* Volatile views follow their BinRef after backing growth.
-                     * Match contexts still require additional representations. */
-                    ASSERT((sub->base_flags&3)!=LB_SUB_MUTABLE);
+                    int matching=lb_is_match_context(sub);
                     move_root(p,&sub->orig,&top);
-                    ASSERT(*boxed_val(sub->orig)==LB_HEADER_BIN_REF);
+                    Eterm *orig=boxed_val(sub->orig);
+                    if(matching && (*orig&_TAG_HEADER_MASK)==HEAP_BITS_SUBTAG)
+                        sub->base_flags=(Uint)(orig+2)|LB_SUB_MUTABLE;
+                    else {
+                        ASSERT(*orig==LB_HEADER_BIN_REF);
+                        if(matching) sub->base_flags=(Uint)((LbBinRef *)orig)->val->orig_bytes|LB_SUB_MUTABLE;
+                    }
                 }
                 scan+=boxed_words(scan);
             }

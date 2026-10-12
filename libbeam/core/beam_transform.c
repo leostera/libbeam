@@ -31,6 +31,13 @@ static Sint load_fun_literal(LoaderState *st,size_t index,Eterm placeholder)
     literal->next=p->dynamic; p->dynamic=literal; return literal->index;
 }
 typedef Uint UWord;
+#include "term_compare.h"
+#define ARCH_64 1
+#define BSF_SIGNED 4
+#define BIG_NEED_FOR_BITS(bits) (((bits)-1)/64+2)
+#define BUILD_SUB_BITSTRING_HEAP_NEED 10
+static Uint lb_match_extracted_words(Uint size)
+{ return size<=512?2+(size+63)/64:LB_SUB_BITS_WORDS; }
 #define BSF_LITTLE 2
 #define BSF_NATIVE 16
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
@@ -203,6 +210,22 @@ static int dictionary_hash(LoaderState *st,Eterm key,Sint *out)
     if(is_small(key)) { *out=(Sint)((Uint)key>>_TAG_IMMED1_SIZE); return 1; }
     if(is_atom(key)) { *out=(Sint)atom_val(key); return 1; }
     st->status=LB_CODE_UNSUPPORTED; return 0;
+}
+static int lb_load_literal_equal(LoaderState *st,Eterm a,Eterm b)
+{
+    int equal=0;
+    if(lb_term_equal(st->space->domain,a,b,&equal)!=LB_ALLOC_OK)
+        st->program->error.status=LB_BEAM_NO_MEMORY;
+    return equal;
+}
+static Sint lb_load_new_label(LoaderState *st)
+{
+    size_t count=st->label_count;
+    Label *labels=lb_palloc(st->program,count+1,sizeof(*labels));
+    if(!labels) return 0;
+    memcpy(labels,st->labels,count*sizeof(*labels)); memset(&labels[count],0,sizeof(*labels));
+    st->labels=labels; st->label_count=count+1;
+    return (Sint)count;
 }
 static int lb_transform_is_float(Eterm value)
 { return is_boxed(value) && boxed_val(value)[0]==((1u<<_HEADER_ARITY_OFFS)|FLOAT_SUBTAG); }

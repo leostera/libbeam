@@ -2,6 +2,7 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  */
 #include "process_internal.h"
+#include "binary_match.h"
 #include "message.h"
 #include "reference.h"
 #include "term_compare.h"
@@ -443,6 +444,26 @@ static void guest_funs(LbCodeSpace *space,LbCodeModule *module,Memory *m)
         CHECK(lb_fun(lb_process_result(p))); lb_process_destroy(p); lb_code_entry_release(e);
     }
 }
+static void match_context_gc(LbCodeEntry *entry)
+{
+    unsigned char data[80]; for(size_t i=0;i<sizeof(data);++i) data[i]=(unsigned char)i;
+    for(unsigned large=0;large<2;++large) {
+        LbProcess *p=create(entry); size_t bits=(large?sizeof(data):4)*8;
+        CHECK(lb_heap_reserve(p,lb_bitstring_heap_words(bits)+LB_SUB_BITS_WORDS,0));
+        Eterm binary; CHECK(lb_bitstring_build(p->entry_module->space->domain,&p->off_heap,&p->htop,data,bits,0,&binary)==LB_ALLOC_OK);
+        LbSubBits *context=lb_bs_start_match(p,binary); context->start=7;
+        p->reg[0]=make_boxed((Eterm *)context);
+        CHECK(lb_process_collect_live(p,64,1)); context=(LbSubBits *)boxed_val(p->reg[0]);
+        CHECK(lb_is_match_context(context) && context->start==7 && context->end==bits);
+        const unsigned char *base=(const unsigned char *)(context->base_flags&~LB_SUB_WRITABLE);
+        CHECK(!memcmp(base,data,bits/8));
+        LbBitstringView view; CHECK(!lb_bitstring_view(p->reg[0],&view));
+        CHECK(lb_process_collect_live(p,64,1)); context=(LbSubBits *)boxed_val(p->reg[0]);
+        base=(const unsigned char *)(context->base_flags&~LB_SUB_WRITABLE);
+        CHECK(!memcmp(base,data,bits/8) && context->start==7);
+        lb_process_destroy(p);
+    }
+}
 int main(int argc,char **argv)
 {
     CHECK(lb_instruction_supported(op_self_x) && lb_instruction_supported(op_self_y) && lb_instruction_supported(op_is_pid_fx) && lb_instruction_supported(op_i_make_fun3_Fdtt));
@@ -452,6 +473,7 @@ int main(int argc,char **argv)
     CHECK(lb_code_preload(a)==LB_CODE_OK); LbCodeModule *preloaded=a->modules;
     LbCodeModule *ma=load(a,argv[1]),*mb=load(b,argv[1]); LbCodeEntry *ea=entry(a,ma,"identity",0),*eb=entry(b,mb,"identity",0);
     LbCodeModule *target_module=load(a,argv[2]);
+    match_context_gc(ea);
     table(a,ea,&m); permuted_ring(a,ea); references(a,ma,&m); fun_consumers(a,ma,target_module,&m);
     CHECK(lb_code_unload(target_module)==LB_CODE_OK);
     LbProcess *failed=create(ea); size_t before=m.live; m.fail=m.calls+1;

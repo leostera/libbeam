@@ -6,6 +6,19 @@
  * continuation return, and native BIF call/epilogue. No scheduler/TLS singleton.
  */
 #include "process_internal.h"
+#include "binary_match.h"
+#define ErlSubBits LbSubBits
+#define HEADER_SUB_BITS LB_HEADER_SUB_BITS
+#define ERL_SUB_BITS_SIZE LB_SUB_BITS_WORDS
+#define bitstring_val boxed_val
+#define make_bitstring(sub) make_boxed((Eterm *)(sub))
+#define HEAP_TOP(p) ((p)->htop)
+typedef unsigned char byte;
+#define BYTE_OFFSET(bits) ((bits)/8)
+#define erl_sub_bits_get_base(sub) ((const byte *)((sub)->base_flags&~LB_SUB_WRITABLE))
+#define ERTS_FALLTHROUGH() __attribute__((fallthrough))
+#define erl_sub_bits_is_match_context lb_is_match_context
+#define is_bitstring_header(h) (((h)&_TAG_HEADER_MASK)==HEAP_BITS_SUBTAG || (h)==LB_HEADER_SUB_BITS)
 #include "term_compare.h"
 #include "writable.h"
 #include "binary_build.h"
@@ -244,6 +257,7 @@ LbProcessStatus lb_process_run(LbProcess *c_p,size_t budget,unsigned reductions)
     const BeamInstr *I;
     BeamInstr next_op;
     Sint FCALLS,neg_o_reds=0;
+    Uint bitdata=c_p?c_p->bitdata:0;
     if(!c_p || c_p->running || c_p->entry_module->space->loading) return LB_PROCESS_INVALID;
     if(c_p->status!=LB_PROCESS_READY && c_p->status!=LB_PROCESS_YIELDED) return c_p->status;
     if(reductions<4) return LB_PROCESS_INVALID;
@@ -354,5 +368,6 @@ stop:
     }
     if(c_p->status!=LB_PROCESS_YIELDED && c_p->identity.owner &&
        lb_pid_remove(c_p->identity.owner,&c_p->identity)!=LB_PID_OK) abort();
+    c_p->bitdata=bitdata;
     SWAPOUT; c_p->running=0; return c_p->status;
 }

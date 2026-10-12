@@ -9,9 +9,9 @@ it must never be treated as TE_FAIL (which would silently skip an optimization).
 import re
 
 PURE = {'distinct', 'equal', 'independent_moves', 'is_offset', 'negation_is_small',
-        'never', 'succ', 'succ3', 'succ4', 'fixed_size_values'}
+        'never', 'succ', 'succ3', 'succ4', 'fixed_size_values', 'floats_or_bignums', 'mixed_types', 'use_jump_tab'}
 OWNED = {'needs_nif_padding', 'is_heavy_bif', 'smp_already_locked', 'smp_mark_target_label'}
-GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2', 'make_fun3', 'is_function2', 'get', 'element', 'literal_timeout', 'literal_timeout_locked', 'select_val'}
+GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2', 'make_fun3', 'is_function2', 'get', 'element', 'literal_timeout', 'literal_timeout_locked', 'select_val', 'bs_match', 'const_select_val', 'jump_tab', 'select_literals', 'split_values'}
 
 
 def project(text):
@@ -65,6 +65,8 @@ def project(text):
         if name=='fixed_size_values':
             helper=helper.replace('beamfile_get_literal(&S->beam, Rest[i].val)', 'load_literal(S, Rest[i].val)')
             helper=helper.replace('is_float(', 'lb_transform_is_float(')
+        if name=='use_jump_tab':
+            helper=helper.replace('return max - min <= Size.val;', 'return (Uint)max - (Uint)min <= (Uint)Size.val;')
         helpers.append(helper)
     for name in sorted(GENERATORS & used):
         match = re.search(r'^static BeamOp\* '+name+r'\(.*?^\}', text, re.M|re.S)
@@ -104,6 +106,19 @@ def project(text):
                 body=body.replace(old,new)
             body=body.replace('op->a = lb_palloc(S->program, op->arity, sizeof(BeamOpArg));',
                 'op->a = lb_palloc(S->program, op->arity, sizeof(BeamOpArg));\n  if (!op->a) return NULL;')
+        if name in {'const_select_val','jump_tab','select_literals','split_values'}:
+            body=body.replace('beamfile_get_literal(&S->beam, Src.val)', 'load_literal(S, Src.val)')
+            body=body.replace('beamfile_get_literal(&S->beam, Rest[i].val)', 'load_literal(S, Rest[i].val)')
+            body=body.replace('eq(term, expr)', 'lb_load_literal_equal(S,term,expr)')
+            body=body.replace('beam_load_new_label(S)', 'lb_load_new_label(S)')
+            body=re.sub(r'(op(?:1|2)?->a) = erts_alloc\(ERTS_ALC_T_LOADER_TMP, ([^;]+)\);',
+                r'\1 = lb_palloc(S->program, 1, \2);\n  if (!\1) return NULL;',body)
+        if name == 'bs_match':
+            body=body.replace('beamfile_get_literal(&S->beam, Flags.val)', 'load_literal(S, Flags.val)')
+            body=body.replace('erts_extracted_bitstring_size(size)', 'lb_match_extracted_words(size)')
+            body,count=re.subn(r'erts_exit\(ERTS_ERROR_EXIT, "loading bs_match in %T:%T/%d: no instructions loaded",\s*S->module, S->function, S->arity\);',
+                'S->program->error.status=LB_BEAM_BAD_FORMAT; return NULL;',body)
+            if count!=1: raise RuntimeError('Unreviewed bs_match fatal boundary')
         if name == 'select_val':
             body=body.replace('int arity = Size.val + 3;',
                 'int arity;\n  if (Size.type!=TAG_u || Size.val<2 || Size.val%2 || Size.val>MAX_REG*2) { S->program->error.status=LB_BEAM_LIMIT; return NULL; }\n  arity = Size.val + 3;')

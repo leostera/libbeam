@@ -24,7 +24,7 @@ def main():
     root = Path(__file__).resolve().parents[2]
     out = args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
-    summary = {'scope': 'additive_engine_lifecycle_and_selected_BEAM_execution_not_stateful_isolate_acceptance', 'commands': [], 'passed': False}
+    summary = {'scope': 'additive_engine_lifecycle_and_stateful_isolate_acceptance_with_bounded_native_BEAM_profile', 'commands': [], 'passed': False}
     env = dict(os.environ, ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0')
 
     def run(name, command, accepted=(0,)):
@@ -437,6 +437,7 @@ def main():
                 native = run(variant+'-program', [out / 'build/core_beam_program_test', probe])
                 compare_functions(variant, probe, native)
                 run(variant+'-executable-refusal', [out / 'build/core_code_test', '--reject', probe])
+            run('stateful-world-execution', [out / 'build/core_world_test', async_fixture, fun_fixture, *probes])
             # Restore the image dump used by the independent metadata check below.
             native = (out / 'native-fixture.log').read_text()
             # Pass paths as plain arguments, never interpolate paths into Erlang code.
@@ -547,7 +548,7 @@ def main():
                 '-lz', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','pid_table','bif_process','fun','message','receive','registry','receive_marker','monitor','preloaded']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','pid_table','bif_process','fun','message','receive','registry','receive_marker','monitor','preloaded','binary_match']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -568,7 +569,7 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle', 'two_isolates'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
                 '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
@@ -602,7 +603,7 @@ def main():
             if run('bit-writer-fallback-vectors', [out / 'bit-writer-fallback', '--reference']) != writer_reference:
                 raise RuntimeError('Native fallback bit writers differ from stock-OTP vectors')
             run('executor-ubsan', [out / 'engine-ubsan/core_executor_test', async_fixture])
-            run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture, fun_fixture])
+            run('world-ubsan', [out / 'engine-ubsan/core_world_test', async_fixture, fun_fixture, *probes])
             run('local-ubsan', [out / 'engine-ubsan/core_local_test', local_fixture])
             run('compare-ubsan', [out / 'engine-ubsan/core_compare_test', compare_fixture])
             run('shape-ubsan', [out / 'engine-ubsan/core_shape_test', shape_fixture])
@@ -696,7 +697,9 @@ def main():
             run('engine-lifecycle-release', [out / 'release/engine_lifecycle'])
             run('engine-components', [out / 'build/core_engine_test'])
             run('engine-api', [out / 'build/api_engine_test'])
-            run('two-isolates-observed', [out / 'build/two_isolates', *probes], accepted=None)
+            run('two-isolates-observed', [out / 'build/two_isolates', *probes])
+            run('two-isolates-release', [out / 'release/two_isolates', *probes])
+            run('two-isolates-ubsan', [out / 'engine-ubsan/two_isolates', *probes])
             summary['two_isolates_returncode'] = summary['commands'][-1]['returncode']
             summary['two_isolates_passed'] = summary['two_isolates_returncode'] == 0
             for p in files:

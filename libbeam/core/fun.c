@@ -54,7 +54,7 @@ LbAllocStatus lb_fun_retain(LbProcess *p,const LbFunEntry *entry)
 /* Prepare code ownership before copying a valid owned term into this process.
  * Term storage is not mutated; a failed preparation remains wholly owned by
  * the unpublished destination and is reclaimed by its destructor. */
-LbAllocStatus lb_fun_retain_roots(LbCodeSpace *space,LbFunLease **leases,Eterm term,Uint *cost)
+static LbAllocStatus retain_roots(LbCodeSpace *space,LbFunLease **leases,Eterm term,Uint *cost,int pin)
 {
     Eterm local[64],*todo=local; size_t count=1,capacity=64;
     LbAllocDomain *domain=space->domain;
@@ -68,6 +68,8 @@ LbAllocStatus lb_fun_retain_roots(LbCodeSpace *space,LbFunLease **leases,Eterm t
             if(is_arity_value(*pointer)) { children=pointer+1; n=arityval(*pointer); }
             else if(*pointer==LB_FLATMAP_HEADER) {
                 (void)lb_flatmap_words(pointer); children=pointer+2; n=pointer[1]+1;
+            } else if(pin && *pointer==LB_HEADER_SUB_BITS) {
+                if(!lb_bitstring_pin(value)) { status=LB_ALLOC_INVALID; break; }
             } else if((*pointer&_TAG_HEADER_MASK)==FUN_SUBTAG) {
                 const LbFun *fun=lb_fun(value);
                 status=retain(space,leases,fun->entry.fun); if(status!=LB_ALLOC_OK) break;
@@ -91,6 +93,10 @@ LbAllocStatus lb_fun_retain_roots(LbCodeSpace *space,LbFunLease **leases,Eterm t
     }
     if(todo!=local) lb_release(domain,todo); return status;
 }
+LbAllocStatus lb_fun_retain_roots(LbCodeSpace *space,LbFunLease **leases,Eterm term,Uint *cost)
+{ return retain_roots(space,leases,term,cost,0); }
+LbAllocStatus lb_fun_retain_message_roots(LbCodeSpace *space,LbFunLease **leases,Eterm term,Uint *cost)
+{ return retain_roots(space,leases,term,cost,1); }
 LbAllocStatus lb_fun_retain_term(LbProcess *p,Eterm term,Uint *cost)
 {
     return lb_fun_retain_roots(p->entry_module->space,&p->fun_leases,term,cost);

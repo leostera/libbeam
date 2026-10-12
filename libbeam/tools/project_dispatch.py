@@ -37,7 +37,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx i_trim_t move_trim_yxt move2_par_xxxy move_window2_xxy move_shift_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_atom_fx is_atom_fy is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt send recv_marker_reserve_S recv_marker_bind_SS recv_marker_clear_S recv_marker_use_S i_loop_rec_f loop_rec_end_f remove_message timeout timeout_locked is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_trim_yxt move2_par_xxxy move_window2_xxy move_shift_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_atom_fx is_atom_fy is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt send recv_marker_reserve_S recv_marker_bind_SS recv_marker_clear_S recv_marker_use_S i_loop_rec_f loop_rec_end_f remove_message timeout timeout_locked bs_test_tail_imm2_fxW bs_test_tail_imm2_fyW bs_test_zero_tail2_fx bs_test_zero_tail2_fy i_bs_eq_ftW i_bs_extract_integer_td is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx').split()
 
 
 def case(source, name):
@@ -378,7 +378,7 @@ def owned_receive_scan(body):
 
 def project(source):
     bodies=[]
-    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd','i_bif1_sfbd','i_bif1_body_sbd','wait_locked_f')]
+    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd','i_bif1_sfbd','i_bif1_body_sbd','wait_locked_f','i_bs_start_match3_xtjd','i_bs_ensure_bits_read_xtf','i_bs_ensure_bits_unit_xItf','i_bs_ensure_bits_xIf')]
     names=NAMES+[name for shared in groups for name in re.findall(r'OpCase\((\w+)\)',shared)]
     selected=[(name,case(source,name)) for name in NAMES]+[('shared group',shared) for shared in groups]
     for name, body in selected:
@@ -403,6 +403,11 @@ def project(source):
         body=owned_receive_wait(body)
         body=owned_receive_timeout(body)
         body=fallible_binary_build(body)
+        if 'i_bs_start_match3__execute:' in body:
+            body=body.replace('erts_bs_start_match_3(', 'lb_bs_start_match(')
+            body=body.replace('(I + (I[3]) + 0)', '(I + (Sint)I[3])').replace('I += I[3] + 0', 'I += (Sint)I[3]')
+        body=body.replace('(I + (I[3]) + 0)', '(I + (Sint)I[3])').replace('I += I[3] + 0', 'I += (Sint)I[3]')
+        body=body.replace('(I + (I[2]) + 1)', '(I + (Sint)I[2] + 1)').replace('I += I[2] + 1', 'I += (Sint)I[2] + 1')
         # No tracing/saved-call/lock instrumentation capability exists in this
         # serialized interpreter. Remove those paths, not their semantic peers.
         body=re.sub(r'^\s*DTRACE_\w+\([^;]+;', '', body, flags=re.M)
