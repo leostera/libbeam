@@ -273,6 +273,10 @@ def main():
             run('world-execution', [out / 'build/core_world_test', async_fixture, fun_fixture])
             run('pid-execution', [out / 'build/core_pid_test', pid_fixture, fun_target_fixture, fun_fixture])
             run('api-world-execution', [out / 'build/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, fun_fixture])
+            application_input = out / 'application-input.bin'
+            application_input.write_bytes(b'generic artifact admission witness')
+            run('application-mode-supported', [out / 'build/api_world_test', '--application',
+                 'async_slice', 'identity', application_input, application_input, async_fixture])
             run('erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/first_slice.erl'])
             fixture = fixture_dir / 'first_slice.beam'
             run('peer-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/code_peer.erl'])
@@ -443,7 +447,7 @@ def main():
                  root / 'libbeam/tests/fixtures/fun_slice.erl'])
             run('monitor-trace-reference', [args.erl, '-noshell', '-pa', trace_reference, '-eval',
                  'lists:foreach(fun(F) -> <<"monitored reply">> = apply(fun_slice,F,[<<"monitored reply">>]) end,'
-                 '[monitored_error,monitored_error_info,monitored_bif_error,monitored_error_call]), '
+                 '[monitored_error,monitored_error_info,monitored_bif_error,monitored_error_call,monitored_empty_info]), '
                  'io:format("MONITOR_TRACE_REFERENCE_OK~n"), halt().'])
             run('stateful-world-execution', [out / 'build/core_world_test', async_fixture, fun_fixture, *probes])
             # Restore the image dump used by the independent metadata check below.

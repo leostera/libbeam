@@ -50,7 +50,10 @@ explicit no-line-info policy. Worker tests include BIF badarg, guest error/3 and
 capture/copy allocation prefixes. Wider exception, signal and opcode capabilities,
 source locations, raw saved-ftrace packaging and catch/unwind remain unadmitted. This does not establish general
 Erlang/Elixir execution, security, performance or quota guarantees, and is not RFD
-completion. Midgard compilation/execution has not yet been attempted.
+completion. The [Midgard whole-application attempt](0003-midgard-application-attempt.md)
+now records a successful 32-module pure-Elixir build and separate actual-Isolate
+refusal: no application execution succeeded. It also records the empty-map literal
+boundary regression found and fixed during that attempt.
 
 ## Decision
 

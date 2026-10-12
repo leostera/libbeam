@@ -310,6 +310,7 @@ static void reject_test(const char *path)
     live=m.live; bytes=m.bytes; atoms=lb_atoms_count(lb_code_space_atoms(space));
     status=lb_code_load(space,data,size,&module,&error);
     CHECK(status==LB_CODE_UNRESOLVED || status==LB_CODE_UNSUPPORTED);
+    printf("CORE_CODE_REJECT status=%d stage=%s offset=%zu\n",status,error.stage?error.stage:"unknown",error.offset);
     CHECK(!module && m.live==live && m.bytes==bytes && lb_atoms_count(lb_code_space_atoms(space))==atoms);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK); lb_engine_release(engine);
     CHECK(!m.live && !m.bytes);

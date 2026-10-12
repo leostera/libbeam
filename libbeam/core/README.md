@@ -87,7 +87,8 @@ lifecycle target passes; the stateful example still refuses unsupported module i
   Real tuple4 frames preserve arglists, BIF metadata and non-tail continuations.
   Monitor DOWN copies the expanded reason and trace, never fabricated empty frames.
   Terminal interpreter roots publish before capture GC and reload afterward.
-  Worker allocation-prefix tests require actual frame/argument/error-info contents.
+  Worker allocation-prefix tests require actual frame/argument/error-info contents,
+  including an empty error-info flatmap with its native zero-arity key tuple.
   This is not raw ftrace/bignum packaging or catch/unwind; unsupported BIF cause
   metadata still refuses rather than producing a success-shaped trace.
 - `binary_match.c`: native SubBits match-context flags/origin roots and complete

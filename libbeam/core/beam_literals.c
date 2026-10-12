@@ -127,7 +127,7 @@ static int decode_term(LbBeamProgram *p, LbBeamReader *r, Eterm *root)
             hp=lb_palloc(p,LB_FLATMAP_WORDS+n+2,sizeof(Eterm)); if(!hp) return 0;
             Eterm *keys=hp+LB_FLATMAP_WORDS+n;
             hp[0]=LB_FLATMAP_HEADER; hp[1]=n;
-            keys[0]=make_arityval(n); hp[2]=make_boxed(keys)|TAG_LITERAL_PTR;
+            keys[0]=n?make_arityval(n):make_arityval_zero(); hp[2]=make_boxed(keys)|TAG_LITERAL_PTR;
             *objp=make_boxed(hp)|TAG_LITERAL_PTR;
             if(n) {
                 hp[3]=(Eterm)(uintptr_t)next; next=&hp[3];
