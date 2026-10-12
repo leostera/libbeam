@@ -105,6 +105,19 @@ int main(int argc,char **argv)
     CHECK(remaining(noise)<noise_before); // Skipped candidate work belongs to its original sender.
     lb_engine_enter(engine); CHECK(birth->remaining==dormant); lb_work_budget_release(birth); lb_engine_leave(engine);
     consume(noise);
-    retire(causal); retire(world); retire(unsafe); retire(peer); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); free(bytes);
-    printf("CORE_WORK_RUNTIME_OK pure_cost=%llu exact_threshold=true fresh_credit=true private_family_reuse=true idle_unspent=true background_retained=true escaped_retirement=true candidate_sender_charged=true birth_credit_not_borrowed=true peer_survives=true execution=shared_worker\n",(unsigned long long)pure_cost);
+    LbWorld *foreign=make(engine,beam,4000); LbCall *receiver=invoke(foreign,"foreign_wait",1);
+    escaped=0;
+    for(unsigned i=0;i<10000 && !escaped;++i) {
+        lb_engine_enter(engine); escaped=receiver->budget->escaped; lb_engine_leave(engine); if(!escaped) tick();
+    }
+    CHECK(escaped);
+    unsigned char large[32768]; memset(large,0x75,sizeof(large));
+    CHECK(lb_world_call(foreign,text("work_slice"),text("deliver"),(LbBytesView){large,sizeof(large)},&call)==LB_WORLD_OK);
+    // Sender completed first; the receiving root later exceeds that sender's
+    // remaining credit while copying its actual 32-KiB result to the host.
+    result(call,"delivered");
+    CHECK(poll(receiver,&out)==LB_WORLD_CANCELLED); consume(receiver); consume(call);
+    CHECK(lb_world_resource_usage(foreign,&usage)==LB_WORLD_OK && usage.closed);
+    retire(foreign); retire(causal); retire(world); retire(unsafe); retire(peer); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); free(bytes);
+    printf("CORE_WORK_RUNTIME_OK pure_cost=%llu exact_threshold=true fresh_credit=true private_family_reuse=true idle_unspent=true background_retained=true escaped_retirement=true candidate_sender_charged=true birth_credit_not_borrowed=true foreign_completion_contained=true peer_survives=true execution=shared_worker\n",(unsigned long long)pure_cost);
 }

@@ -2,7 +2,8 @@
 %% Copyright 2026 Leandro Ostera <leandro@ostera.io>
 -module(work_slice).
 -export([pure/1, loop/1, waiting/1, private_wait/1, background/1,
-         escaped_wait/1, registered_wait/1, boot/1, request/1, noise/1]).
+         escaped_wait/1, registered_wait/1, boot/1, request/1, noise/1,
+         foreign_wait/1, deliver/1]).
 pure(Binary) -> Binary.
 loop(Binary) -> loop(Binary).
 waiting(Binary) -> receive after infinity -> Binary end.
@@ -27,3 +28,7 @@ request(Binary) ->
 noise(Binary) -> work_actor ! {noise, Binary}, <<"noise">>.
 actor() ->
     receive {request, From, Binary} -> From ! {answer, Binary}, actor() end.
+foreign_wait(_) ->
+    register(work_listener, self()),
+    receive {foreign, Binary} -> Binary end.
+deliver(Binary) -> work_listener ! {foreign, Binary}, <<"delivered">>.

@@ -90,6 +90,10 @@ static int finish_task(LbTask *task,LbTaskStatus status)
         lb_call_complete(call,task->process,status);
         if(call->status==LB_WORLD_MEMORY_LIMIT) { task->status=LB_TASK_MEMORY_LIMIT; limited=1; }
         if(call->status==LB_WORLD_WORK_LIMIT) { task->status=LB_TASK_WORK_LIMIT; limited=2; }
+        // A foreign causal owner can turn this root's completion into CANCELLED,
+        // but its original failure must still trigger family/world containment.
+        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_LIMIT) limited=1;
+        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_WORK_LIMIT) limited=2;
         lb_work_domain_borrow(task->domain,NULL);
         lb_process_destroy(task->process); task->process=NULL;
         if(!call->owner_live) {

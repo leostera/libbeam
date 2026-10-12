@@ -128,12 +128,26 @@ stateful acceptance source or quota-test limits, nor interpret zero as unlimited
 
 ## Integrated checkpoint evidence
 
-Fresh `/tmp/libbeam-causal-work-integrated-third/summary.json` passes **207 commands**.
+Fresh `/tmp/libbeam-causal-work-integrated-fourth/summary.json` passes **207 commands**.
 The new actual-worker C and public C++ work suites pass Debug, Release and available
 UBSan. Unchanged lifecycle/two-Isolate acceptance is green. Observed pure-call cost
 is 95 units for this exact fixture/build profile; it is not a policy constant or
 performance claim. Root admission now faults all seven measured allocation prefixes;
 existing child/monitor/message/reclamation failure gates remain green.
+
+A further actual-worker test makes a registered receiving root return the sender's
+real 32-KiB binary after the sender already returned `delivered`. Copying the
+receiver's completion exceeds the sender's remaining credit: the ready sender
+reply survives, the receiving root reports cancellation, and the escaped world
+closes. Completion status remapping must not erase the underlying quota fact and
+omit containment. Both work and memory completion attribution use the causal owner.
+
+Native dynamic tuple construction, frame initialization, closure-environment
+construction and linear selection now precharge/checkpoint in the complete
+projected cases. PID insertion prepays its worst-case ring search before any
+identity counter mutation; logical removal/cleanup remains unmetered release work.
+These are additional audited paths, not a claim that the entire coverage/failure
+inventory has been completed.
 
 Retained internal failures include the standalone UBSan missing-source link, the
 callback-OOM monitor-wake regression, missing generated receive-consumption ownership

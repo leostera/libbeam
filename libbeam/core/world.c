@@ -208,7 +208,8 @@ void lb_call_complete(LbCall *call,LbProcess *process,LbTaskStatus status)
     case LB_TASK_CANCELLED: call->status=LB_WORLD_CANCELLED; break;
     default: abort();
     }
-    if(call->status==LB_WORLD_WORK_LIMIT && world->domain.failed_work && call->budget!=world->domain.failed_work)
+    if((call->status==LB_WORLD_WORK_LIMIT && world->domain.failed_work && call->budget!=world->domain.failed_work) ||
+       (call->status==LB_WORLD_MEMORY_LIMIT && world->domain.work && call->budget!=world->domain.work))
         call->status=LB_WORLD_CANCELLED; // Failure belongs to the causally selected sender, not this other root.
     if(call->budget) call->budget->call=NULL; // No later background failure rewrites a terminal reply.
     call->charge=call->size;

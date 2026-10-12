@@ -175,6 +175,7 @@ def owned_make_fun(body):
     old='  funp = (ErlFunThing*)HTOP;'
     if body.count(old)!=1: raise RuntimeError('Changed fun construction boundary')
     body=body.replace(old,
+        '  if(!lb_work_domain_charge(c_p->entry_module->space->domain,num_free+lb_work_bulk_units(num_free))) goto work_failure;\n'
         '  LbAllocStatus held=lb_fun_retain(c_p,fe);\n'
         '  FCALLS-=1+num_free;\n'
         '  if(held==LB_ALLOC_NO_MEMORY) goto memory_failure;\n'
@@ -445,7 +446,16 @@ def project(source):
             body=body.replace('{','{\n  if ((Uint)(E-HTOP)<2+S_RESERVED || c_p->heap_reserved<2) goto malformed_code;\n  c_p->heap_reserved-=2;',1)
         if name in {'put_tuple2_xI','put_tuple2_yI'}:
             body=body.replace('ASSERT(arity != 0);',
-                'if (!arity || (Uint)(E-HTOP) < arity+1+S_RESERVED || c_p->heap_reserved < arity+1) goto malformed_code;\n  c_p->heap_reserved -= arity+1;')
+                'if (!arity || (Uint)(E-HTOP) < arity+1+S_RESERVED || c_p->heap_reserved < arity+1) goto malformed_code;\n'
+                '  if(!lb_work_domain_charge(c_p->entry_module->space->domain,arity+lb_work_bulk_units(arity+1))) goto work_failure;\n'
+                '  c_p->heap_reserved -= arity+1;')
+        # Actual dynamic native loops: precharge initialized frames/closures,
+        # and checkpoint the bounded linear-selector walk before each pair.
+        body=re.sub(r'(unsigned needed = [^;]+;)',
+            r'\1\n    if(!lb_work_domain_charge(c_p->entry_module->space->domain,lb_work_bulk_units(needed))) goto work_failure;',body)
+        if 'select_val_lin__execute:' in body:
+            body=body.replace('    for (;;) {',
+                '    for (;;) {\n      if(!lb_work_domain_charge(c_p->entry_module->space->domain,2)) goto work_failure;')
         dependency_code=re.sub(r'/\*.*?\*/|//[^\n]*', '', body, flags=re.S)
         if 'erts_' in dependency_code or 'ERTS_PROC_GET_' in dependency_code or 'save_calls(' in dependency_code:
             raise RuntimeError('Unadapted execution dependency in '+name)

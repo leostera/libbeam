@@ -76,6 +76,8 @@ LbPidStatus lb_pid_insert(LbPidTable *t,LbPidEntry *entry,LbProcess *process)
     if(!t || !entry || !process || entry!=&process->identity ||
        process->entry_module->space!=t->space || entry->owner || is_internal_pid(entry->id)) return LB_PID_INVALID;
     if(t->count==t->capacity-t->retired) return LB_PID_FULL;
+    // Pay the worst-case ring search before advancing any identity counter.
+    if(!lb_work_domain_charge(t->domain,t->capacity)) return LB_PID_NO_MEMORY;
     for(size_t tried=0;tried<t->capacity;++tried) {
         size_t index=slot_index(t,++t->allocated_index);
         Uint data=t->free_ids[index];
