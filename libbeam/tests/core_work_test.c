@@ -7,6 +7,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #define CHECK(c) do { if(!(c)) { fprintf(stderr,"CHECK %d: %s\n",__LINE__,#c); abort(); } } while(0)
+typedef struct { int fail_next; } FailingAllocator;
+static void *allocate_once_failure(void *context,size_t bytes)
+{
+    FailingAllocator *allocator=context;
+    if(allocator->fail_next) { allocator->fail_next=0; return NULL; }
+    return malloc(bytes);
+}
 static void retire(LbWorld *world)
 {
     LbReclamation *reclamation;
@@ -42,9 +49,40 @@ int main(void)
     CHECK(!lb_work_budget_charge(a,0) && lb_work_budget_usage(a).denied_charge==1);
     CHECK(lb_work_budget_charge(b,2) && lb_work_budget_usage(b).remaining==3);
     lb_work_budget_escape(a); CHECK(lb_work_budget_usage(a).escaped);
-    lb_work_budget_release(a); CHECK(lb_alloc_domain_usage(&world->domain).current==owned);
-    lb_work_budget_release(a); lb_work_budget_release(b);
+    lb_work_domain_borrow(&world->domain,a); CHECK(!lb_work_domain_charge(&world->domain,1));
+    CHECK(world->domain.failed_work==a && a->references==3);
+    lb_work_domain_borrow(&world->domain,b); CHECK(!lb_work_domain_charge(&world->domain,0));
+    CHECK(b->remaining==3 && world->domain.failed_work==a);
+    lb_work_domain_borrow(&world->domain,NULL);
+    void *denied=NULL;
+    CHECK(lb_alloc_domain_allocate(&world->domain,SIZE_MAX,&denied)==LB_ALLOC_WORK_LIMIT && !denied);
+    CHECK(lb_alloc_domain_failure(&world->domain)==LB_ALLOC_WORK_LIMIT); // Later memory denial cannot erase the first owner.
+    lb_work_budget_release(a); lb_work_budget_release(a);
+    CHECK(a->references==1 && lb_alloc_domain_usage(&world->domain).current==owned);
+    lb_work_domain_clear_failure(&world->domain); lb_alloc_domain_begin_operation(&world->domain);
+    lb_work_budget_release(b);
     CHECK(!world->budgets && lb_alloc_domain_usage(&world->domain).current==before);
+    // A pre-existing memory denial likewise remains the operation's primary
+    // terminal cause if a later helper tries and fails to charge work.
+    lb_alloc_domain_begin_operation(&world->domain);
+    LbWorkBudget *first=lb_work_budget_create(world); CHECK(first);
+    size_t old_limit=world->domain.limit; world->domain.limit=world->domain.current;
+    void *denied_memory=NULL;
+    CHECK(lb_alloc_domain_allocate(&world->domain,1,&denied_memory)==LB_ALLOC_LIMIT);
+    lb_work_domain_borrow(&world->domain,first);
+    CHECK(!lb_work_domain_charge(&world->domain,UINT64_MAX));
+    CHECK(lb_alloc_domain_failure(&world->domain)==LB_ALLOC_LIMIT && !world->domain.failed_work);
+    lb_work_domain_borrow(&world->domain,NULL); lb_work_budget_release(first);
+    world->domain.limit=old_limit; lb_alloc_domain_begin_operation(&world->domain);
+    LbWorkBudget *oom_first=lb_work_budget_create(world); CHECK(oom_first);
+    LbSystemAllocator original=world->domain.system; FailingAllocator failing={1};
+    world->domain.system=(LbSystemAllocator){&failing,allocate_once_failure,original.release};
+    lb_work_domain_borrow(&world->domain,oom_first); void *oom=NULL;
+    CHECK(lb_alloc_domain_allocate(&world->domain,1,&oom)==LB_ALLOC_NO_MEMORY && !oom);
+    CHECK(!lb_work_domain_charge(&world->domain,UINT64_MAX));
+    CHECK(lb_alloc_domain_failure(&world->domain)==LB_ALLOC_NO_MEMORY && !world->domain.failed_work);
+    lb_work_domain_borrow(&world->domain,NULL); world->domain.system=original;
+    lb_work_budget_release(oom_first); lb_alloc_domain_begin_operation(&world->domain);
     LbWorkBudget *full=lb_work_budget_create(maximum); CHECK(full);
     CHECK(lb_work_budget_charge(full,UINT64_MAX) && lb_work_budget_usage(full).remaining==0);
     CHECK(!lb_work_budget_charge(full,1)); lb_work_budget_release(full);
@@ -53,5 +91,5 @@ int main(void)
     CHECK(lb_work_budget_charge(NULL,UINT64_MAX)); // Explicit management/component sentinel only.
     lb_engine_leave(engine);
     retire(world); retire(maximum); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
-    puts("CORE_WORK_LEDGER_OK fresh_owners=true inherited_credit=true no_retry_reset=true checked_threshold=true leases_accounted=true physical_release=true runtime_enforcement=false");
+    puts("CORE_WORK_LEDGER_OK fresh_owners=true inherited_credit=true no_retry_reset=true checked_threshold=true leases_accounted=true failing_owner_retained=true first_failure_preserved=true physical_release=true runtime_enforcement=false");
 }

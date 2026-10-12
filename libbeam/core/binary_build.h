@@ -10,6 +10,7 @@ typedef enum {
     LB_BUILD_LIMIT, LB_BUILD_REFUSED, LB_BUILD_ENVIRONMENT
 } LbBinaryBuildStatus;
 typedef struct {
+    LbAllocDomain *domain; /* Stable scope, borrowed only within this instruction. */
     LbBitWriter writer;
     Eterm result,float_info;
     size_t expected;

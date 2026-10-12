@@ -32,6 +32,7 @@ static int lookup(LbCodeSpace *space,const BeamInstr *pc,LbMFA *mfa)
 void lb_trace_callsite(LbProcess *p,const BeamInstr *from,const BeamInstr *to)
 {
     LbCodeSpace *space=p->entry_module->space;
+    if(!lb_work_domain_charge(space->domain,LB_NATIVE_COUNT)) return;
     for(size_t i=0;i<LB_NATIVE_COUNT;++i) if(to==space->natives[i].dispatch.addresses[0]) {
         LbMFA mfa;
         if(lookup(space,from,&mfa)) {
@@ -70,6 +71,7 @@ LbProcessStatus lb_error_down_reason(LbProcess *p,Eterm *out)
     int bif=0,copy_args=0,wrapper=!!(p->freason&LB_EXF_ARGLIST);
     Eterm args=am_true,info=NIL;
     if(p->status!=LB_PROCESS_EXCEPTION || LB_GET_EXC_CLASS(p->freason)!=LB_EXTAG_ERROR) return LB_PROCESS_INVALID;
+    if(!lb_work_domain_charge(space->domain,LB_NATIVE_COUNT)) return LB_PROCESS_WORK_LIMIT;
     for(size_t i=0;i<LB_NATIVE_COUNT;++i) if(pc==space->natives[i].dispatch.addresses[0]) { bif=1; break; }
     if(bif && p->current->function!=am_error) {
         /* All admitted native imports are erlang BIFs. Other format modules

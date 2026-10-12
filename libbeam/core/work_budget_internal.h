@@ -8,7 +8,7 @@ struct LbWorkBudget {
     LbWorld *world;
     LbAllocDomain *domain;
     struct LbCall *call; /* borrowed pending completion; cleared before it retires */
-    LbWorkBudget *next;
+    LbWorkBudget *previous,*next;
     size_t references;
     uint64_t limit,remaining,denied_charge;
     int exhausted,escaped;

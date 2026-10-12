@@ -13,7 +13,9 @@ LbWorkBudget *lb_work_budget_create(LbWorld *world)
     LbWorkBudget *budget=memory; memset(budget,0,sizeof(*budget));
     budget->world=world; budget->domain=&world->domain; budget->references=1;
     budget->limit=budget->remaining=world->limits.invocation_work;
-    budget->next=world->budgets; world->budgets=budget; return budget;
+    budget->next=world->budgets;
+    if(budget->next) budget->next->previous=budget;
+    world->budgets=budget; return budget;
 }
 LbAllocStatus lb_work_budget_retain(LbWorkBudget *budget)
 {
@@ -27,9 +29,12 @@ void lb_work_budget_release(LbWorkBudget *budget)
     if(!budget) return;
     if(!budget->references) abort();
     if(--budget->references) return;
-    LbWorld *world=budget->world; LbWorkBudget **link;
-    for(link=&world->budgets;*link && *link!=budget;link=&(*link)->next) {}
-    if(!*link || budget->call || world->domain.work==budget) abort(); *link=budget->next;
+    LbWorld *world=budget->world;
+    if(budget->call || world->domain.work==budget) abort();
+    if(budget->previous) budget->previous->next=budget->next;
+    else if(world->budgets==budget) world->budgets=budget->next;
+    else abort();
+    if(budget->next) budget->next->previous=budget->previous;
     lb_release(&world->domain,budget);
 }
 void lb_work_budget_escape(LbWorkBudget *budget) { if(budget) budget->escaped=1; }
@@ -77,7 +82,9 @@ int lb_work_receive_begin(LbProcess *process,LbMessage *candidate)
 {
     if(!candidate || process->work_candidate==candidate) return 1;
     if(process->work_candidate) abort();
-    if(lb_work_budget_retain(candidate->budget)!=LB_ALLOC_OK) return 0;
+    if(lb_work_budget_retain(candidate->budget)!=LB_ALLOC_OK) {
+        process->status=LB_PROCESS_LIMIT; return 0;
+    }
     process->work_previous=process->work_active; // Transfer, not an additional lease.
     process->work_active=candidate->budget; process->work_candidate=candidate;
     lb_work_domain_borrow(process->entry_module->space->domain,process->work_active);

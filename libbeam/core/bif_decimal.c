@@ -30,6 +30,7 @@ Eterm lb_bif_integer_to_binary_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
         LbAllocStatus status;
         if(is_small(args[0])) {
             unsigned char output[LB_DECIMAL_SMALL_BYTES];
+            if(!lb_work_domain_charge(domain,LB_DECIMAL_SMALL_BYTES)) return no_memory(p);
             return publish(p,lb_decimal_small(signed_val(args[0]),output));
         }
         if(!lb_is_big(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }

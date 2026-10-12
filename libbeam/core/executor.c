@@ -155,6 +155,11 @@ static void step(LbTask *task)
     case LB_PROCESS_ENVIRONMENT: limited=finish_task(task,LB_TASK_ENVIRONMENT); break;
     default: abort();
     }
+    if(domain->failed_work && owner!=domain->failed_work) {
+        LbWorkBudget *causal=domain->failed_work;
+        if(lb_work_budget_retain(causal)!=LB_ALLOC_OK) abort();
+        lb_work_budget_release(owner); owner=causal;
+    }
     lb_work_domain_borrow(domain,NULL);
     lb_work_domain_clear_failure(domain);
     if(limited) {
@@ -301,6 +306,13 @@ LbTaskStatus lb_task_status(LbTask *task)
 {
     LbTaskStatus status;
     lb_engine_enter(task->engine); status=task->status; lb_engine_leave(task->engine); return status;
+}
+LbTaskObservation lb_task_observe(LbTask *task)
+{
+    lb_engine_enter(task->engine);
+    LbTaskObservation value={task->status,task->process?task->process->collections:0,
+        task->process?task->process->waiting:0};
+    lb_engine_leave(task->engine); return value;
 }
 Eterm lb_task_result(LbTask *task)
 {

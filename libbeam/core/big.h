@@ -9,6 +9,8 @@
  * These functions neither allocate nor collect. Callers own the output words;
  * no new BIF/instruction admission follows merely from linking these helpers. */
 #define LB_BIG_ARITY_MAX ((1u<<16)-1)
+/* Covers the bounded 64-bit MSB scan and sticky-bit loop in big_to_double. */
+#define LB_BIG_TO_DOUBLE_FIXED_WORK 8u
 static inline int lb_is_big(Eterm value)
 {
     return is_boxed(value) && ((*boxed_val(value)&_TAG_HEADER_MASK)==POS_BIG_SUBTAG || (*boxed_val(value)&_TAG_HEADER_MASK)==NEG_BIG_SUBTAG);

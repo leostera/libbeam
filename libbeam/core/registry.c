@@ -13,6 +13,7 @@ struct LbRegisteredProcess {
     Uint hash;
     Eterm name;
     LbProcess *process;
+    struct LbRegisteredProcess *previous;
     void *port; /* native RegProc alternative, never admitted by this profile */
 };
 _Static_assert(offsetof(LbRegisteredProcess,name)==2*sizeof(Eterm),"native HashBucket prefix");
@@ -39,6 +40,7 @@ LbProcessStatus lb_registry_register(LbProcess *caller,Eterm name,Eterm pid)
     if(!is_atom(name) || name==am_undefined || !is_internal_pid(pid)) return LB_PROCESS_EXCEPTION;
     LbProcess *target=lb_pid_lookup(space->pids,pid);
     if(!target || target->registered || lb_registry_lookup(space,name,&caller->last_native_cost)) return LB_PROCESS_EXCEPTION;
+    if(lb_alloc_domain_failure(space->domain)==LB_ALLOC_WORK_LIMIT) return LB_PROCESS_WORK_LIMIT;
     LbRegistry *registry=space->registry; int fresh=!registry; void *memory;
     if(fresh) {
         if(lb_alloc_domain_allocate(space->domain,sizeof(*registry),&memory)!=LB_ALLOC_OK) return LB_PROCESS_NO_MEMORY;
@@ -51,7 +53,8 @@ LbProcessStatus lb_registry_register(LbProcess *caller,Eterm name,Eterm pid)
     }
     LbRegisteredProcess *r=memory;
     r->hash=atom_val(name); r->name=name; r->process=target; r->port=NULL;
-    r->next=registry->bucket[bucket(name)];
+    r->previous=NULL; r->next=registry->bucket[bucket(name)];
+    if(r->next) r->next->previous=r;
     /* A published name is reachable by later independent invocations. */
     lb_work_budget_escape(caller->work_active); lb_work_budget_escape(target->work_birth);
     /* No allocation or interpreter re-entry after either association publishes. */
@@ -64,10 +67,13 @@ void lb_registry_remove(LbProcess *p)
     LbRegisteredProcess *r=p->registered;
     if(!r) return;
     LbCodeSpace *space=p->entry_module->space; LbRegistry *registry=space->registry;
-    LbRegisteredProcess **link=&registry->bucket[bucket(r->name)];
-    while(*link && *link!=r) link=&(*link)->next;
-    if(*link!=r || !registry->count) abort();
-    *link=r->next; p->registered=NULL; --registry->count;
+    if(r->previous) r->previous->next=r->next;
+    else {
+        LbRegisteredProcess **head=&registry->bucket[bucket(r->name)];
+        if(*head!=r) abort(); *head=r->next;
+    }
+    if(r->next) r->next->previous=r->previous;
+    if(!registry->count) abort(); p->registered=NULL; --registry->count;
     if(lb_alloc_domain_release(space->domain,r)!=LB_ALLOC_OK) abort();
     if(!registry->count) {
         space->registry=NULL;

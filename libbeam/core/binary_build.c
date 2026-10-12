@@ -36,7 +36,8 @@ LbBinaryBuildStatus lb_binary_build_begin(LbProcess *p,const Uint *words,size_t 
                                          size_t alloc,size_t live,LbBinaryBuild *b)
 {
     if(!p || !b) return LB_BUILD_INVALID;
-    *b=(LbBinaryBuild){.result=THE_NON_VALUE,.float_info=NIL,.status=LB_BUILD_INVALID};
+    *b=(LbBinaryBuild){.domain=p->entry_module->space->domain,
+        .result=THE_NON_VALUE,.float_info=NIL,.status=LB_BUILD_INVALID};
     if(live>MAX_REG || alloc>UINT32_MAX) return b->status;
     if(!lb_work_domain_charge(p->entry_module->space->domain,1+3*(count/5)))
         return b->status=LB_BUILD_NO_MEMORY;
@@ -159,7 +160,13 @@ void lb_build_string(LbBinaryBuild *b,const unsigned char *bytes,size_t count)
 }
 Eterm lb_build_float(LbBinaryBuild *b,Eterm value,size_t bits,Uint flags)
 {
-    if(lb_is_big(value)) b->cost+=1+lb_big_size(value)/16;
+    // Converting a huge integer can visit all limbs even for a 64-bit output.
+    if(lb_is_big(value)) {
+        if(!lb_work_domain_charge(b->domain,LB_BIG_TO_DOUBLE_FIXED_WORK+lb_big_size(value))) {
+            b->status=LB_BUILD_NO_MEMORY; return THE_NON_VALUE;
+        }
+        b->cost+=1+lb_big_size(value)/16;
+    }
     LbBitFloatResult result=lb_bits_put_float(&b->writer,value,bits,flags&2?LB_BITS_LITTLE_ENDIAN:LB_BITS_BIG_ENDIAN);
     if(written(b,result.status)) return THE_NON_VALUE;
     switch(result.error) {

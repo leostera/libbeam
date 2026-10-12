@@ -8,6 +8,9 @@
  * quota. The owned single-generation collector accounts retained capacity,
  * including writable spare capacity, rather than claiming native generations. */
 #define LB_BINARY_VHEAP_MIN_WORDS UINT64_C(46422)
+/* Conservative native work bound for next()'s full-width rounding and growth
+ * loops over uint64_t thresholds (charged before moving-GC forwarding). */
+#define LB_BINARY_VHEAP_NEXT_MAX_WORK UINT64_C(2048)
 /* Native do_next_vheap_size/next_vheap_size under binary64 nearest/ties-even.
  * Pure integer implementation: no allocation, failure or host fenv changes,
  * including after the collector's first forwarding write. Sub-minimum current

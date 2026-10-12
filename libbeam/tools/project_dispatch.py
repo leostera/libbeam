@@ -9,6 +9,7 @@ import re
 import hashlib
 
 NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c move_shift_cxx '
+         'move_shift_nyx move_shift_xxx move_shift_xyx move_shift_yry move_shift_yxx '
          'move_return_c move_return_n move_return_x return put_tuple2_xI put_tuple2_yI test_heap_It '
          'i_call_ext_only_e i_move_call_ext_only_ec jump_f badmatch_x case_end_x '
          'i_allocate_zero_tt i_allocate_heap_zero_tIt allocate_tt allocate_heap_tIt '
@@ -335,7 +336,8 @@ def owned_receive_remove(body):
     # Check the fragment token instead of silently accepting a traced message.
     body=body[:start]+'  if (msgp->m[1]!=NIL) goto execution_refused;\n'+body[end:]
     body=body.replace('erts_msgq_unlink_msg_set_save_first(c_p, msgp);',
-        'if(msgp!=c_p->receive_message || lb_message_queue_take(&c_p->messages)!=msgp) goto malformed_code;\n'
+        'if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_RECV_MARKERS)) goto work_failure;\n'
+        '  if(msgp!=c_p->receive_message || lb_message_queue_take(&c_p->messages)!=msgp) goto malformed_code;\n'
         '  c_p->messages.save=&c_p->messages.first;\n  c_p->receive_message=NULL; c_p->receive_root=NIL;\n'
         '  lb_work_receive_end(c_p,1);')
     body=body.replace('CANCEL_TIMER(c_p);', 'lb_receive_timer_cancel(c_p);')
@@ -372,6 +374,7 @@ def owned_receive_scan(body):
         '  SWAPOUT;\n  Eterm lb_view;\n  LbProcessStatus lb_receive_status=lb_message_peek_owned(c_p,&lb_view);\n  SWAPIN;\n'
         '  if(lb_receive_status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n'
         '  if(lb_receive_status==LB_PROCESS_LIMIT) goto resource_limit;\n'
+        '  if(lb_receive_status==LB_PROCESS_WORK_LIMIT) goto work_failure;\n'
         '  if(lb_receive_status!=LB_PROCESS_READY || is_non_value(lb_view)) goto malformed_code;\n'
         '  FCALLS-=(Sint)c_p->last_native_cost;\n  x(0)=lb_view;')
     body=body.replace('erts_msgq_set_save_next(c_p);', 'lb_message_skip_owned(c_p);')
@@ -392,11 +395,16 @@ def project(source):
         body=owned_make_fun(body)
         body=owned_predicate_bif(body)
         body=owned_send(body)
-        body=body.replace('erts_msgq_recv_marker_bind(', 'lb_receive_marker_bind(')
-        body=body.replace('erts_msgq_recv_marker_clear(', 'lb_receive_marker_clear(')
-        body=body.replace('erts_msgq_recv_marker_set_save(', 'lb_receive_marker_use(')
+        body=body.replace('erts_msgq_recv_marker_bind(',
+            'if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_RECV_MARKERS)) goto work_failure; lb_receive_marker_bind(')
+        body=body.replace('erts_msgq_recv_marker_clear(',
+            'if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_RECV_MARKERS)) goto work_failure; lb_receive_marker_clear(')
+        body=body.replace('erts_msgq_recv_marker_set_save(',
+            'if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_RECV_MARKERS)) goto work_failure; lb_receive_marker_use(')
         body=body.replace('  Sb(I[1]) = erts_msgq_recv_marker_insert(c_p);',
-            '  Eterm lb_marker;\n  LbProcessStatus lb_marker_status=lb_receive_marker_reserve(c_p,&lb_marker);\n'
+            '  Eterm lb_marker;\n'
+            '  if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_RECV_MARKERS)) goto work_failure;\n'
+            '  LbProcessStatus lb_marker_status=lb_receive_marker_reserve(c_p,&lb_marker);\n'
             '  if(lb_marker_status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n'
             '  if(lb_marker_status==LB_PROCESS_LIMIT) goto resource_limit;\n'
             '  if(lb_marker_status!=LB_PROCESS_READY) goto malformed_code;\n  *REG_TARGET_PTR(I[1])=lb_marker;')

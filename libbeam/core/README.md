@@ -25,9 +25,16 @@ constructed; [the earlier application attempt](../../docs/rfds/0003-midgard-appl
 records a real refusal, not execution. [RFD 0004](../../docs/rfds/0004-isolate-resource-policy.md)
 selects memory/invocation policy. [World memory accounting/enforcement](../../docs/rfds/0004-accounted-memory.md)
 is implemented. [Invocation wiring](../../docs/rfds/0004-invocation-work-wiring.md)
-now charges actual worker dispatch/native paths and uses owned causal credits and
-private-family/escaped-world cancellation. Native coverage and failure-boundary
-audit remain unfinished; this is not resource-milestone or application completion.
+now charges every currently admitted worker dispatch/native path and uses owned
+causal credits with private-family/escaped-world cancellation. The current-profile
+loop inventory and failure-boundary audit are recorded in RFD 0004; mandatory drain,
+allocator bookkeeping and teardown remain explicit exclusions, not a hard CPU cap.
+Debug/Release/UBSan actual-worker tests pin exact thresholds for decimal formatting,
+bignum-to-float construction, deep equality, monitored child/message work and GC.
+Fixed dispatch/trace/receive-marker scans and first-failure priority are charged;
+registry unlink is constant-time. Future application-required capabilities must
+extend the inventory and bring matching threshold/failure tests. This resource
+checkpoint does not mean whole-Midgard execution or compatibility.
 
 ## Boundaries
 

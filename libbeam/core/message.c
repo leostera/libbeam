@@ -57,7 +57,9 @@ LbProcessStatus lb_message_import(LbProcess *receiver,const LbMessage *message,s
     if(receiver->collections!=collections) receiver->last_native_cost+=receiver->last_gc_cost;
     LbCodeSpace *space=message->space; LbFunLease *previous=receiver->fun_leases;
     LbAllocStatus held=lb_fun_retain_term(receiver,message->m[0],&receiver->last_native_cost);
-    LbProcessStatus status=held==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_REFUSED;
+    LbProcessStatus status=held==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:
+        held==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+        held==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:LB_PROCESS_REFUSED;
     if(held!=LB_ALLOC_OK) goto rollback_leases;
     Eterm *top=receiver->htop; LbOffHeap prepared={0};
     Eterm term=lb_copy_flat(message->m[0],&top,&prepared);
@@ -91,8 +93,8 @@ LbProcessStatus lb_message_peek_owned(LbProcess *receiver,Eterm *out)
         receiver->receive_message=NULL; receiver->receive_root=NIL;
         return LB_PROCESS_READY;
     }
-    if(!lb_work_receive_begin(receiver,selected) || !lb_work_domain_charge(selected->space->domain,1))
-        return LB_PROCESS_WORK_LIMIT;
+    if(!lb_work_receive_begin(receiver,selected)) return LB_PROCESS_LIMIT;
+    if(!lb_work_domain_charge(selected->space->domain,1)) return LB_PROCESS_WORK_LIMIT;
     if(selected!=receiver->receive_message) {
         Eterm copied;
         receiver->receive_message=NULL; receiver->receive_root=NIL;
@@ -114,6 +116,9 @@ void lb_message_consume_owned(LbProcess *receiver)
 {
     LbMessage *selected=*receiver->messages.save;
     if(!selected || selected!=receiver->receive_message) abort();
+    if(!lb_work_domain_charge(selected->space->domain,LB_RECV_MARKERS)) {
+        receiver->status=LB_PROCESS_WORK_LIMIT; return;
+    }
     receiver->receive_message=NULL; receiver->receive_root=NIL;
     if(lb_message_queue_take(&receiver->messages)!=selected) abort();
     receiver->messages.save=&receiver->messages.first;

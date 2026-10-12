@@ -196,13 +196,17 @@ static const LbMFA *entry_mfa(LbProcess *p,const BeamInstr *pc)
 {
     LbCodeSpace *space=p->entry_module->space;
     LbCodeModule *module; Export *e;
-    for(e=space->exports;e;e=e->next)
+    for(e=space->exports;e;e=e->next) {
+        if(!lb_work_domain_charge(space->domain,1)) return NULL;
         if(e->dispatch.addresses[0]==pc) return &e->info.mfa;
+    }
     /* Local calls can yield at non-exported entries. Use the emitted native
      * function directory, not an export stub or a fabricated scheduling MFA.
      * memcpy avoids aliasing instruction-word storage as an LbMFA object. */
-    for(module=space->modules;module;module=module->next)
+    for(module=space->modules;module;module=module->next) {
+        if(!lb_work_domain_charge(space->domain,1)) return NULL;
         if(private_mfa(module,pc,&p->local_mfa)) return &p->local_mfa;
+    }
     return NULL;
 }
 static int32_t lb_packed_label(const BeamInstr *table,size_t index)
@@ -285,7 +289,9 @@ dispatch:
     if(next_op==op_i_loop_rec_f && !lb_work_receive_begin(c_p,*c_p->messages.save)) goto resource_limit;
     if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
     /* pc_valid is also an assertion predicate: it must remain pure. Pay its
-     * frozen private-directory bound here, not from inside CHECK_ARGS. */
+     * frozen native table bound and private-directory scan here, not inside
+     * CHECK_ARGS where Debug-only validation would distort admission credit. */
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_NATIVE_COUNT)) goto work_failure;
     for(LbCodeModule *module=c_p->entry_module->space->modules;module;module=module->next)
         if(!lb_work_domain_charge(module->space->domain,2)) goto work_failure;
     if(!pc_valid(c_p,I) || !VALID_INSTR(next_op) || (c_p->decimal && next_op!=op_call_bif_W)) goto malformed_code;

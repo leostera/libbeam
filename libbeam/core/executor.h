@@ -17,6 +17,9 @@ typedef enum {
  * Engine must be protected by lb_engine_enter/leave once a worker exists. */
 LbEngineStatus lb_task_create_binary(LbEngine *,const LbCodeEntry *,const void *,size_t,LbTask **);
 LbTaskStatus lb_task_status(LbTask *);
+typedef struct { LbTaskStatus status; size_t collections; int waiting; } LbTaskObservation;
+/* Scalar snapshot only; never exposes a process or a moving root. */
+LbTaskObservation lb_task_observe(LbTask *);
 /* Borrowed terminal roots, valid until cancellation/release; no raw host ABI. */
 Eterm lb_task_result(LbTask *);
 Eterm lb_task_exception(LbTask *);

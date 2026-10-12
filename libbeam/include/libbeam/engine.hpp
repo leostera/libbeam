@@ -52,8 +52,9 @@ struct ResourceUsage {
     bool closed;
 };
 // Finite positive policy resolved at creation. Accounted backing is not RSS.
-// Memory and causal invocation charging/cancellation are implemented;
-// the complete admitted-native charging/failure audit remains under construction.
+// Invocation charging/causal cancellation covers the current admitted profile.
+// New capabilities require corresponding charge and boundary tests; work units
+// estimate native effort and do not impose a CPU-time guarantee.
 
 class Call {
 public:

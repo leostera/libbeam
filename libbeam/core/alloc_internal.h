@@ -16,7 +16,9 @@ struct LbAllocDomain {
     size_t children,current,peak,limit;
     LbAllocStatus failure;
     LbWorkBudget *work; /* borrowed only within the serialized operation's owned lease */
-    LbWorkBudget *failed_work; /* owned first-failure attribution until outer cleanup */
+    /* First denied owner stays leased until cleanup; later quota/OOM results
+     * cannot overwrite causal failure attribution. */
+    LbWorkBudget *failed_work;
 };
 /* Fresh zeroed storage only. A child is destroyed before its containing control.
  * Init performs no callback/allocation; destroy refuses live allocations/users. */

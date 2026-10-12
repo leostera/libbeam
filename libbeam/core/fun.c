@@ -213,11 +213,17 @@ const BeamInstr *lb_fun_call(LbProcess *p,unsigned arity)
             }
         }
         if(!found) { p->status=LB_PROCESS_INVALID; return NULL; }
+        if(!lb_work_domain_charge(p->entry_module->space->domain,count+lb_work_bulk_units(count))) {
+            p->status=LB_PROCESS_WORK_LIMIT; return NULL;
+        }
         for(unsigned i=0;i<count;++i) p->reg[arity+i]=fun->env[i];
         return entry->dispatch.addresses[0];
     }
     /* Build the native {Fun,Args} badarity payload in one fallible reservation.
      * Both the argument registers and fun register survive moving collection. */
+    if(!lb_work_domain_charge(p->entry_module->space->domain,arity+lb_work_bulk_units(2*(uint64_t)arity+3))) {
+        p->status=LB_PROCESS_WORK_LIMIT; return NULL;
+    }
     size_t before=p->collections,need;
     if(!lb_size_add(2*(size_t)arity+3,p->heap_reserved,&need) || !lb_heap_reserve(p,need,arity+1)) {
         p->status=LB_PROCESS_NO_MEMORY; return NULL;

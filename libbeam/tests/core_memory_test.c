@@ -75,7 +75,7 @@ int main(int argc,char **argv)
     CHECK(lb_world_create_with_overrides(engine,&limits,&exact)==LB_WORLD_OK);
     --limits.memory_bytes;
     CHECK(lb_world_create_with_overrides(engine,&limits,&lower)==LB_WORLD_OK);
-    load(exact,bytes,(size_t)length); load(lower,bytes,(size_t)length); free(bytes);
+    load(exact,bytes,(size_t)length); load(lower,bytes,(size_t)length);
     LbProcess *a=prepared(exact),*b=prepared(lower); old=b->heap; Eterm root=b->reg[0];
     size_t before=usage(lower).current,callbacks=host.allocations;
     lb_engine_enter(engine); lb_alloc_domain_begin_operation(&lower->domain);
@@ -86,6 +86,36 @@ int main(int argc,char **argv)
     lb_engine_enter(engine); CHECK(lb_process_collect_live(a,0,1)); check_input(a); lb_engine_leave(engine);
     CHECK(usage(exact).peak==peak); // Simultaneously retained old/new heaps, not logical live terms.
     destroy(lower,b); destroy(exact,a); stop(lower); stop(exact);
+    // Exercise real collector credit before forwarding, independently of memory
+    // admission. This is native collector testing, never host BEAM execution.
+    LbWorld *work_probe; CHECK(lb_world_create(engine,&work_probe)==LB_WORLD_OK);
+    load(work_probe,bytes,(size_t)length); p=prepared(work_probe);
+    lb_engine_enter(engine); lb_alloc_domain_begin_operation(&work_probe->domain);
+    uint64_t credit=lb_work_budget_usage(p->work_active).remaining;
+    lb_work_domain_borrow(&work_probe->domain,p->work_active);
+    CHECK(lb_process_collect_live(p,0,1)); check_input(p);
+    uint64_t gc_work=credit-lb_work_budget_usage(p->work_active).remaining; CHECK(gc_work>MAX_REG);
+    lb_work_domain_borrow(&work_probe->domain,NULL); lb_engine_leave(engine);
+    destroy(work_probe,p); stop(work_probe);
+    limits=(LbResourceOverrides){.has_work=1,.invocation_work=gc_work};
+    CHECK(lb_world_create_with_overrides(engine,&limits,&exact)==LB_WORLD_OK);
+    --limits.invocation_work; CHECK(lb_world_create_with_overrides(engine,&limits,&lower)==LB_WORLD_OK);
+    load(exact,bytes,(size_t)length); load(lower,bytes,(size_t)length); free(bytes);
+    a=prepared(exact); b=prepared(lower); old=b->heap; root=b->reg[0]; callbacks=host.allocations;
+    lb_engine_enter(engine); lb_alloc_domain_begin_operation(&lower->domain);
+    lb_work_domain_borrow(&lower->domain,b->work_active);
+    CHECK(!lb_process_collect_live(b,0,1));
+    CHECK(lb_alloc_domain_failure(&lower->domain)==LB_ALLOC_WORK_LIMIT && b->heap==old && b->reg[0]==root && !b->collections);
+    check_input(b);
+    // A denial at allocation preparation can allocate no block; any prefix
+    // before that point is still physically released without forwarding roots.
+    CHECK(host.allocations==callbacks);
+    lb_work_domain_borrow(&lower->domain,NULL); lb_work_domain_clear_failure(&lower->domain);
+    lb_work_domain_borrow(&exact->domain,a->work_active);
+    CHECK(lb_process_collect_live(a,0,1) && !lb_work_budget_usage(a->work_active).remaining); check_input(a);
+    lb_work_domain_borrow(&exact->domain,NULL); lb_engine_leave(engine);
+    destroy(lower,b); destroy(exact,a); stop(lower); stop(exact);
+    printf("CORE_WORK_GC_OK exact_units=%llu threshold=true before_forwarding=true roots_preserved=true peer_collects=true physical_release=true execution=false\n",(unsigned long long)gc_work);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!host.live);
     printf("CORE_MEMORY_GC_OK exact_peak=%zu old_plus_new=true denial_before_forwarding=true roots_preserved=true peer_collects=true final_balance=true execution=false\n",peak);
 }

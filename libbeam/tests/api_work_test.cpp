@@ -26,7 +26,24 @@ int main(int argc,char** argv) {
     std::ifstream input(argv[1],std::ios::binary); CHECK(input.good());
     Bytes beam{std::istreambuf_iterator<char>(input),std::istreambuf_iterator<char>()};
     const Bytes bytes{'p','a','y','l','o','a','d'};
+    auto invalid_engine=Engine::create(ResourceLimits{256u*1024u*1024u,0});
+    CHECK(std::holds_alternative<Error>(invalid_engine) && std::get<Error>(invalid_engine).code==ErrorCode::invalid_argument);
+    {
+        auto engine=take(Engine::create());
+        {
+            auto world=take(engine.create_isolate());
+            auto limits=take(world.resource_usage()).limits;
+            CHECK(limits.memory_limit_bytes==256u*1024u*1024u && limits.invocation_work_limit==10'000'000);
+            CHECK(!world.load_module(view(beam)));
+            auto call=take(world.start("work_slice","pure",view(bytes))); reply(call,bytes);
+            stop(world);
+        }
+        CHECK(!engine.shutdown(deadline()));
+    }
     auto engine=take(Engine::create(ResourceLimits{256u*1024u*1024u,4096}));
+    ResourceOverrides invalid_override; invalid_override.invocation_work_limit=0;
+    auto invalid_isolate=engine.create_isolate(invalid_override);
+    CHECK(std::holds_alternative<Error>(invalid_isolate) && std::get<Error>(invalid_isolate).code==ErrorCode::invalid_argument);
     {
         auto world=take(engine.create_isolate()); ResourceOverrides overrides; overrides.invocation_work_limit=8192;
         auto peer=take(engine.create_isolate(overrides));

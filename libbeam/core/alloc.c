@@ -20,7 +20,10 @@ static void *system_allocate(void *context,size_t size)
 static void system_release(void *context,void *allocation)
 { (void)context; free(allocation); }
 static LbAllocStatus failed(LbAllocDomain *domain,LbAllocStatus status)
-{ domain->failure=status; return status; }
+{
+    if(domain->failure!=LB_ALLOC_OK) return domain->failure;
+    domain->failure=status; return status;
+}
 LbAllocStatus lb_alloc_domain_create(const LbSystemAllocator *allocator,LbAllocDomain **out)
 {
     const LbSystemAllocator defaults={NULL,system_allocate,system_release};

@@ -84,7 +84,7 @@ static void flush(LbProcess *p,Eterm ref)
         LbAllocDomain *domain=p->entry_module->space->domain;
         LbWorkBudget *prior=lb_work_domain_owner(domain);
         lb_work_domain_borrow(domain,message->budget);
-        int charged=lb_work_domain_charge(domain,1);
+        int charged=lb_work_domain_charge(domain,1+LB_RECV_MARKERS);
         lb_work_domain_borrow(domain,prior);
         if(!charged) { p->status=LB_PROCESS_WORK_LIMIT; break; }
         Eterm value=message->m[0];

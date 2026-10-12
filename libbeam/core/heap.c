@@ -74,7 +74,10 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
         if(!lb_work_domain_charge(domain,1)) return 0;
         ++leases;
     }
-    uint64_t factor=used+live+2*stack+8,work=MAX_REG+2*used+2*stack+16;
+    // Includes the full-width binary-vheap rounding/growth bound, plus roots,
+    // full copy/sweep and conservative per-lease code-mark searches.
+    uint64_t factor=used+live+2*stack+8;
+    uint64_t work=MAX_REG+2*used+2*stack+LB_BINARY_VHEAP_NEXT_MAX_WORK;
     if(leases && factor>(UINT64_MAX-work)/leases) return 0;
     work+=factor*leases;
     if(!lb_work_domain_charge(domain,work)) return 0;

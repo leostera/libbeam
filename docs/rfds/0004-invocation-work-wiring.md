@@ -3,11 +3,13 @@
 
 # RFD 0004 invocation ledger and wiring plan
 
-Status: **Owned credit, actual worker dispatch charging, causal process/message
-wiring and family cancellation implemented as an integrated checkpoint. Native
-charging coverage and broader failure-boundary tests are still under audit; the
-resource milestone and whole-application goal remain unfinished.** This implements
-the [selected policy](0004-isolate-resource-policy.md), not a relaxation of the goal.
+Status: **Resource enforcement is complete for the currently admitted runtime
+profile**: accounted memory, default/override work credit, dispatch/native/GC/message
+charging, causal attribution, cancellation containment and explicit exclusions are
+implemented and integrated-tested. The Midgard-required runtime capabilities and
+whole-application goal remain unfinished; each newly admitted capability must extend
+this inventory and its tests. This implements the [selected policy](0004-isolate-resource-policy.md),
+not a relaxation of the goal.
 
 ## Implemented primitive
 
@@ -50,8 +52,9 @@ binary construction/copies/zeroing, term equality/size/ownership traversal, deci
 continuations, numeric preparation, native option/error scans, code/trace metadata
 and collector preparation. GC prepays a conservative roots/copy/sweep/code-mark
 bound before forwarding; there are no newly fallible checks halfway through GC.
-This is an estimate, not elapsed time; small/large helper coverage still needs its
-complete inventory and focused threshold/failure evidence before task completion.
+This is an estimate, not elapsed time. The integrated checkpoint below records
+threshold evidence for the currently admitted helpers; code loading, setup, scheduler
+bookkeeping and mandatory cleanup/reclamation remain explicitly outside guest work.
 
 Private-family work/memory-limit failure cancels its pending birth-family tasks
 and permits loaded-world reuse. Registered names, cross-family sends/monitors and
@@ -79,7 +82,7 @@ world's finite work limit to UINT64_MAX: optimized Release can exhaust the defau
 while its peer initializes a large binary. This does not change the application,
 stateful acceptance source or quota-test limits, nor interpret zero as unlimited.
 
-## Wiring invariants and remaining audit
+## Wiring invariants and scope exclusions
 
 1. Root admission allocates a record before process/task publication, alongside
    reserved completion capacity. Failed preparation releases its exact prefix.
@@ -128,12 +131,44 @@ stateful acceptance source or quota-test limits, nor interpret zero as unlimited
 
 ## Integrated checkpoint evidence
 
-Fresh `/tmp/libbeam-causal-work-integrated-fourth/summary.json` passes **207 commands**.
+Fresh `/tmp/libbeam-work-native-boundary-integrated-twentyfourth/summary.json` passes **207 commands**.
 The new actual-worker C and public C++ work suites pass Debug, Release and available
 UBSan. Unchanged lifecycle/two-Isolate acceptance is green. Observed pure-call cost
-is 95 units for this exact fixture/build profile; it is not a policy constant or
+is 141 units for this exact fixture/build profile (per-instruction native target
+validation and callsite metadata scans are charged); it is not a policy constant or
 performance claim. Root admission now faults all seven measured allocation prefixes;
 existing child/monitor/message/reclamation failure gates remain green.
+
+The subsequent native-loop review hardened first-failure preservation (the first
+work, memory-quota or allocator-OOM cause cannot be overwritten by a later failure),
+made registry unlink constant-time, charged fixed-eight receive-marker scans and
+message unlinks before mutation, accounted native trace-catalog scans, binary vheap
+rounding and per-dispatch code-pointer scans, and bounded bignum-to-float and
+small-decimal charges. PID free-ring
+removal, receive/monitor drain and allocator-node release loops remain cleanup/bookkeeping:
+they must run to preserve ownership after cancellation and are not a hard CPU bound.
+Work units estimate admitted guest work; they do not count every host/control or
+mandatory-reclamation instruction.
+
+Actual-worker evidence now also checks charge thresholds around native algorithms.
+A non-tail BEAM BIF call prevents constant folding: the unchanged decimal BIF
+formats the real 8192-bit integer at 12,954 units and its 2467 result bytes match a
+separately computed exact decimal MD5. The small-integer formatter costs 355 units;
+a real bignum-to-float binary segment produces independently verified bytes
+`58f0000000000000` at 287 units. A BEAM-built 256-element nested list compares
+deeply under real term equality at 85,315 units. Eight real spawn_opt/monitor/DOWN
+cycles cost 20,177 units across child execution, monitor publication and received
+messages. For all five, exact measured credit succeeds and one unit less fails; the
+141-unit pure path and native thresholds are identical in Debug, Release and UBSan.
+A selective-receive fixture builds and collects its heap before waiting; the worker
+reports three real collections, its credit remains stable while idle, and cancellation
+drains it. The native collector component measures its bound after prepaying the full-width
+binary-vheap threshold-rounding allowance; exact succeeds and one below denies
+before forwarding, preserving roots/peer collection and releasing all backing.
+The allowance is a conservative 2048 work units for bounded uint64 growth and
+wide-rounding loops, not an elapsed-time estimate. Exact thresholds are evidence for
+the named fixtures; the source-level inventory covers the current admitted profile,
+not capabilities that have not yet been implemented for Midgard.
 
 A further actual-worker test makes a registered receiving root return the sender's
 real 32-KiB binary after the sender already returned `delivered`. Copying the
@@ -146,24 +181,46 @@ Native dynamic tuple construction, frame initialization, closure-environment
 construction and linear selection now precharge/checkpoint in the complete
 projected cases. PID insertion prepays its worst-case ring search before any
 identity counter mutation; logical removal/cleanup remains unmetered release work.
-These are additional audited paths, not a claim that the entire coverage/failure
-inventory has been completed.
+Together with instruction dispatch and native helper review, these complete the
+source-level coverage inventory for the current admitted profile. Future runtime
+capabilities require new charges and boundary evidence.
 
 Retained internal failures include the standalone UBSan missing-source link, the
 callback-OOM monitor-wake regression, missing generated receive-consumption ownership
 hook, a mutable assertion predicate, and the Release stop-versus-default-work-limit
 race. Each was corrected rather than reclassifying failed tests as acceptance.
-The independent sender-failure lease and complete native charging audit still need
-more threshold/fault coverage; no resource-task completion is claimed.
+The standalone work-ledger test now forces an exhausted sender failure while a
+separate receiver budget is borrowed, proves the first causal owner remains leased,
+and verifies that later memory denial cannot overwrite the first work failure; the
+inverse memory-first/work-later case preserves memory as the operation result too.
+An injected allocator callback OOM followed by work denial keeps `NO_MEMORY` as the
+first cause and never fabricates a quota-owner lease.
+When completion copying exhausts a borrowed sender budget after the worker has
+changed owners, the executor reselects the retained first-failure owner before
+family cancellation. The shared-worker test asserts the sender is exhausted while
+the receiver's root budget is not.
+The public work API test also reads both default policy values and runs a real
+zero-override default-credit call before testing lower Engine defaults and per-world
+overrides, and rejects zero-valued Engine/Isolate work limits. A one-unit-below
+monitored-spawn run reports a distinct work-limit outcome,
+reuses the contained Isolate for a pure call, and leaves the independent peer live.
+The inventory in this checkpoint covers every currently admitted interpreter and
+native runtime path; cleanup, allocator-node lookup and worker scheduling are listed
+as explicit exclusions, not silently charged work. The Midgard-required modules and
+operations are not yet admitted, so this is not an application-wide coverage claim;
+every capability added for that profile must extend this inventory and its boundary
+tests. Root admission faults all seven measured allocation prefixes, and existing
+child/monitor/message/reclamation rollback gates remain green. No hard CPU-time or
+security guarantee follows from this work ledger.
 
-## Required evidence before claiming complete enforcement
+## Requirements for extending the admitted profile
 
-Threshold/default/override tests must exercise actual shared-worker loops, native
-copy/traversal/decimal/GC work, child inheritance, receive scan/skip/consume owner
-transfer, background work after response, repeated waits without reset, simultaneous
-calls, private family reuse and escaped actor retirement. Fault all newly introduced
-metadata prefixes. Preserve peers, closed controls, ready/detached replies and exact
-resource balance. Fresh Debug/Release/UBSan integration and unchanged stateful
-acceptance remain required. The default 10 million units is not milliseconds or a
-security/performance guarantee, and an unfinished native charging audit cannot be
-called full enforcement.
+Every new opcode, BIF, helper or representation needed by Midgard must enter the
+native charging inventory with actual-worker threshold/failure tests. Such tests
+must preserve causal ownership, dispatch status distinctions, moving-GC commit
+boundaries, private reuse or escaped-world retirement, peers, ready/detached replies
+and exact resource balance. Repeat fresh Debug/Release/UBSan integration and the
+unchanged lifecycle/two-Isolate acceptance at each integrated boundary. This
+checkpoint covers only the profile that currently loads; it does not claim
+whole-application resource enforcement. The 10 million work-unit default is not
+milliseconds, a security boundary or a hard CPU-time guarantee.
