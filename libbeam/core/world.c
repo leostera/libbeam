@@ -31,31 +31,60 @@ static void world_unref(LbWorld *world)
        world->outstanding || world->queued_bytes) abort();
     for(link=&engine->worlds;*link && *link!=world;link=&(*link)->next) {}
     if(!*link) abort();
-    *link=world->next; lb_release(engine->domain,world);
+    *link=world->next;
+    if(lb_alloc_domain_destroy(&world->domain)!=LB_ALLOC_OK) abort();
+    lb_release(engine->domain,world);
     /* Host callers still hold the Engine control borrow. Worker completion
      * cannot remove the final world reference: its host owner remains live. */
 }
-LbWorldStatus lb_world_create(LbEngine *engine,LbWorld **out)
+static LbWorldStatus memory_status(LbWorld *world,LbWorldStatus status)
+{
+    return status==LB_WORLD_NO_MEMORY && lb_alloc_domain_failure(&world->domain)==LB_ALLOC_LIMIT?
+        LB_WORLD_MEMORY_LIMIT:status;
+}
+LbWorldStatus lb_world_create_with_overrides(LbEngine *engine,const LbResourceOverrides *overrides,LbWorld **out)
 {
     LbWorld *world; void *memory; LbCodeStatus status;
     if(!out) return LB_WORLD_INVALID;
     *out=NULL; if(!engine) return LB_WORLD_INVALID;
     if(!lb_engine_is_open(engine)) return LB_WORLD_CLOSED;
+    LbResourceLimits limits=engine->limits;
+    if(overrides) {
+        if((overrides->has_memory!=0 && overrides->has_memory!=1) ||
+           (overrides->has_work!=0 && overrides->has_work!=1)) return LB_WORLD_INVALID;
+        if(overrides->has_memory) limits.memory_bytes=overrides->memory_bytes;
+        if(overrides->has_work) limits.invocation_work=overrides->invocation_work;
+    }
+    if(!lb_resource_limits_valid(limits)) return LB_WORLD_INVALID;
     lb_engine_enter(engine);
     if(lb_alloc_domain_allocate(engine->domain,sizeof(*world),&memory)!=LB_ALLOC_OK) {
         lb_engine_leave(engine); return LB_WORLD_NO_MEMORY;
     }
-    world=memory; memset(world,0,sizeof(*world)); world->engine=engine;
-    status=lb_code_space_create(engine,&world->space);
-    if(status!=LB_CODE_OK) { lb_release(engine->domain,world); lb_engine_leave(engine); return code_status(status); }
-    status=lb_code_preload(world->space);
+    world=memory; memset(world,0,sizeof(*world)); world->engine=engine; world->limits=limits;
+    if(lb_alloc_scope_init(engine->domain,&world->domain,limits.memory_bytes)!=LB_ALLOC_OK) {
+        lb_release(engine->domain,world); lb_engine_leave(engine); return LB_WORLD_RESOURCE_LIMIT;
+    }
+    status=lb_code_space_create_in_domain(engine,&world->domain,&world->space);
+    if(status==LB_CODE_OK) status=lb_code_preload(world->space);
     if(status!=LB_CODE_OK) {
-        if(lb_code_space_destroy(world->space)!=LB_CODE_OK) abort();
-        lb_release(engine->domain,world); lb_engine_leave(engine); return code_status(status);
+        LbWorldStatus result=memory_status(world,code_status(status));
+        if(world->space && lb_code_space_destroy(world->space)!=LB_CODE_OK) abort();
+        if(lb_alloc_domain_destroy(&world->domain)!=LB_ALLOC_OK) abort();
+        lb_release(engine->domain,world); lb_engine_leave(engine); return result;
     }
     world->references=1; world->owner_live=1; world->phase=LB_WORLD_LOADING;
     world->next=engine->worlds; engine->worlds=world; *out=world;
     lb_engine_leave(engine); return LB_WORLD_OK;
+}
+LbWorldStatus lb_world_create(LbEngine *engine,LbWorld **out)
+{ return lb_world_create_with_overrides(engine,NULL,out); }
+LbWorldStatus lb_world_resource_usage(LbWorld *world,LbWorldResourceUsage *out)
+{
+    if(!out || !world) return LB_WORLD_INVALID;
+    lb_engine_enter(world->engine);
+    LbAllocUsage usage=lb_alloc_domain_usage(&world->domain);
+    *out=(LbWorldResourceUsage){world->limits,usage.current,usage.peak,closed(world)};
+    lb_engine_leave(world->engine); return LB_WORLD_OK;
 }
 LbWorldStatus lb_world_load_report(LbWorld *world,LbBytesView bytes,LbWorldLoadReport *report)
 {
@@ -67,7 +96,8 @@ LbWorldStatus lb_world_load_report(LbWorld *world,LbBytesView bytes,LbWorldLoadR
     else if(bytes.size && !bytes.data) status=LB_WORLD_INVALID;
     else if(world->phase!=LB_WORLD_LOADING) status=LB_WORLD_INVALID_STATE;
     else {
-        status=code_status(lb_code_load_report(world->space,bytes.data,bytes.size,&module,&error,report));
+        lb_alloc_domain_begin_operation(&world->domain);
+        status=memory_status(world,code_status(lb_code_load_report(world->space,bytes.data,bytes.size,&module,&error,report)));
     }
     lb_engine_leave(world->engine); return status;
 }
@@ -104,6 +134,7 @@ static LbWorldStatus admit(LbWorld *world,LbBytesView module,LbBytesView functio
     if(world->outstanding==LB_CALL_COUNT_LIMIT || charge>LB_CALL_QUEUE_LIMIT-world->queued_bytes) {
         status=LB_WORLD_FULL; goto unlock;
     }
+    lb_alloc_domain_begin_operation(&world->domain);
     status=resolve(world,module,function,&entry); if(status!=LB_WORLD_OK) goto unlock;
     if(lb_alloc_domain_allocate(world->engine->domain,sizeof(*call),&memory)!=LB_ALLOC_OK) {
         status=LB_WORLD_NO_MEMORY; goto release_entry;
@@ -113,7 +144,7 @@ static LbWorldStatus admit(LbWorld *world,LbBytesView module,LbBytesView functio
     task_status=lb_task_create_call_locked(world->engine,entry,input,call,&call->task);
     if(task_status!=LB_ENGINE_OK) {
         lb_release(world->engine->domain,call);
-        status=task_status==LB_ENGINE_NO_MEMORY?LB_WORLD_NO_MEMORY:LB_WORLD_INVALID; goto release_entry;
+        status=memory_status(world,task_status==LB_ENGINE_NO_MEMORY?LB_WORLD_NO_MEMORY:LB_WORLD_INVALID); goto release_entry;
     }
     /* Worker publication is protected by the same mutex. No fallible work
      * follows; failed start never leaves a half-started world or lost status. */
@@ -137,7 +168,8 @@ static LbWorldStatus copy_result(LbCall *call,LbProcess *process)
     if(!lb_bitstring_view(lb_process_result(process),&view) || view.bit_size%8) return LB_WORLD_BAD_RESULT;
     size=view.bit_size/8; if(size>LB_CALL_BYTES_LIMIT) return LB_WORLD_LIMIT;
     if(!size) return LB_WORLD_OK;
-    if(lb_alloc_domain_allocate(call->world->engine->domain,size,&memory)!=LB_ALLOC_OK) return LB_WORLD_NO_MEMORY;
+    if(lb_alloc_domain_allocate(&call->world->domain,size,&memory)!=LB_ALLOC_OK)
+        return memory_status(call->world,LB_WORLD_NO_MEMORY);
     call->bytes=memory; call->size=size;
     /* Valid owned views fit their backing binary. Treat broken internal
      * metadata as an invariant violation, not a successful truncated reply. */
@@ -155,6 +187,7 @@ void lb_call_complete(LbCall *call,LbProcess *process,LbTaskStatus status)
     case LB_TASK_DONE: call->status=call->owner_live?copy_result(call,process):LB_WORLD_OK; break;
     case LB_TASK_EXCEPTION: call->status=LB_WORLD_EXCEPTION; break;
     case LB_TASK_NO_MEMORY: call->status=LB_WORLD_NO_MEMORY; break;
+    case LB_TASK_MEMORY_LIMIT: call->status=LB_WORLD_MEMORY_LIMIT; break;
     case LB_TASK_LIMIT: call->status=LB_WORLD_RESOURCE_LIMIT; break;
     case LB_TASK_REFUSED: call->status=LB_WORLD_EXECUTION_REFUSED; break;
     case LB_TASK_ENVIRONMENT: call->status=LB_WORLD_ENVIRONMENT; break;
@@ -168,7 +201,7 @@ void lb_call_complete(LbCall *call,LbProcess *process,LbTaskStatus status)
 static void release_payload(LbCall *call)
 {
     LbWorld *world=call->world;
-    lb_release(world->engine->domain,call->bytes); call->bytes=NULL; call->size=0;
+    lb_release(&world->domain,call->bytes); call->bytes=NULL; call->size=0;
     if(call->charge>world->queued_bytes) abort();
     world->queued_bytes-=call->charge; call->charge=0;
     if(call->slot_held) {
@@ -249,6 +282,8 @@ static void close_admission(LbWorld *world)
         while(world->phase!=LB_WORLD_RECLAIMED) retire_one(world);
     else if(pthread_cond_signal(&world->engine->wake)) abort();
 }
+void lb_world_close_for_limit_locked(LbWorld *world)
+{ if(!closed(world)) close_admission(world); }
 LbWorldStatus lb_world_stop(LbWorld *world,LbReclamation **out)
 {
     LbReclamation *reclamation; void *memory; LbWorldStatus status;

@@ -4,6 +4,7 @@
 #ifndef LIBBEAM_CORE_ENGINE_H
 #define LIBBEAM_CORE_ENGINE_H
 #include "alloc.h"
+#include "resource_policy.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,6 +20,7 @@ typedef enum {
  * Allocator callbacks/context outlive all retained children and this handle.
  * Internal allocator hooks may run on the worker under Engine serialization;
  * they must not reenter the Engine/domain. Public C++ uses the default allocator. */
+LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *,const LbResourceLimits *,LbEngine **);
 LbEngineStatus lb_engine_create(const LbSystemAllocator *,LbEngine **);
 /* Busy refusal is nonmutating. Success releases execution resources; a finite
  * closed control handle remains until release. Any lazily admitted executor

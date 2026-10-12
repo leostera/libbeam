@@ -8,8 +8,8 @@
 extern "C" {
 #endif
 
-/* Internal, serialized bootstrap ownership primitive; not a guest allocator,
- * Engine, GC, or concurrent API. Callback/context lifetime includes domain
+/* Internal, serialized owned backing/accounting primitive; not a guest term
+ * format, Engine, GC, or concurrent API. Callback/context lifetime includes domain
  * destruction. Allocations must have malloc-equivalent alignment; callbacks
  * must not reenter the domain. A NULL allocator selects malloc/free.
  */
@@ -23,8 +23,15 @@ typedef enum {
     LB_ALLOC_OK,
     LB_ALLOC_INVALID,
     LB_ALLOC_NO_MEMORY,
-    LB_ALLOC_BUSY
+    LB_ALLOC_BUSY,
+    LB_ALLOC_LIMIT
 } LbAllocStatus;
+typedef struct { size_t current,peak,limit; } LbAllocUsage;
+/* Serialized allocation-operation diagnostics. Callers clear the causal result
+ * before an outer operation; quota denial and callback OOM remain distinct. */
+LbAllocUsage lb_alloc_domain_usage(const LbAllocDomain *);
+void lb_alloc_domain_begin_operation(LbAllocDomain *);
+LbAllocStatus lb_alloc_domain_failure(const LbAllocDomain *);
 
 /* Valid output pointers are set to NULL on failure. Zero-size allocation is
  * invalid. Allocation results are max_align_t-aligned, not initialized.

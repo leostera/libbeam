@@ -25,18 +25,16 @@ Export *lb_export_find(LbCodeSpace *space,Eterm module,Eterm function,unsigned a
         if(e->info.mfa.module==module && e->info.mfa.function==function && e->info.mfa.arity==arity) return e;
     return NULL;
 }
-LbCodeStatus lb_code_space_create(LbEngine *engine,LbCodeSpace **out)
+LbCodeStatus lb_code_space_create_in_domain(LbEngine *engine,LbAllocDomain *domain,LbCodeSpace **out)
 {
     LbCodeSpace *space;
-    LbAllocDomain *domain;
     void *memory;
     size_t i;
     LbAtomStatus status;
     if(!out) return LB_CODE_INVALID;
-    *out=NULL; if(!engine) return LB_CODE_INVALID;
+    *out=NULL; if(!engine || !domain) return LB_CODE_INVALID;
     if(!lb_engine_is_open(engine)) return LB_CODE_CLOSED;
     if(engine->spaces==SIZE_MAX) return LB_CODE_LIMIT;
-    domain=engine->domain;
     if(lb_alloc_domain_allocate(domain,sizeof(*space),&memory)!=LB_ALLOC_OK) return LB_CODE_NO_MEMORY;
     space=memory; memset(space,0,sizeof(*space)); space->engine=engine; space->domain=domain;
     status=lb_atoms_create(domain,1048576,&space->atoms);
@@ -57,6 +55,8 @@ LbCodeStatus lb_code_space_create(LbEngine *engine,LbCodeSpace **out)
     }
     lb_engine_space_published(engine); *out=space; return LB_CODE_OK;
 }
+LbCodeStatus lb_code_space_create(LbEngine *engine,LbCodeSpace **out)
+{ return lb_code_space_create_in_domain(engine,engine?engine->domain:NULL,out); }
 LbCodeStatus lb_code_space_destroy(LbCodeSpace *space)
 {
     LbAllocDomain *domain;

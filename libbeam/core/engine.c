@@ -22,7 +22,7 @@ static void release_control(LbEngine *engine)
     lb_release(domain,engine);
     if(lb_alloc_domain_destroy(domain)!=LB_ALLOC_OK) abort();
 }
-LbEngineStatus lb_engine_create(const LbSystemAllocator *allocator,LbEngine **out)
+LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,const LbResourceLimits *limits,LbEngine **out)
 {
     LbAllocDomain *domain=NULL;
     LbEngine *engine;
@@ -51,13 +51,15 @@ LbEngineStatus lb_engine_create(const LbSystemAllocator *allocator,LbEngine **ou
     _Static_assert(BIF_get_module_info_1<BIF_SIZE && BIF_get_module_info_2<BIF_SIZE && BIF_splus_2<BIF_SIZE && BIF_integer_to_binary_1<BIF_SIZE,"native identities");
     if(!out) return LB_ENGINE_INVALID;
     *out=NULL;
+    LbResourceLimits selected=limits?*limits:lb_resource_defaults();
+    if(!lb_resource_limits_valid(selected)) return LB_ENGINE_INVALID;
     status=lb_alloc_domain_create(allocator,&domain);
     if(status!=LB_ALLOC_OK) return status==LB_ALLOC_INVALID?LB_ENGINE_INVALID:LB_ENGINE_NO_MEMORY;
     if(lb_alloc_domain_allocate(domain,sizeof(*engine),&memory)!=LB_ALLOC_OK) {
         if(lb_alloc_domain_destroy(domain)!=LB_ALLOC_OK) abort();
         return LB_ENGINE_NO_MEMORY;
     }
-    engine=memory; memset(engine,0,sizeof(*engine)); engine->domain=domain;
+    engine=memory; memset(engine,0,sizeof(*engine)); engine->domain=domain; engine->limits=selected;
     if(lb_alloc_domain_allocate(domain,BIF_SIZE*sizeof(BifEntry),&memory)!=LB_ALLOC_OK) {
         release_control(engine); return LB_ENGINE_NO_MEMORY;
     }
@@ -77,6 +79,8 @@ int lb_engine_is_open(const LbEngine *engine)
 {
     return engine && engine->owner_live && !engine->closed;
 }
+LbEngineStatus lb_engine_create(const LbSystemAllocator *allocator,LbEngine **out)
+{ return lb_engine_create_with_limits(allocator,NULL,out); }
 LbEngineStatus lb_engine_shutdown(LbEngine *engine)
 {
     if(!engine) return LB_ENGINE_INVALID;

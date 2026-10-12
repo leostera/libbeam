@@ -86,9 +86,12 @@ conditionally supported operations, explicitly report a profile revision and kee
 
 Selected current limits: copied input/result ≤64 KiB, 64 outstanding calls/world,
 1 MiB reserved queued transport. **These are not heap/CPU quotas.** The
-[resource policy](../../docs/rfds/0004-isolate-resource-policy.md) selects future
-256 MiB accounted world memory and per-invocation work enforcement; those settings
-are not yet exposed/enforced by this checkpoint. Whole Midgard remains an
+[resource policy](../../docs/rfds/0004-isolate-resource-policy.md) selects
+256 MiB accounted world memory and per-invocation work enforcement. Memory defaults
+and overrides are now exposed/enforced through the public API; invocation work
+settings remain metadata pending charging and causal-family cancellation. See the
+[memory checkpoint](../../docs/rfds/0004-accounted-memory.md) for exclusions and
+its narrower current reuse guarantee. Whole Midgard remains an
 [honestly refused application attempt](../../docs/rfds/0003-midgard-application-attempt.md),
 not a runnable Elixir compatibility example yet. No security, RSS, latency,
 throughput, density, Linux or multicore claim is made.

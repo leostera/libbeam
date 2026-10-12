@@ -16,7 +16,8 @@ typedef enum {
     LB_WORLD_CLOSED, LB_WORLD_FULL, LB_WORLD_LIMIT, LB_WORLD_NO_MEMORY,
     LB_WORLD_BAD_BEAM, LB_WORLD_UNSUPPORTED, LB_WORLD_NOT_FOUND,
     LB_WORLD_EXCEPTION, LB_WORLD_CANCELLED, LB_WORLD_BAD_RESULT,
-    LB_WORLD_RESOURCE_LIMIT, LB_WORLD_EXECUTION_REFUSED, LB_WORLD_ENVIRONMENT
+    LB_WORLD_RESOURCE_LIMIT, LB_WORLD_EXECUTION_REFUSED, LB_WORLD_ENVIRONMENT,
+    LB_WORLD_MEMORY_LIMIT
 } LbWorldStatus;
 typedef struct { const unsigned char *data; size_t size; } LbBytesView;
 #define LB_CALL_BYTES_LIMIT (64u * 1024u)
@@ -25,7 +26,11 @@ typedef struct { const unsigned char *data; size_t size; } LbBytesView;
 
 /* Serialized host control. Actual guest execution occurs only on the Engine
  * worker. Opaque handles retain finite control state, not reclaimed VM storage. */
+typedef struct { LbResourceLimits limits; size_t current,peak; int closed; } LbWorldResourceUsage;
+LbWorldStatus lb_world_create_with_overrides(LbEngine *,const LbResourceOverrides *,LbWorld **);
 LbWorldStatus lb_world_create(LbEngine *,LbWorld **);
+/* Read-only accounting also works on a retained closed control. */
+LbWorldStatus lb_world_resource_usage(LbWorld *,LbWorldResourceUsage *);
 /* Diagnostic stage points only to static runtime metadata, never guest/arena
  * storage. Offset is an import-table index for "unresolved import", otherwise
  * the loader's byte/instruction location. It remains valid after rollback. */

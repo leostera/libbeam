@@ -23,7 +23,9 @@ lifecycle and unchanged stateful two-Isolate examples pass in Debug, Release and
 available UBSan. Whole Midgard/Elixir application compatibility is still being
 constructed; [the earlier application attempt](../../docs/rfds/0003-midgard-application-attempt.md)
 records a real refusal, not execution. [RFD 0004](../../docs/rfds/0004-isolate-resource-policy.md)
-selects memory/invocation policy; enforcement is not yet implemented.
+selects memory/invocation policy. [World memory accounting/enforcement](../../docs/rfds/0004-accounted-memory.md)
+is implemented; invocation work charging and full causal-family cancellation are
+still under construction.
 
 ## Boundaries
 

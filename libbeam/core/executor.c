@@ -16,6 +16,7 @@
 
 struct LbTask {
     LbEngine *engine;
+    LbAllocDomain *domain;
     LbTask *next;
     LbProcess *process;
     LbCall *completion;
@@ -72,16 +73,23 @@ static LbTask *runnable(LbEngine *engine)
     } while(task!=first);
     return NULL;
 }
-static void finish_task(LbTask *task,LbTaskStatus status)
+static int finish_task(LbTask *task,LbTaskStatus status)
 {
     LbCall *call=task->completion;
+    int memory_limited=status==LB_TASK_MEMORY_LIMIT;
     /* Timer/infrastructure failure can bypass the interpreter stop label.
      * Propagate that failure through owned monitor halves too; private world
      * cancellation instead detaches them during destruction without DOWN. */
-    if(status!=LB_TASK_CANCELLED) lb_monitor_exit(task->process,1);
+    if(status!=LB_TASK_CANCELLED) {
+        lb_monitor_exit(task->process,1);
+        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_LIMIT) {
+            status=LB_TASK_MEMORY_LIMIT; memory_limited=1;
+        }
+    }
     task->status=status;
     if(call) {
         lb_call_complete(call,task->process,status);
+        if(call->status==LB_WORLD_MEMORY_LIMIT) { task->status=LB_TASK_MEMORY_LIMIT; memory_limited=1; }
         lb_process_destroy(task->process); task->process=NULL;
         if(!call->owner_live) {
             lb_task_release_locked(task); call->task=NULL; lb_call_discard_completed(call);
@@ -93,21 +101,41 @@ static void finish_task(LbTask *task,LbTaskStatus status)
     } else if(status==LB_TASK_CANCELLED) {
         lb_process_destroy(task->process); task->process=NULL;
     }
+    return memory_limited;
+}
+static int solitary_invocation(const LbTask *task)
+{
+    if(!task->completion) return 0;
+    for(LbTask *other=task->engine->tasks;other;other=other->next)
+        if(other!=task && other->world==task->world && other->status==LB_TASK_PENDING) return 0;
+    return 1;
 }
 static void step(LbTask *task)
 {
     /* Both bounds are real interpreter safepoints, not a replacement evaluator.
      * The Engine lock serializes the existing allocation/loader/GC domains. */
-    switch(lb_process_run(task->process,1024,128)) {
+    LbWorld *world=task->world;
+    int contained=solitary_invocation(task),memory_limited=0;
+    lb_alloc_domain_begin_operation(task->domain);
+    LbProcessStatus result=lb_process_run(task->process,1024,128);
+    if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_LIMIT) {
+        task->process->status=LB_PROCESS_NO_MEMORY; result=LB_PROCESS_NO_MEMORY;
+    }
+    switch(result) {
     case LB_PROCESS_YIELDED: break;
-    case LB_PROCESS_DONE: finish_task(task,LB_TASK_DONE); break;
-    case LB_PROCESS_EXCEPTION: finish_task(task,LB_TASK_EXCEPTION); break;
-    case LB_PROCESS_NO_MEMORY: finish_task(task,LB_TASK_NO_MEMORY); break;
-    case LB_PROCESS_LIMIT: finish_task(task,LB_TASK_LIMIT); break;
-    case LB_PROCESS_REFUSED: finish_task(task,LB_TASK_REFUSED); break;
-    case LB_PROCESS_ENVIRONMENT: finish_task(task,LB_TASK_ENVIRONMENT); break;
+    case LB_PROCESS_DONE: memory_limited=finish_task(task,LB_TASK_DONE); break;
+    case LB_PROCESS_EXCEPTION: memory_limited=finish_task(task,LB_TASK_EXCEPTION); break;
+    case LB_PROCESS_NO_MEMORY: {
+        int limited=lb_alloc_domain_failure(task->domain)==LB_ALLOC_LIMIT;
+        memory_limited=finish_task(task,limited?LB_TASK_MEMORY_LIMIT:LB_TASK_NO_MEMORY);
+        break;
+    }
+    case LB_PROCESS_LIMIT: memory_limited=finish_task(task,LB_TASK_LIMIT); break;
+    case LB_PROCESS_REFUSED: memory_limited=finish_task(task,LB_TASK_REFUSED); break;
+    case LB_PROCESS_ENVIRONMENT: memory_limited=finish_task(task,LB_TASK_ENVIRONMENT); break;
     default: abort(); /* published tasks contain runnable, verified processes */
     }
+    if(memory_limited && world && !contained) lb_world_close_for_limit_locked(world);
 }
 static void *worker_main(void *context)
 {
@@ -159,17 +187,18 @@ static LbEngineStatus create_locked(LbEngine *engine,const LbCodeEntry *entry,
     *out=NULL;
     if(!engine || !entry || entry->module->space->engine!=engine ||
        entry->entry->info.mfa.arity!=1 || size>LB_MAX_BINARY_BYTES || (size && !bytes)) return LB_ENGINE_INVALID;
-    if(lb_alloc_domain_allocate(engine->domain,sizeof(*task),&memory)!=LB_ALLOC_OK) return LB_ENGINE_NO_MEMORY;
-    task=memory; memset(task,0,sizeof(*task)); task->engine=engine; task->status=LB_TASK_PENDING;
+    LbAllocDomain *domain=entry->module->space->domain;
+    if(lb_alloc_domain_allocate(domain,sizeof(*task),&memory)!=LB_ALLOC_OK) return LB_ENGINE_NO_MEMORY;
+    task=memory; memset(task,0,sizeof(*task)); task->engine=engine; task->domain=domain; task->status=LB_TASK_PENDING;
     task->completion=completion; task->world=completion?completion->world:NULL;
     process_status=lb_process_create_binary(entry,bytes,size,64,&task->process);
     if(process_status!=LB_PROCESS_READY) {
         status=process_status==LB_PROCESS_NO_MEMORY?LB_ENGINE_NO_MEMORY:LB_ENGINE_INVALID;
-        lb_release(engine->domain,task); return status;
+        lb_release(domain,task); return status;
     }
     if(!engine->worker_started) {
         if(pthread_create(&engine->worker,NULL,worker_main,engine)) {
-            lb_process_destroy(task->process); lb_release(engine->domain,task); return LB_ENGINE_NO_MEMORY;
+            lb_process_destroy(task->process); lb_release(domain,task); return LB_ENGINE_NO_MEMORY;
         }
         engine->worker_started=1;
     }
@@ -203,11 +232,11 @@ LbProcessStatus lb_task_spawn_fun_monitored_locked(LbWorld *world,LbProcess *par
     if(!world || !parent || world->phase!=LB_WORLD_RUNNING ||
        parent->entry_module->space!=world->space || !world->engine->worker_started) return LB_PROCESS_REFUSED;
     LbEngine *engine=world->engine; void *memory;
-    if(lb_alloc_domain_allocate(engine->domain,sizeof(LbTask),&memory)!=LB_ALLOC_OK) return LB_PROCESS_NO_MEMORY;
+    if(lb_alloc_domain_allocate(&world->domain,sizeof(LbTask),&memory)!=LB_ALLOC_OK) return LB_PROCESS_NO_MEMORY;
     LbTask *task=memory; memset(task,0,sizeof(*task));
-    task->engine=engine; task->world=world; task->background=1; task->status=LB_TASK_PENDING;
+    task->engine=engine; task->domain=&world->domain; task->world=world; task->background=1; task->status=LB_TASK_PENDING;
     LbProcessStatus status=lb_process_create_fun(parent,fun,64,&task->process);
-    if(status!=LB_PROCESS_READY) { lb_release(engine->domain,task); return status; }
+    if(status!=LB_PROCESS_READY) { lb_release(task->domain,task); return status; }
     *out=task->process->identity.id;
     task->process->world=world;
     if(monitor) lb_monitor_publish(monitor,task->process);
@@ -272,7 +301,7 @@ void lb_task_release_locked(LbTask *task)
     *link=task->next;
     if(engine->cursor==task) engine->cursor=task->next?task->next:engine->tasks;
     if(task->process) lb_process_destroy(task->process);
-    lb_release(engine->domain,task);
+    lb_release(task->domain,task);
 }
 void lb_task_release(LbTask *task)
 {

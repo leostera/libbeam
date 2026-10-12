@@ -29,7 +29,7 @@ struct ByteView {
 
 enum class ErrorCode {
     not_implemented, invalid_argument, invalid_beam, unsupported, invalid_state, full, limit,
-    closed, cancelled, exception, timeout, busy, internal_error
+    closed, cancelled, exception, timeout, busy, internal_error, memory_limit
 };
 struct Error {
     ErrorCode code;
@@ -37,6 +37,22 @@ struct Error {
 };
 template<class T> using Result = std::variant<T, Error>;
 using Status = std::optional<Error>; // No error means success.
+
+struct ResourceLimits {
+    std::size_t memory_limit_bytes = 256u * 1024u * 1024u;
+    std::uint64_t invocation_work_limit = 10'000'000;
+};
+struct ResourceOverrides {
+    std::optional<std::size_t> memory_limit_bytes;
+    std::optional<std::uint64_t> invocation_work_limit;
+};
+struct ResourceUsage {
+    ResourceLimits limits;
+    std::size_t memory_current, memory_peak;
+    bool closed;
+};
+// Finite positive policy resolved at creation. Accounted backing is not RSS.
+// Memory enforcement is implemented; invocation charging is under construction.
 
 class Call {
 public:
@@ -84,6 +100,7 @@ public:
     // and publishes only in this isolate. No filesystem paths or module aliases.
     // Load failure rolls back unpublished state. Loading after start is rejected.
     Status load_module(ByteView);
+    Result<ResourceUsage> resource_usage(); // Read-only; retained closed controls are observable.
 
     // Atomically enters running state and admits the initial binary arity-one
     // invocation. A failed admission leaves the isolate loaded, not half-started.
@@ -109,8 +126,8 @@ public:
     Engine& operator=(const Engine&) = delete;
     ~Engine();
 
-    static Result<Engine> create();
-    Result<Isolate> create_isolate(); // Fresh world, not a pooled tenant context.
+    static Result<Engine> create(ResourceLimits = {});
+    Result<Isolate> create_isolate(ResourceOverrides = {}); // Fresh world, not a pooled tenant context.
     // Requires reclaimed isolates and released handles; otherwise returns busy.
     // Success includes thread joins and engine resource release, without exit().
     Status shutdown(Deadline);

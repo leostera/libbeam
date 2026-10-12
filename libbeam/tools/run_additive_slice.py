@@ -49,6 +49,8 @@ def main():
                            {p for p in (root / 'libbeam/tests/fixtures/two_isolates').rglob('*') if p.is_file()} |
                            {root / 'libbeam/CMakeLists.txt', root / 'libbeam/src/engine.cpp',
                             root / 'libbeam/examples/run_beam.cpp', root / 'libbeam/include/libbeam/engine.hpp',
+                            root / 'libbeam/tests/api_memory_test.cpp', root / 'libbeam/tests/core_memory_test.c',
+                            root / 'libbeam/tests/fixtures/memory_slice.erl',
                             root / 'libbeam/tests/fixtures/refused_map.erl',
                             root / 'libbeam/tests/core_beam_image_test.c', root / 'libbeam/tests/core_alloc_test.c',
                             root / 'libbeam/tests/core_terms_atoms_test.c', root / 'libbeam/tools/generate_atoms.py',
@@ -247,6 +249,10 @@ def main():
             summary['bit_writer_reference_sha256'] = hashlib.sha256((fixture_dir / 'bit_writer_reference.beam').read_bytes()).hexdigest()
             run('async-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/async_slice.erl'])
             async_fixture = fixture_dir / 'async_slice.beam'
+            run('memory-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/memory_slice.erl'])
+            memory_fixture = fixture_dir / 'memory_slice.beam'
+            run('api-memory-execution', [out / 'build/api_memory_test', memory_fixture])
+            run('core-memory-gc', [out / 'build/core_memory_test', memory_fixture])
             run('executor-execution', [out / 'build/core_executor_test', async_fixture])
             large_source = fixture_dir / 'code_large.erl'
             large_source.write_text('-module(code_large).\n-export([value/1]).\nvalue(_) -> <<"'+'q'*65537+'">>.\n')
@@ -607,9 +613,9 @@ def main():
                 '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Debug',
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
-                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'engine_lifecycle', 'two_isolates', 'run_beam'])
+                'core_engine_test', 'core_executor_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'api_memory_test', 'core_memory_test', 'core_alloc_test', 'engine_lifecycle', 'two_isolates', 'run_beam'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|engine_lifecycle_acceptance)$'])
+                '-R', '^(core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|api_memory_gate|core_allocation_lifetime|core_memory_scope|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:
                 raise RuntimeError('UBSan float segments differ from stock-OTP vectors')
             run('flatmap-ubsan', [out / 'engine-ubsan/core_flatmap_test', binary_fixture])
@@ -651,11 +657,15 @@ def main():
             run('add-ubsan', [out / 'engine-ubsan/core_add_test', add_fixture])
             run('decimal-ubsan', [out / 'engine-ubsan/core_decimal_test', decimal_fixture])
             run('pid-ubsan', [out / 'engine-ubsan/core_pid_test', pid_fixture, fun_target_fixture, fun_fixture])
+            run('api-memory-ubsan', [out / 'engine-ubsan/api_memory_test', memory_fixture])
+            run('core-memory-gc-ubsan', [out / 'engine-ubsan/core_memory_test', memory_fixture])
             run('api-world-ubsan', [out / 'engine-ubsan/api_world_test', async_fixture, large_fixture, local_fixture, compare_fixture, shape_fixture, add_fixture, decimal_fixture, pid_fixture, fun_fixture])
             run('release-configure', ['cmake', '-S', root / 'libbeam', '-B', out / 'release',
                                      '-DBUILD_TESTING=ON', '-DCMAKE_BUILD_TYPE=Release'])
             run('release-build', ['cmake', '--build', out / 'release'])
             run('release-ctest', ['ctest', '--test-dir', out / 'release', '--output-on-failure'])
+            run('api-memory-release', [out / 'release/api_memory_test', memory_fixture])
+            run('core-memory-gc-release', [out / 'release/core_memory_test', memory_fixture])
             run('runner-release', [out / 'release/run_beam', '--entry', 'probe', 'request',
                  '--boot', 'boot', '', '--expect-boot', 'A:ready', '--call', 'next', '--expect', 'A:1',
                  '--call', 'read', '--expect', 'A:1', '--isolate', probes[0], '--isolate', probes[0]])

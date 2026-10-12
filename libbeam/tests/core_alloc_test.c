@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  */
-#include "alloc.h"
+#include "alloc_internal.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -70,10 +70,55 @@ static void failure_prefixes(void)
     }
 }
 
+static void accounted_scopes(void)
+{
+    Host host={0}; LbSystemAllocator system={&host,allocate,release};
+    LbAllocDomain *root; LbAllocDomain a={0},b={0}; void *p,*q; size_t callbacks;
+    CHECK(lb_alloc_domain_create(&system,&root)==LB_ALLOC_OK);
+    CHECK(lb_alloc_scope_init(root,&a,128)==LB_ALLOC_OK);
+    CHECK(lb_alloc_scope_init(root,&b,256)==LB_ALLOC_OK);
+    CHECK(lb_alloc_domain_destroy(root)==LB_ALLOC_BUSY && host.live==1);
+    CHECK(lb_alloc_domain_allocate(&a,1,&p)==LB_ALLOC_OK);
+    size_t header=lb_alloc_domain_usage(&a).current-1;
+    CHECK(header>=sizeof(void *) && header%_Alignof(max_align_t)==0);
+    CHECK(lb_alloc_domain_usage(root).current==0); // Shared backing is not double-charged.
+    CHECK(lb_alloc_domain_release(&a,p)==LB_ALLOC_OK);
+    CHECK(lb_alloc_domain_allocate(&a,128-header,&p)==LB_ALLOC_OK);
+    callbacks=host.calls;
+    CHECK(lb_alloc_domain_allocate(&a,1,&q)==LB_ALLOC_LIMIT && !q && host.calls==callbacks);
+    CHECK(lb_alloc_domain_failure(&a)==LB_ALLOC_LIMIT && lb_alloc_domain_usage(&a).current==128);
+    CHECK(lb_alloc_domain_allocate(&b,32,&q)==LB_ALLOC_OK); void *peer=q;
+    memset(peer,0x5a,32);
+    CHECK(lb_alloc_domain_release(&a,peer)==LB_ALLOC_INVALID); // Peer ownership is unchanged.
+    CHECK(lb_alloc_domain_release(&a,p)==LB_ALLOC_OK && lb_alloc_domain_usage(&a).current==0);
+    CHECK(lb_alloc_domain_usage(&a).peak==128);
+    lb_alloc_domain_begin_operation(&a); host.fail_at=host.calls+1;
+    CHECK(lb_alloc_domain_allocate(&a,1,&p)==LB_ALLOC_NO_MEMORY && !p);
+    CHECK(lb_alloc_domain_failure(&a)==LB_ALLOC_NO_MEMORY && lb_alloc_domain_usage(&a).current==0);
+    host.fail_at=0; lb_alloc_domain_begin_operation(&a);
+    CHECK(lb_alloc_domain_allocate(&a,16,&p)==LB_ALLOC_OK);
+    callbacks=host.calls;
+    CHECK(lb_alloc_domain_allocate(&a,SIZE_MAX,&q)==LB_ALLOC_LIMIT && !q && host.calls==callbacks);
+    CHECK(lb_alloc_domain_release(&a,p)==LB_ALLOC_OK);
+    CHECK(lb_alloc_domain_allocate(&a,64,&p)==LB_ALLOC_OK);
+    callbacks=host.calls;
+    CHECK(lb_alloc_domain_allocate(&a,64,&q)==LB_ALLOC_LIMIT && !q && callbacks==host.calls);
+    CHECK(lb_alloc_domain_release(&a,p)==LB_ALLOC_OK);
+    CHECK(lb_alloc_domain_allocate(&a,64,&p)==LB_ALLOC_OK); // Succeeds after old backing is actually freed.
+    CHECK(lb_alloc_domain_release(&a,p)==LB_ALLOC_OK);
+    CHECK(lb_alloc_domain_destroy(&a)==LB_ALLOC_OK);
+    CHECK(lb_alloc_domain_destroy(&b)==LB_ALLOC_BUSY);
+    CHECK(lb_alloc_domain_release(&b,&b)==LB_ALLOC_INVALID);
+    CHECK(((unsigned char *)peer)[31]==0x5a && lb_alloc_domain_usage(&b).current==32+header);
+    CHECK(lb_alloc_domain_destroy(root)==LB_ALLOC_BUSY);
+    CHECK(lb_alloc_domain_release(&b,peer)==LB_ALLOC_OK);
+    CHECK(lb_alloc_domain_destroy(&b)==LB_ALLOC_OK && lb_alloc_domain_destroy(root)==LB_ALLOC_OK);
+    CHECK(host.live==0);
+}
 int main(void)
 {
     size_t cycle;
-    failure_prefixes();
+    failure_prefixes(); accounted_scopes();
     for (cycle = 0; cycle < 64; ++cycle) {
         Host host = {0};
         LbSystemAllocator system = {&host, allocate, release};

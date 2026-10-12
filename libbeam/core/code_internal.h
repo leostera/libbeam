@@ -113,6 +113,7 @@ int lb_transform(LoaderState *);
 LbCodeStatus lb_emit(LoaderState *,BeamOp *);
 LbCodeStatus lb_finish_emit(LoaderState *);
 LbCodeStatus lb_compile_code(LbCodeModule *);
+LbCodeStatus lb_code_space_create_in_domain(LbEngine *,LbAllocDomain *,LbCodeSpace **);
 LbCodeStatus lb_verify_program(LoaderState *);
 int lb_instruction_supported(unsigned);
 Eterm lb_bif_module_info_1(LbProcess *,Eterm *,const BeamInstr *);

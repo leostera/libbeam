@@ -18,6 +18,7 @@ Error world_error(LbWorldStatus status) {
     case LB_WORLD_FULL: return {ErrorCode::full, "call capacity exhausted"};
     case LB_WORLD_LIMIT: return {ErrorCode::limit, "transport limit exceeded"};
     case LB_WORLD_RESOURCE_LIMIT: return {ErrorCode::limit, "runtime resource limit exceeded"};
+    case LB_WORLD_MEMORY_LIMIT: return {ErrorCode::memory_limit, "Isolate accounted memory limit exceeded"};
     case LB_WORLD_EXECUTION_REFUSED: return {ErrorCode::unsupported, "execution outside admitted ownership profile"};
     case LB_WORLD_ENVIRONMENT: return {ErrorCode::internal_error, "floating-point environment failure"};
     case LB_WORLD_NO_MEMORY: return {ErrorCode::limit, "out of memory"};
@@ -89,14 +90,17 @@ Reclamation::Reclamation(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 Reclamation::Reclamation(Reclamation&&) noexcept = default;
 Reclamation::~Reclamation() = default;
 
-Result<Engine> Engine::create() {
+Result<Engine> Engine::create(ResourceLimits limits) {
     // Preserved subtractive-experiment limitation (not this factory):
     // erl_prepare_shared_runtime now stops before diagnostic world tables.
     // Its remaining backend/thread-library state still prevents safe unwind.
     // Neither erl_prepare_runtime nor erl_start_embedded is a factory shortcut.
     try {
+        if (!limits.memory_limit_bytes || !limits.invocation_work_limit)
+            return Error{ErrorCode::invalid_argument, "resource limits must be finite and positive"};
         auto impl = std::make_unique<Impl>();
-        const auto status = lb_engine_create(nullptr, &impl->runtime);
+        const LbResourceLimits selected{limits.memory_limit_bytes, limits.invocation_work_limit};
+        const auto status = lb_engine_create_with_limits(nullptr, &selected, &impl->runtime);
         if (status == LB_ENGINE_NO_MEMORY)
             return Error{ErrorCode::limit, "out of memory"};
         if (status != LB_ENGINE_OK)
@@ -108,13 +112,26 @@ Result<Engine> Engine::create() {
         return Error{ErrorCode::limit, {}};
     }
 }
-Result<Isolate> Engine::create_isolate() {
+Result<Isolate> Engine::create_isolate(ResourceOverrides overrides) {
     try {
         if (!usable(impl_)) return invalid_handle();
         auto isolate = std::make_unique<Isolate::Impl>();
-        const auto status = lb_world_create(impl_->runtime, &isolate->runtime);
+        const LbResourceOverrides selected{
+            overrides.memory_limit_bytes.has_value(), overrides.invocation_work_limit.has_value(),
+            overrides.memory_limit_bytes.value_or(0), overrides.invocation_work_limit.value_or(0)};
+        const auto status = lb_world_create_with_overrides(impl_->runtime, &selected, &isolate->runtime);
         if (status != LB_WORLD_OK) return world_error(status);
         return Isolate(std::move(isolate));
+    } catch (const std::bad_alloc&) { return Error{ErrorCode::limit, {}}; }
+}
+Result<ResourceUsage> Isolate::resource_usage() {
+    try {
+        if (!usable(impl_)) return invalid_handle();
+        LbWorldResourceUsage usage;
+        const auto status = lb_world_resource_usage(impl_->runtime, &usage);
+        if (status != LB_WORLD_OK) return world_error(status);
+        return ResourceUsage{{usage.limits.memory_bytes, usage.limits.invocation_work},
+                             usage.current, usage.peak, usage.closed != 0};
     } catch (const std::bad_alloc&) { return Error{ErrorCode::limit, {}}; }
 }
 Status Engine::shutdown(Deadline deadline) {
@@ -138,7 +155,7 @@ Status Isolate::load_module(ByteView input) {
         const auto status = lb_world_load_report(impl_->runtime, bytes(input), &report);
         if (status != LB_WORLD_OK) {
             auto error = world_error(status);
-            if (status == LB_WORLD_BAD_BEAM || status == LB_WORLD_UNSUPPORTED) {
+            if (status == LB_WORLD_BAD_BEAM || status == LB_WORLD_UNSUPPORTED || status == LB_WORLD_MEMORY_LIMIT) {
                 const std::string stage = report.stage ? report.stage : "unknown";
                 error.message += " (stage=" + stage +
                     (stage == "unresolved import" ? ", import_index=" : ", offset=") +

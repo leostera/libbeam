@@ -19,6 +19,7 @@ typedef struct { Eterm module,name; int arity; LbBifFn f; BifKind kind; } BifEnt
 #define LB_NATIVE_COUNT 15
 struct LbEngine {
     LbAllocDomain *domain;
+    LbResourceLimits limits;
     const BifEntry *bifs; /* immutable catalog, owned until shutdown */
     unsigned native_ids[LB_NATIVE_COUNT];
     size_t spaces;

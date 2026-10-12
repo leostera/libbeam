@@ -6,9 +6,12 @@
 #include "world.h"
 #include "code_internal.h"
 #include "executor.h"
+#include "alloc_internal.h"
 typedef enum { LB_WORLD_LOADING, LB_WORLD_RUNNING, LB_WORLD_STOPPING, LB_WORLD_RECLAIMED } LbWorldPhase;
 struct LbWorld {
     LbEngine *engine;
+    LbAllocDomain domain;
+    LbResourceLimits limits;
     LbCodeSpace *space;
     LbWorld *next;
     LbCall *calls;
@@ -39,6 +42,7 @@ LbProcessStatus lb_task_spawn_fun_locked(LbWorld *,LbProcess *,Eterm,Eterm *);
  * exposing the source process or interpreting on the host control thread. */
 LbProcessStatus lb_task_spawn_result_locked(LbWorld *,LbTask *,Eterm *);
 void lb_task_cancel_world_children_locked(LbWorld *);
+void lb_world_close_for_limit_locked(LbWorld *);
 void lb_task_cancel_locked(LbTask *);
 void lb_task_release_locked(LbTask *);
 #endif
