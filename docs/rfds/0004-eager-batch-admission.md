@@ -7,7 +7,8 @@ Status: **The C loader, public Isolate API, and example runner now admit an
 exact-name module group transactionally, including forward and mutual imports.**
 This is a loader checkpoint only. The unchanged Midgard `hello_worker` dependency
 closure still needs additional native/Elixir capabilities and has not been
-executed successfully.
+executed successfully. Its existing packer supplies real exact-name BEAM files;
+no modules or functions are renamed or stripped.
 
 ## Contract
 
@@ -73,4 +74,9 @@ the focused UBSan run passes 31 selected tests, including the core/public batch
 tests and grouped runner. The unchanged Engine lifecycle and two-Isolate acceptance
 also pass. The strict Debug build uses `-Wall -Wextra -Werror`; the first strict
 attempt exposed a signed-byte test-fixture initializer, corrected before this clean
-run. No Midgard application-success or performance claim follows from the fixtures.
+run. The existing Midgard packer artifact has 32 original exact-name modules; its
+manifest file sizes and SHA-256 values were checked. A real public-runner batch
+attempt on that package at `/tmp/libbeam-midgard-batch-admission-attempt/application.log`
+transactionally refused an unsupported literal at module index 2 and reclaimed the
+world; this is not application execution. No Midgard success or performance claim
+follows from the fixtures.
