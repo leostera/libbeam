@@ -106,6 +106,10 @@ def audit(root, request, contracts_path=None, wrappers_path=None):
     denials_path = root / 'libbeam/core/capability_denials.def'
     has_denials = denials_path.is_file() and '#include "capability_denials.def"' in engine
     registered = engine + ('\n' + denials_path.read_text() if has_denials else '')
+    predicates_path = root / 'libbeam/core/type_predicates.def'
+    has_predicates = predicates_path.is_file() and '#include "type_predicates.def"' in engine
+    predicate_symbols = {name + '_1' for name in re.findall(r'^LB_TYPE_PREDICATE\((\w+),',
+        predicates_path.read_text(), re.M)} if has_predicates else set()
     preloaded_path = root / 'beam/erts/preloaded/src/erlang.erl'
     preloaded = preloaded_path.read_text()
     requested = requested_mfas(request)
@@ -127,7 +131,7 @@ def audit(root, request, contracts_path=None, wrappers_path=None):
             row['native_declaration'] = native
             row['native_source_candidates'] = definitions.get(native['symbol'], [])
             row['native_id_in_engine_catalog'] = bool(re.search(
-                r'(?:\{BIF_|LB_DENIAL\(BIF_)' + re.escape(native['symbol']) + r'\s*,', registered))
+                r'(?:\{BIF_|LB_DENIAL\(BIF_)' + re.escape(native['symbol']) + r'\s*,', registered)) or native['symbol'] in predicate_symbols
         else:
             row['native_declaration'] = None
             row['requires_wrapper_or_intrinsic_review'] = True
@@ -141,6 +145,8 @@ def audit(root, request, contracts_path=None, wrappers_path=None):
     sources = [table_path, preloaded_path, root / 'libbeam/core/engine.c', request]
     if has_denials:
         sources.append(denials_path)
+    if has_predicates:
+        sources.append(predicates_path)
     if contracts_path:
         sources.append(contracts_path)
     if wrappers_path:

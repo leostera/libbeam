@@ -25,7 +25,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'i_is_eq_exact_immed_fyc i_is_eq_exact_literal_fxc i_is_eq_exact_literal_fyc '
          'i_is_ne_exact_immed_fxc i_is_ne_exact_immed_fyc i_is_ne_exact_literal_fxc i_is_ne_exact_literal_fyc '
          'is_eq_exact_fxx is_eq_exact_fxy is_eq_exact_fyy is_ne_exact_fSS is_nil_fx is_nil_fy '
-         'i_get_sd i_get_hash_cWd i_apply i_apply_last_Q i_apply_only apply_t apply_last_tQ is_binary_fx is_binary_fy is_list_fx is_list_fy is_integer_fx is_integer_fy is_integer_allocate_fxtt is_tuple_fr is_tuple_fx is_tuple_fy is_tuple_of_arity_frA is_tuple_of_arity_fxA is_tuple_of_arity_fyA '
+         'i_get_sd i_get_hash_cWd i_apply i_apply_last_Q i_apply_only apply_t apply_last_tQ is_binary_fx is_binary_fy is_bitstring_fx is_bitstring_fy is_boolean_fx is_boolean_fy is_float_fx is_float_fy is_number_fx is_number_fy is_port_fx is_port_fy is_pid_fy is_reference_fy is_list_fx is_list_fy is_integer_fx is_integer_fy is_integer_allocate_fxtt is_tuple_fr is_tuple_fx is_tuple_fy is_tuple_of_arity_frA is_tuple_of_arity_fxA is_tuple_of_arity_fyA '
          'is_tagged_tuple_frAa is_tagged_tuple_fxAa is_tagged_tuple_fyAa is_tagged_tuple_ff_ffrAa is_tagged_tuple_ff_ffxAa '
          'test_arity_fxA test_arity_fyA test_arity_get_tuple_element_fxAPx '
          'i_get_tuple_element_xPx i_get_tuple_element_xPy i_get_tuple_element_yPx i_get_tuple_element_yPy '

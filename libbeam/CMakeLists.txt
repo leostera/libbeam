@@ -335,6 +335,20 @@ if(BUILD_TESTING)
     add_dependencies(core_bif_work_test libbeam_process_info_fixture)
     add_test(NAME core_process_info_work COMMAND core_bif_work_test ${LIBBEAM_PROCESS_INFO_FIXTURE} process_info_slice)
     set_tests_properties(core_process_info_execution core_process_info_work PROPERTIES TIMEOUT 90)
+    set(LIBBEAM_TYPE_PREDICATES_FIXTURE ${CMAKE_CURRENT_BINARY_DIR}/fixtures/type_predicates_slice.beam)
+    add_custom_command(OUTPUT ${LIBBEAM_TYPE_PREDICATES_FIXTURE}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/fixtures
+        COMMAND ${CMAKE_COMMAND} -E env "ERL_FLAGS=+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"
+            ${LIBBEAM_ERLC} -o ${CMAKE_CURRENT_BINARY_DIR}/fixtures
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/type_predicates_slice.erl
+        DEPENDS tests/fixtures/type_predicates_slice.erl VERBATIM)
+    add_custom_target(libbeam_type_predicates_fixture DEPENDS ${LIBBEAM_TYPE_PREDICATES_FIXTURE})
+    add_executable(core_type_predicates_test tests/core_type_predicates_test.c)
+    target_link_libraries(core_type_predicates_test PRIVATE libbeam_core)
+    add_dependencies(core_type_predicates_test libbeam_type_predicates_fixture)
+    add_test(NAME core_type_predicates_execution COMMAND core_type_predicates_test ${LIBBEAM_TYPE_PREDICATES_FIXTURE})
+    set_tests_properties(core_type_predicates_execution PROPERTIES TIMEOUT 90)
+
     set(LIBBEAM_LOAD_MODULE_FIXTURE ${CMAKE_CURRENT_BINARY_DIR}/fixtures/load_module_slice.beam)
     add_custom_command(OUTPUT ${LIBBEAM_LOAD_MODULE_FIXTURE}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/fixtures

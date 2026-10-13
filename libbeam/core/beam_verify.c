@@ -228,8 +228,12 @@ static uint32_t forwarding_return_shape(LoaderState *st,const Analysis *w,size_t
 }
 static int plain_bif_allowed(const LbEngine *engine,const BifEntry *native,size_t arity)
 {
-    static const unsigned unary[]={BIF_is_function_1,BIF_map_size_1,BIF_is_integer_1,BIF_hd_1,BIF_tl_1,BIF_is_list_1,BIF_not_1,BIF_is_atom_1,BIF_is_binary_1};
-    static const unsigned binary[]={BIF_is_function_2,BIF_max_2,BIF_min_2,BIF_is_map_key_2};
+    static const unsigned unary[]={BIF_is_function_1,BIF_map_size_1,BIF_is_integer_1,BIF_hd_1,BIF_tl_1,BIF_is_list_1,BIF_not_1,BIF_is_atom_1,BIF_is_binary_1,
+#define LB_TYPE_PREDICATE(name, predicate) BIF_##name##_1,
+#include "type_predicates.def"
+#undef LB_TYPE_PREDICATE
+        BIF_tuple_size_1};
+    static const unsigned binary[]={BIF_is_function_2,BIF_max_2,BIF_min_2,BIF_is_map_key_2,BIF_seqeq_2};
     if(!native || native->kind!=BIF_KIND_GUARD) return 0;
     const unsigned *ids; size_t count;
     if(arity==1) { ids=unary; count=sizeof(unary)/sizeof(*unary); }
@@ -260,6 +264,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:case genop_trim_2:
         case genop_jump_1:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_binary_2:case genop_is_list_2:case genop_is_integer_2:case genop_is_map_2:case genop_is_function_2:case genop_is_function2_3:
+        case genop_is_float_2:case genop_is_number_2:case genop_is_port_2:case genop_is_boolean_2:case genop_is_bitstr_2:
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:case genop_select_val_3:
         case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_get_list_3:
         case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif1_5:case genop_gc_bif2_6:
@@ -593,10 +598,12 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             status=select_arities(st,w,index,&f,op); if(status!=LB_CODE_OK) return status; terminal=1; break;
         case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_binary_2:case genop_is_list_2:case genop_is_integer_2:case genop_is_map_2:case genop_is_function_2:case genop_is_function2_3:
+        case genop_is_float_2:case genop_is_number_2:case genop_is_port_2:case genop_is_boolean_2:case genop_is_bitstr_2:
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_is_nonempty_list_2:
             REQUIRE(label(st,a[0]) && source(st,&f,a[1])); alternate=labels[a[0].val];
             REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
-            if((op->op==genop_is_integer_2 || op->op==genop_is_list_2 || op->op==genop_is_binary_2) && a[1].type==TAG_q) {
+            if((op->op==genop_is_integer_2 || op->op==genop_is_list_2 || op->op==genop_is_binary_2 ||
+                op->op==genop_is_float_2 || op->op==genop_is_number_2 || op->op==genop_is_bitstr_2) && a[1].type==TAG_q) {
                 /* Native literal lowering writes scratch x1023 before either
                  * branch. Old shape facts cannot survive that overwrite. */
                 define(f.x,MAX_REG-1); f.xs[MAX_REG-1]=shape(st,&f,a[1]);

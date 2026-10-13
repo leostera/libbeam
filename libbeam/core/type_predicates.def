@@ -1,0 +1,15 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright Ericsson AB 1996-2026. All Rights Reserved.
+ * Copyright 2026 Leandro Ostera <leandro@ostera.io>
+ * erl_bif_op.c predicates over valid owned terms. Recognizing a type tag does
+ * not admit an external-term consumer or grant the represented capability.
+ */
+LB_TYPE_PREDICATE(is_bitstring, lb_build_is_bitstring(value))
+LB_TYPE_PREDICATE(is_boolean, value==am_true || value==am_false)
+LB_TYPE_PREDICATE(is_float, is_boxed(value) && *boxed_val(value)==_make_header(1,FLOAT_SUBTAG))
+LB_TYPE_PREDICATE(is_map, is_boxed(value) && ((*boxed_val(value)&_TAG_HEADER_MASK)==MAP_SUBTAG))
+LB_TYPE_PREDICATE(is_number, lb_is_integer(value) || (is_boxed(value) && *boxed_val(value)==_make_header(1,FLOAT_SUBTAG)))
+LB_TYPE_PREDICATE(is_pid, is_pid(value))
+LB_TYPE_PREDICATE(is_port, ((value&_TAG_IMMED1_MASK)==_TAG_IMMED1_PORT) || (is_boxed(value) && ((*boxed_val(value)&_TAG_HEADER_MASK)==EXTERNAL_PORT_SUBTAG)))
+LB_TYPE_PREDICATE(is_reference, is_boxed(value) && (((*boxed_val(value)&_TAG_HEADER_MASK)==REF_SUBTAG) || ((*boxed_val(value)&_TAG_HEADER_MASK)==EXTERNAL_REF_SUBTAG)))
+LB_TYPE_PREDICATE(is_tuple, is_tuple(value))

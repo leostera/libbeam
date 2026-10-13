@@ -8,6 +8,7 @@
 #define _XOPEN_SOURCE 700
 #include "process_internal.h"
 #include "binary.h"
+#include "binary_build.h"
 #include "atoms.h"
 #include "big.h"
 #include "term_compare.h"
@@ -1001,6 +1002,25 @@ Eterm lb_bif_is_binary_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     }
     p->last_native_cost=1;
     return lb_is_binary(args[0])?am_true:am_false;
+}
+#define LB_TYPE_PREDICATE(name, predicate) \
+    Eterm lb_bif_##name##_1(LbProcess *p,Eterm *args,const BeamInstr *pc) { \
+        (void)pc; p->last_native_cost=1; \
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) \
+            return allocation_failure(p,LB_ALLOC_WORK_LIMIT); \
+        Eterm value=args[0]; return (predicate)?am_true:am_false; \
+    }
+#include "type_predicates.def"
+#undef LB_TYPE_PREDICATE
+
+/* bif.c:tuple_size_1. The admitted native arity fits a small without allocation. */
+Eterm lb_bif_tuple_size_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    _Static_assert(MAX_ARITYVAL<=(Uint)MAX_SMALL,"native tuple arity fits a small");
+    (void)pc; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    if(!is_tuple(args[0])) return fail(p,LB_EXC_BADARG);
+    return make_small(arityval(*tuple_val(args[0])));
 }
 Eterm lb_bif_is_atom_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {

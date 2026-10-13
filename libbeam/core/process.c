@@ -30,6 +30,10 @@ typedef unsigned char byte;
 #include "stacktrace.h"
 #include "receive.h"
 #define is_not_ref(term) (!lb_is_reference(term))
+#define is_not_float(term) (!(is_boxed(term) && *boxed_val(term)==_make_header(1,FLOAT_SUBTAG)))
+#define is_not_bitstring(term) (!lb_build_is_bitstring(term))
+#define is_not_port(term) (!(((term)&_TAG_IMMED1_MASK)==_TAG_IMMED1_PORT || \
+    (is_boxed(term) && ((*boxed_val(term)&_TAG_HEADER_MASK)==EXTERNAL_PORT_SUBTAG))))
 #define erl_send lb_erl_send
 #define TRAP (1u<<LB_EXC_OFFSET)
 #define is_any_fun(term) (lb_fun(term)!=NULL)

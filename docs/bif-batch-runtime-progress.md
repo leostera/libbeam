@@ -98,6 +98,34 @@ finite 1,000,000 units and explicitly asserts escaped state and zero remaining
 credit. Exact measured boundaries, private 4096-unit tests and production defaults
 are unchanged. This fixes the witness's premise, not the runtime containment rule.
 
+## Third cluster: type predicates and tuple_size/1
+
+Nine additional native predicates (`is_bitstring`, `is_boolean`, `is_float`,
+`is_map`, `is_number`, `is_pid`, `is_port`, `is_reference`, `is_tuple`, all /1)
+and `tuple_size/1` now have exact bindings and executable witnesses. The catalog
+has 121 entries: 93 local implementations, 27 denials and one compatibility
+exception. The predicates report native type membership, not object liveness or
+permission to operate on a resource. Port coverage uses the inert native
+`#Port<0.0>` identity, not an opened port or port-service implementation.
+
+Sixteen native-OTP reference rows independently check predicate masks and tuple
+sizes/badarg against the constructed native terms. Component execution covers
+body and dynamic bindings, X/Y guard outcomes, zero/exact/extra primitive work
+under denied allocation and full quota, unchanged heap/credit/atoms, and all
+execution work prefixes for representative positive/negative body and dynamic
+calls. The boolean-valued tuple-size guard exposed a missing verifier allowance
+for the already implemented, non-collecting `=:=/2` BIF; that exact allowance and
+its original compiled form are retained and tested rather than bypassed.
+Literal float/number/bitstring lowering preserves scratch invalidation on both
+edges; exhaustive new literal/scratch adversarial witnesses remain part of the
+whole-batch audit. No catch/unwind acceptance is claimed.
+
+Fresh `/tmp/libbeam-type-predicates-integrated/summary.json` passes **276 commands**,
+**112 Debug + 112 Release CTests**, **31 existing + 69 profile UBSan tests**, native
+reference comparison, and the prior lifecycle/two-Isolate gates. All **401 source
+inputs** matched. See `libbeam/core/otp/type-predicate-sources.json` for pinned
+sources and adaptation boundaries. No application retry occurred.
+
 ## Still required
 
 - Correct catch/unwind and admitted try/catch/rescue witnesses. The new outcome

@@ -140,6 +140,10 @@ Eterm lb_bif_node_0(LbProcess *,Eterm *,const BeamInstr *);
 #undef LB_DENIAL
 Eterm lb_bif_module_loaded_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_load_module_2(LbProcess *,Eterm *,const BeamInstr *);
+#define LB_TYPE_PREDICATE(name, predicate) Eterm lb_bif_##name##_1(LbProcess *,Eterm *,const BeamInstr *);
+#include "type_predicates.def"
+#undef LB_TYPE_PREDICATE
+Eterm lb_bif_tuple_size_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_binary_to_term_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_process_info_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_function_exported_3(LbProcess *,Eterm *,const BeamInstr *);
