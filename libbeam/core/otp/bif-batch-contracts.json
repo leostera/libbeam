@@ -1,5 +1,5 @@
 {
-  "status": "design-in-progress; not runtime admission or executable coverage",
+  "status": "assigned implementation contracts; not runtime admission or executable coverage",
   "common": {
     "ownership": "Isolate-owned state and terms; preserve native representations, moving roots and code leases. No host-global mutable substitutes.",
     "accounting": "Bounded entry charge plus causal traversal/construction/cleanup work; temporary and retained storage are accounted. Prepare before publication; preserve the first failure cause.",
@@ -145,7 +145,7 @@
       "id": "empty-distribution",
       "classification": "query",
       "mfas": ["disconnect_node/1", "get_cookie/0", "is_alive/0", "nodes/0", "nodes/1", "nodes/2"],
-      "contract": "Native argument/options validation and accurate unnamed, disconnected namespace behavior: no peers and no configured distribution cookie. Review nodes options including local/this-node results; never equate all valid variants with an empty list. Disconnect reports absence of a real connection, without creating one."
+      "contract": "Native argument/options validation and accurate unnamed, disconnected namespace behavior: no peers and no configured distribution cookie. nodes(known) and nodes(this) include the owned local node; nodes/2 returns node/info-map pairs even with an empty options map, with this-node connection_id undefined and node_type this when requested. Invalid filters/options are badarg. With no distribution service, disconnect_node returns ignored even for non-atom arguments; do not invent a badarg or false result. get_cookie returns nocookie from the unconfigured owned distribution state."
     },
     {
       "id": "empty-port-queries",
@@ -163,7 +163,7 @@
       "id": "no-vm-probes",
       "classification": "query",
       "mfas": ["dt_restore_tag/1", "dt_spread_tag/1"],
-      "contract": "Adapt the actual no-USE_VM_PROBES branches of pinned bif.c: spread accepts only booleans and returns true; restore accepts only true and returns true. Other inputs raise badarg. This is native disabled-probe behavior, not a generic successful stub or permission to enable host probes."
+      "contract": "Adapt the actual no-USE_VM_PROBES branches of pinned bif.c: spread accepts only booleans and returns true; restore accepts only true and returns true. Other inputs raise badarg. This is native disabled-probe behavior, not a generic successful stub or permission to enable host probes. The opcode manifest explicitly selects USE_VM_PROBES=0. Installed OTP 28/ERTS 16.3 instead demonstrated the enabled branch (spread returns {0,[]}; restore(true) is badarg), so those reference results are a documented configuration difference, not the oracle for the disabled branch."
     },
     {
       "id": "code-install-denial",
@@ -187,7 +187,7 @@
       "id": "loaded-module-noop",
       "classification": "exception",
       "mfas": ["load_module/2"],
-      "contract": "Require an atom module and a byte-aligned binary code argument; wrong types are badarg after entry charge. Look up actual published state with charged traversal. If present, return {module,Module} without inspecting/installing supplied bytes or changing code/exports/on_load. If absent, host capability failure. Result allocation can still fail; test unchanged code identity and arbitrary binary payloads."
+      "contract": "Require an atom module and a binary code argument (bit length divisible by eight, including unaligned binary views); wrong types are badarg after entry charge. Look up actual published state with charged traversal. If present, return {module,Module} without inspecting/installing supplied bytes or changing code/exports/on_load. If absent, host capability failure. Result allocation can still fail; test unchanged code identity and arbitrary binary payloads."
     }
   ]
 }

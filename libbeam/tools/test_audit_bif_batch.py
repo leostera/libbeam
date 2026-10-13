@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from audit_bif_batch import audit, requested_mfas, contracts_for_mfas
+from audit_bif_batch import audit, requested_mfas, contracts_for_mfas, wrapper_plans
 
 
 class BifInventoryTests(unittest.TestCase):
@@ -99,15 +99,29 @@ class BifInventoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             contracts_for_mfas(path, {('+', 1)})
 
+    def test_wrapper_plan_coverage_is_exact(self):
+        path = self.root / 'wrappers.json'
+        document = {'plans': [{'mode': 'beam', 'reason': 'preserve complete function', 'mfas': ['alias/0']}]}
+        path.write_text(json.dumps(document))
+        self.assertEqual(wrapper_plans(path, {('alias', 0)})[('alias', 0)]['mode'], 'beam')
+        with self.assertRaises(ValueError):
+            wrapper_plans(path, {('alias', 0), ('other', 1)})
+        document['plans'][0]['mfas'].append('alias/0')
+        path.write_text(json.dumps(document))
+        with self.assertRaises(ValueError):
+            wrapper_plans(path, {('alias', 0)})
+
     def test_pinned_inventory(self):
         root = Path(__file__).resolve().parents[2]
         result = audit(root, root / 'libbeam/core/otp/bif-batch-request.txt',
-                       root / 'libbeam/core/otp/bif-batch-contracts.json')
+                       root / 'libbeam/core/otp/bif-batch-contracts.json',
+                       root / 'libbeam/core/otp/bif-batch-wrapper-plan.json')
         self.assertEqual(result['requested_count'], 185)
         self.assertEqual(result['direct_native_declarations'], 135)
         for row in result['entries']:
             self.assertIn(row['proposed_contract']['classification'], {'local', 'query', 'denial', 'exception'})
-            self.assertEqual(row['policy_status'], 'unreviewed')
+            self.assertEqual(row['policy_status'], 'contract-assigned; implementation-review-pending')
+            self.assertIn('mode', row['proposed_implementation'])
             if row['native_declaration']:
                 self.assertTrue(row['native_source_candidates'], row)
             else:

@@ -61,7 +61,23 @@ def contracts_for_mfas(path, expected):
     return document['common'], contracts
 
 
-def audit(root, request, contracts_path=None):
+def wrapper_plans(path, expected):
+    plans = {}
+    allowed = {'beam', 'intrinsic', 'owned-query-adapter', 'local-native-adapter', 'denial', 'compatibility-exception'}
+    for group in json.loads(path.read_text())['plans']:
+        if group['mode'] not in allowed or not group['reason'].strip():
+            raise ValueError('Invalid wrapper implementation plan')
+        for mfa in group['mfas']:
+            key = parse_mfa(mfa, str(path))
+            if key not in expected or key in plans:
+                raise ValueError(f'Unexpected or duplicate wrapper plan: {mfa}')
+            plans[key] = {field: group[field] for field in ('mode', 'reason')}
+    if plans.keys() != expected:
+        raise ValueError(f'Missing wrapper plans: {expected - plans.keys()}')
+    return plans
+
+
+def audit(root, request, contracts_path=None, wrappers_path=None):
     table_path = root / 'beam/erts/emulator/beam/bif.tab'
     table = {}
     for line_number, line in enumerate(table_path.read_text().splitlines(), 1):
@@ -91,13 +107,19 @@ def audit(root, request, contracts_path=None):
     preloaded = preloaded_path.read_text()
     requested = requested_mfas(request)
     common, contracts = contracts_for_mfas(contracts_path, set(requested)) if contracts_path else ({}, {})
+    plans = wrapper_plans(wrappers_path, set(requested) - table.keys()) if wrappers_path else {}
     rows = []
     for name, arity in requested:
         native = table.get((name, arity))
         row = {'module': 'erlang', 'function': name, 'arity': arity,
                'policy_status': 'unreviewed', 'implementation_evidence': []}
         if contracts_path:
+            row['policy_status'] = 'contract-assigned; implementation-review-pending'
             row['proposed_contract'] = contracts[(name, arity)]
+        if wrappers_path:
+            row['proposed_implementation'] = (
+                {'mode': 'native-c', 'reason': 'Pinned native C body or explicit C capability boundary; see contract.'}
+                if native else plans[(name, arity)])
         if native:
             row['native_declaration'] = native
             row['native_source_candidates'] = definitions.get(native['symbol'], [])
@@ -116,6 +138,8 @@ def audit(root, request, contracts_path=None):
     sources = [table_path, preloaded_path, root / 'libbeam/core/engine.c', request]
     if contracts_path:
         sources.append(contracts_path)
+    if wrappers_path:
+        sources.append(wrappers_path)
     return {'scope': 'source facts and proposed contracts; not capability admission or test coverage',
             'common_proposed_contract': common,
             'requested_count': len(rows),
@@ -131,7 +155,8 @@ def main():
     args = parser.parse_args()
     root = args.root.resolve()
     print(json.dumps(audit(root, root / 'libbeam/core/otp/bif-batch-request.txt',
-                           root / 'libbeam/core/otp/bif-batch-contracts.json'), indent=2))
+                           root / 'libbeam/core/otp/bif-batch-contracts.json',
+                           root / 'libbeam/core/otp/bif-batch-wrapper-plan.json'), indent=2))
 
 
 if __name__ == '__main__':

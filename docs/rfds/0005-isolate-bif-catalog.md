@@ -3,14 +3,14 @@
 
 # RFD 0005: Complete BIF inventory and Isolate capability boundaries
 
-Status: **Design in progress. The user authorized catalogued runtime denials;
-this document does not claim they are implemented.**
+Status: **Policy and implementation contract. The user authorized catalogued
+runtime denials; implementation and executable validation remain pending.**
 
 This extends [eager admission](0004-eager-batch-admission.md) and preserves
 [causal work policy](0004-invocation-work-wiring.md). The workspace was checkpointed
 at `cebaa7f6`. The [185-MFA requirement list](../../libbeam/core/otp/bif-batch-request.txt)
-is authoritative; the [inventory work](../bif-batch-inventory.md) is not yet a
-completed per-MFA coverage matrix.
+is authoritative; the [per-MFA inventory](../bif-batch-inventory.md) assigns every
+entry a contract and implementation plan, not an executable coverage claim.
 
 ## Decision and invariant
 
@@ -86,8 +86,9 @@ Isolate or host process may be terminated, and no guest-state rollback is promis
 
 ## load_module/2 compatibility exception
 
-After charging entry work, require an atom module and a byte-aligned binary code
-argument; wrong types produce guest badarg regardless of module presence. Then
+After charging entry work, require an atom module and a binary code argument
+(bit length divisible by eight, including unaligned views); wrong types produce
+guest badarg regardless of module presence. Then
 perform charged lookup of actual published state. For an existing module return
 the native-shaped `{module, Module}`. Arbitrary binary payload bytes are ignored:
 this exception does not assert that the supplied binary is valid BEAM. No supplied
@@ -131,9 +132,12 @@ host-denied entries for this batch. Catchable exceptions for prohibited operatio
 were considered and explicitly rejected. Silently successful placeholders,
 namespace aliases and generic missing-import traps are not alternatives here.
 
-The per-MFA draft matrix covers all 185 names without omissions or duplicates.
-Detailed source/mode review, native/preloaded dependency mapping, selector policies,
-diagnostics representation and lifecycle implementation/tests are unfinished. This RFD is not a completion claim or a grant of additional host,
+The per-MFA matrix covers all 185 names without omissions or duplicates. The
+[wrapper/compiler inventory](../bif-batch-wrapper-prerequisites.md) records native
+versus BEAM plans and additional exact dependencies. Detailed source/mode review,
+diagnostics representation and lifecycle implementation/tests remain required
+while implementing these contracts. This RFD is not an implementation-completion
+claim or a grant of additional host,
 network, distribution, NIF, tracing or I/O bindings. Local tracing and pure
 match-spec behavior must be assessed on their actual local semantics rather than
 being dismissed merely because upstream also uses them for broader facilities.
