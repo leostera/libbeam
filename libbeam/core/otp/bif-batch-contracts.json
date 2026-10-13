@@ -1,0 +1,193 @@
+{
+  "status": "design-in-progress; not runtime admission or executable coverage",
+  "common": {
+    "ownership": "Isolate-owned state and terms; preserve native representations, moving roots and code leases. No host-global mutable substitutes.",
+    "accounting": "Bounded entry charge plus causal traversal/construction/cleanup work; temporary and retained storage are accounted. Prepare before publication; preserve the first failure cause.",
+    "errors": "Native guest errors for supported cases; explicit uncatchable host capability failure for reviewed unavailable modes. Resource/OOM/cancellation remain distinct.",
+    "invocation_paths": "Direct exported and dynamic calls for every MFA; review compiler lowering, guard/body and intrinsic paths separately. BEAM wrappers retain necessary exact-name dependencies.",
+    "tests": "Independent native reference cases, malformed/boundary inputs, lowered/dynamic calls, GC and code retention, memory/work/allocation prefixes, peer survival and exact reclamation. Explicit divergences tested separately.",
+    "provenance": "Join source candidates from audit_bif_batch.py; review full admitted upstream bodies and wrapper dependencies, retaining notices and source hashes. Candidate matches are not proof of executable semantics."
+  },
+  "groups": [
+    {
+      "id": "numeric",
+      "classification": "local",
+      "mfas": ["+/1", "'/'/2", "ceil/1", "float/1", "round/1", "trunc/1"],
+      "contract": "Native numeric identity/conversion/rounding/division over admitted integer and float representations, including signed zero and pinned boundary quirks. Preserve host floating environment; reject invalid numeric arguments as native errors. No host allocation outside accounting."
+    },
+    {
+      "id": "boolean-predicates",
+      "classification": "local",
+      "mfas": ["and/2", "or/2", "xor/2", "is_bitstring/1", "is_boolean/1", "is_float/1", "is_map/1", "is_number/1", "is_pid/1", "is_port/1", "is_reference/1", "is_tuple/1", "bit_size/1", "tuple_size/1"],
+      "contract": "Native term predicates, boolean validation and exact sizes; preserve bitstring views and native term distinctions. Existing predicate instruction admission is not proof of an exported BIF binding. Verify guard failure versus body error."
+    },
+    {
+      "id": "numeric-text",
+      "classification": "local",
+      "mfas": ["binary_to_integer/2", "float_to_list/1", "float_to_list/2", "integer_to_list/1", "integer_to_list/2", "list_to_float/1", "list_to_integer/2"],
+      "contract": "Native base/options/number parsing and formatting, proper-list and character validation, native result/error precedence and locale-independent behavior. Reuse real conversion machinery and existing BEAM wrappers where appropriate. Charge input and output size without changing transport limits."
+    },
+    {
+      "id": "sequence-construction",
+      "classification": "local",
+      "mfas": ["binary_to_list/1", "binary_to_list/3", "bitstring_to_list/1", "insert_element/3", "iolist_size/1", "iolist_to_iovec/1", "list_to_binary/1", "list_to_bitstring/1"],
+      "contract": "Native list/tuple/binary/iovec construction and traversal, including partial bits, range rules, improper inputs and overflow. Preserve aliasing/refcounts and root sources across allocation; no publication before validated construction."
+    },
+    {
+      "id": "atom-conversion",
+      "classification": "local",
+      "mfas": ["list_to_atom/1", "list_to_existing_atom/1"],
+      "contract": "Native character-list semantics over the owned atom namespace. Existing-only conversion never interns; new atoms require namespace/accounting transactions. Validate native length and codepoint boundaries and preserve errors before publication."
+    },
+    {
+      "id": "external-encoding",
+      "classification": "local",
+      "mfas": ["external_size/1", "term_to_binary/1", "term_to_binary/2"],
+      "contract": "Native ETF sizing/encoding for admitted terms and reviewed options, not fabricated encoding. Share size/encode invariants, atom/function/identity rules and binary-view handling. Explicitly refuse unimplemented valid modes rather than silently ignoring options; account temporary and compression work if admitted."
+    },
+    {
+      "id": "packet-decoding",
+      "classification": "local",
+      "mfas": ["decode_packet/3"],
+      "contract": "Pure native packet parser over supplied bytes, with packet-type/options limits and exact incomplete/error/rest results. Does not open sockets or consume ambient input. Preserve returned subbinary ownership and charge scans."
+    },
+    {
+      "id": "hashing",
+      "classification": "local",
+      "mfas": ["md5/1", "md5_final/1", "md5_init/0", "md5_update/2", "phash/2", "phash2/1", "phash2/2"],
+      "contract": "Native MD5 contexts and term hashing/range rules, including exact representation/equality subtleties. Context input is untrusted and must be parsed safely. No cryptographic-security claim; deterministic reference vectors, incremental equivalence, malformed contexts and charged traversal."
+    },
+    {
+      "id": "dictionary",
+      "classification": "local",
+      "mfas": ["erase/0", "get/0", "get_keys/0", "get_keys/1"],
+      "contract": "Return/remove actual process dictionary entries and exact-value key matches. Materialize results before destructive publication; keep key/value roots and code leases correct. Empty results only for genuinely empty/no-match state."
+    },
+    {
+      "id": "functions",
+      "classification": "local",
+      "mfas": ["apply/2", "make_fun/3", "fun_info/1", "fun_info/2", "fun_info_mfa/1", "fun_to_list/1"],
+      "contract": "Real fun application/metadata/formatting and external-fun construction with native argument and arity semantics. Retain code through GC and owner teardown. Missing executable targets do not create fabricated exports; review intrinsic apply dispatch separately from preloaded stubs."
+    },
+    {
+      "id": "guest-exits",
+      "classification": "local",
+      "mfas": ["exit/1", "nif_error/1"],
+      "contract": "Native guest exception/exit behavior and stacktrace/catch semantics. These are not capability denials. Implement required correct unwind and compare ordinary caught errors against uncatchable capability failures."
+    },
+    {
+      "id": "scheduling-gc",
+      "classification": "local",
+      "mfas": ["bump_reductions/1", "garbage_collect/0", "garbage_collect/1", "hibernate/0", "hibernate/3", "yield/0"],
+      "contract": "Actual owned-process GC, reduction/scheduling and hibernation behavior on the single Engine worker. Never grant extra invocation work, fabricate a GC success, or add a public external suspend/resume lifecycle. Preserve live arguments, continuation/code roots and wakeup semantics."
+    },
+    {
+      "id": "aliases-monitors-links",
+      "classification": "local",
+      "mfas": ["alias/0", "alias/1", "unalias/1", "demonitor/1", "monitor/2", "monitor/3", "link/1", "unlink/1"],
+      "contract": "Owned alias/link/monitor state and native options/messages, cancellation/flush rules and process-death cleanup. Local process modes must work; explicitly unavailable remote/port/service modes fail at the host boundary. Prevent descendant capability failures becoming host success through DOWN handling."
+    },
+    {
+      "id": "spawn",
+      "classification": "local",
+      "mfas": ["spawn/2", "spawn/4", "spawn_link/1", "spawn_link/2", "spawn_link/3", "spawn_link/4", "spawn_monitor/2", "spawn_monitor/3", "spawn_monitor/4", "spawn_opt/2", "spawn_opt/3", "spawn_opt/5", "spawn_request/5", "spawn_request_abandon/1"],
+      "contract": "Real local process creation, linking/monitoring/options and asynchronous request lifecycle, including local-node variants. Preserve validated BEAM wrappers and causal budgets. Remote-node creation is denied before creating proxies or distributing; do not deny valid local variants because their signatures also accept a node."
+    },
+    {
+      "id": "send-registry",
+      "classification": "local",
+      "mfas": ["send/2", "send/3", "unregister/1", "whereis/1", "registered/0"],
+      "contract": "Actual owned names, PIDs/aliases and inbox delivery with native option/result semantics, charged copy/candidate work and real registration ownership. Queries use the current namespace; remote/host-port effects are unavailable. Preserve send instruction and dynamic exported forms."
+    },
+    {
+      "id": "timers",
+      "classification": "local",
+      "mfas": ["cancel_timer/1", "cancel_timer/2", "read_timer/1", "send_after/3", "send_after/4", "start_timer/3", "start_timer/4"],
+      "contract": "Owned timer identities, monotonic deadlines, native options and actual timer delivery/cancellation races serialized on the worker. Retain message/code roots and causal ownership; reclaim cancelled/expired timers. No host callback may interpret guest code."
+    },
+    {
+      "id": "process-state",
+      "classification": "local",
+      "mfas": ["group_leader/0", "group_leader/2", "process_flag/2", "process_flag/3", "process_info/1", "processes/0", "processes_iterator/0", "processes_next/1", "is_process_alive/1"],
+      "contract": "Real local process metadata, group leaders, flags, liveness and snapshots/iterators. Native validation/order and dead-process results; account snapshot storage and retain no dangling process pointers. Group leadership does not create an ambient I/O service. Unsupported selectors require explicit refusal, never invented values."
+    },
+    {
+      "id": "identity-text",
+      "classification": "local",
+      "mfas": ["list_to_pid/1", "list_to_port/1", "list_to_ref/1", "pid_to_list/1", "port_to_list/1", "ref_to_list/1", "node/1"],
+      "contract": "Native identity parsing/formatting and node extraction for admitted namespace identities, with canonical native bounds. Constructing a textual identity is not spawning a process or opening a port; existence checks remain separate. Do not introduce remote identities or alias peer namespaces."
+    },
+    {
+      "id": "clock-calendar",
+      "classification": "local",
+      "mfas": ["convert_time_unit/3", "localtime/0", "localtime_to_universaltime/1", "localtime_to_universaltime/2", "monotonic_time/0", "monotonic_time/1", "posixtime_to_universaltime/1", "system_time/0", "system_time/1", "time_offset/0", "time_offset/1", "timestamp/0", "universaltime/0", "universaltime_to_localtime/1", "universaltime_to_posixtime/1"],
+      "contract": "Actual clocks and native calendar/unit conversion, with supported epoch/timezone/DST/range contracts stated explicitly. Preserve negative rounding and bignum overflow behavior. Do not fabricate deterministic timestamps or alter host clock/timezone configuration; reference tests separate nondeterministic observations from exact conversions."
+    },
+    {
+      "id": "unique-integers",
+      "classification": "local",
+      "mfas": ["unique_integer/0", "unique_integer/1"],
+      "contract": "Real owned uniqueness and monotonic/positive option semantics, overflow-safe and serialized. Document namespace scope and replacement behavior; preserve counter state on failed result construction according to native effect/publication rules."
+    },
+    {
+      "id": "runtime-introspection",
+      "classification": "query",
+      "mfas": ["is_builtin/3", "loaded/0", "pre_loaded/0", "memory/0", "memory/1", "statistics/1", "system_info/1"],
+      "contract": "Published code/catalog identity and actual scoped allocation/runtime statistics. Add real accounting instrumentation where necessary. Scope and supported selectors must be documented; no host-global ERTS statistics, invented categories, fake uptime or claimed full OTP version parity."
+    },
+    {
+      "id": "runtime-flags",
+      "classification": "local",
+      "mfas": ["system_flag/2"],
+      "contract": "Reviewed meaningful Isolate-local flags change actual owned runtime behavior and return native previous values. Host/Engine-global mutations and unavailable selectors fail explicitly. A returned previous value without changing supported behavior is not implementation."
+    },
+    {
+      "id": "empty-distribution",
+      "classification": "query",
+      "mfas": ["disconnect_node/1", "get_cookie/0", "is_alive/0", "nodes/0", "nodes/1", "nodes/2"],
+      "contract": "Native argument/options validation and accurate unnamed, disconnected namespace behavior: no peers and no configured distribution cookie. Review nodes options including local/this-node results; never equate all valid variants with an empty list. Disconnect reports absence of a real connection, without creating one."
+    },
+    {
+      "id": "empty-port-queries",
+      "classification": "query",
+      "mfas": ["ports/0", "port_info/1", "port_info/2", "port_get_data/1"],
+      "contract": "Real port-free state and native validation/dead-port query behavior; no invented live-port metadata or data. Type/selector/error precedence follows reviewed native sources. No query implicitly opens a port or accesses a host descriptor."
+    },
+    {
+      "id": "local-tracing-matchspec",
+      "classification": "local",
+      "mfas": ["match_spec_test/3", "trace/3", "trace_info/2", "trace_pattern/3"],
+      "contract": "Pure native match-spec behavior and meaningful owned-process tracing/query state for explicitly admitted modes. Trace events must derive from actual execution and stay inside the Isolate; account compilation, matching and messages. Host tracer/NIF/distributed targets remain unavailable, and unsupported selectors are explicit. No fake successful trace activation."
+    },
+    {
+      "id": "no-vm-probes",
+      "classification": "query",
+      "mfas": ["dt_restore_tag/1", "dt_spread_tag/1"],
+      "contract": "Adapt the actual no-USE_VM_PROBES branches of pinned bif.c: spread accepts only booleans and returns true; restore accepts only true and returns true. Other inputs raise badarg. This is native disabled-probe behavior, not a generic successful stub or permission to enable host probes."
+    },
+    {
+      "id": "code-install-denial",
+      "classification": "denial",
+      "mfas": ["call_on_load_function/1", "delete_module/1", "finish_after_on_load/2", "finish_loading/1", "has_prepared_code_on_load/1", "prepare_loading/2", "purge_module/1", "load_nif/2"],
+      "contract": "Explicit host capability failure for runtime code preparation/installation/lifecycle or guest NIF execution. No hidden loader state, code replacement, on_load execution, library opening or namespace mutation. Denial remains distinct from unresolved imports."
+    },
+    {
+      "id": "host-effects-denial",
+      "classification": "denial",
+      "mfas": ["display/1", "display_string/1", "display_string/2", "halt/0", "halt/1", "halt/2", "open_port/2", "port_close/1", "port_command/2", "port_command/3", "port_connect/2", "port_control/3", "port_set_data/2", "process_display/2"],
+      "contract": "Explicit host capability failure before stdout/stderr output, host termination, port/driver operations or process-display effects. Do not close descriptors, launch programs or return fabricated success. Test malformed arguments too: whole-MFA denial does not execute upstream effectful wrappers."
+    },
+    {
+      "id": "distribution-denial",
+      "classification": "denial",
+      "mfas": ["dist_ctrl_put_data/2", "monitor_node/2", "monitor_node/3", "set_cookie/2", "setnode/2"],
+      "contract": "Explicit host capability failure before enabling/configuring distribution, node monitors or distribution-controller traffic. No peers, authentication service or node naming is synthesized to satisfy the binding."
+    },
+    {
+      "id": "loaded-module-noop",
+      "classification": "exception",
+      "mfas": ["load_module/2"],
+      "contract": "Require an atom module and a byte-aligned binary code argument; wrong types are badarg after entry charge. Look up actual published state with charged traversal. If present, return {module,Module} without inspecting/installing supplied bytes or changing code/exports/on_load. If absent, host capability failure. Result allocation can still fail; test unchanged code identity and arbitrary binary payloads."
+    }
+  ]
+}

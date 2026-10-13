@@ -38,6 +38,26 @@ The current protected preloaded subset is not the full upstream erlang module.
   and executable evidence. Registered denial does not count as successful native
   capability implementation.
 
+## Machine-auditable draft contracts
+
+[Draft contracts](../libbeam/core/otp/bif-batch-contracts.json) assign every MFA
+exactly once to 30 behavior groups, with shared ownership, accounting, error,
+invocation-path and test requirements. These are proposed implementation
+contracts, not claims that the functions work. Detailed native mode/selector and
+wrapper dependency review remains open.
+
+`python3 -B libbeam/tools/audit_bif_batch.py` joins those contracts with pinned
+native declarations, C source candidates (including hashes), preloaded function
+head candidates and current native-ID registration facts. It rejects missing,
+extra or duplicated contracts. Head candidates deliberately do not prove arity,
+actual executable bodies or supported behavior. Every row remains explicitly
+unreviewed and has no executable implementation evidence until supplied.
+
+[Policy RFD 0005](rfds/0005-isolate-bif-catalog.md) specifies failure propagation,
+including why a denied child operation cannot merely emit a catchable DOWN and
+let the owning active invocation return success. It also separates contained
+invocation failure from unsafe escaped/background work requiring termination.
+
 ## Inventory work still required
 
 Complete the per-MFA policy and provenance matrix, identify necessary wrapper and
