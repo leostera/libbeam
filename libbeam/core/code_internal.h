@@ -135,6 +135,9 @@ Eterm lb_bif_get_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_put_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_erase_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_node_0(LbProcess *,Eterm *,const BeamInstr *);
+#define LB_DENIAL(id, name, arity, category) Eterm lb_bif_deny_##name##_##arity(LbProcess *,Eterm *,const BeamInstr *);
+#include "capability_denials.def"
+#undef LB_DENIAL
 Eterm lb_bif_module_loaded_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_binary_to_term_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_process_info_2(LbProcess *,Eterm *,const BeamInstr *);

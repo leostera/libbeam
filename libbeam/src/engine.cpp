@@ -20,6 +20,7 @@ Error world_error(LbWorldStatus status) {
     case LB_WORLD_RESOURCE_LIMIT: return {ErrorCode::limit, "runtime resource limit exceeded"};
     case LB_WORLD_MEMORY_LIMIT: return {ErrorCode::memory_limit, "Isolate accounted memory limit exceeded"};
     case LB_WORLD_WORK_LIMIT: return {ErrorCode::work_limit, "invocation work limit exceeded"};
+    case LB_WORLD_CAPABILITY_DENIED: return {ErrorCode::capability_denied, "guest capability denied"};
     case LB_WORLD_EXECUTION_REFUSED: return {ErrorCode::unsupported, "execution outside admitted ownership profile"};
     case LB_WORLD_ENVIRONMENT: return {ErrorCode::internal_error, "floating-point environment failure"};
     case LB_WORLD_NO_MEMORY: return {ErrorCode::limit, "out of memory"};
@@ -227,6 +228,11 @@ Result<Bytes> Call::wait_until(Deadline deadline) {
             return result;
         }
         auto error = world_error(status);
+        if (status == LB_WORLD_CAPABILITY_DENIED) {
+            const auto* failure = lb_call_capability_failure(impl_->runtime);
+            if (!failure) return Error{ErrorCode::internal_error, "missing capability diagnostic"};
+            error.message = failure->message;
+        }
         if (status != LB_WORLD_CLOSED) lb_call_consume(impl_->runtime);
         return error;
     } catch (const std::bad_alloc&) {

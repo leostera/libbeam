@@ -8,7 +8,7 @@ typedef struct LbTask LbTask;
 typedef enum {
     LB_TASK_PENDING, LB_TASK_DONE, LB_TASK_EXCEPTION, LB_TASK_NO_MEMORY,
     LB_TASK_CANCELLED, LB_TASK_LIMIT, LB_TASK_REFUSED, LB_TASK_ENVIRONMENT,
-    LB_TASK_MEMORY_LIMIT, LB_TASK_WORK_LIMIT
+    LB_TASK_MEMORY_LIMIT, LB_TASK_WORK_LIMIT, LB_TASK_CAPABILITY_DENIED
 } LbTaskStatus;
 /* Internal asynchronous execution boundary, not the public Call transport.
  * One lazy shared worker per Engine. Tasks retain actual processes/code until

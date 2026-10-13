@@ -29,6 +29,7 @@ struct LbCall {
     unsigned char *bytes;
     size_t size, charge;
     LbWorldStatus status;
+    const LbCapabilityFailure *capability_failure; /* static, survives physical reclamation */
     int owner_live, slot_held, consumed;
 };
 struct LbReclamation { LbWorld *world; int consumed; };

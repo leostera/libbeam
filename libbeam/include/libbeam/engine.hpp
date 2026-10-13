@@ -29,7 +29,8 @@ struct ByteView {
 
 enum class ErrorCode {
     not_implemented, invalid_argument, invalid_beam, unsupported, invalid_state, full, limit,
-    closed, cancelled, exception, timeout, busy, internal_error, memory_limit, work_limit
+    closed, cancelled, exception, timeout, busy, internal_error, memory_limit, work_limit,
+    capability_denied
 };
 struct Error {
     ErrorCode code;

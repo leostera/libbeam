@@ -53,7 +53,7 @@ endif()
 add_library(libbeam_core STATIC core/alloc.c core/utf8.c core/beam_image.c core/atoms.c
     core/opcodes.c core/beam_reader.c core/beam_program.c core/beam_decode.c
     core/beam_metadata.c core/beam_literals.c core/beam_select.c core/binary.c core/binary_match.c core/map_hamt.c core/map_runtime.c core/bif_map.c core/writable.c core/binary_error.c core/binary_size.c core/binary_vheap.c core/binary_build.c core/exception.c core/stacktrace.c core/raise_trace.c core/bif_exception.c core/pid_table.c core/bif_process.c core/bif_process_info.c core/bif_external.c core/bif_dict.c core/fun.c core/apply.c core/message.c core/receive.c core/registry.c core/receive_marker.c core/monitor.c core/preloaded.c core/bit_copy.c core/bit_writer.c core/bit_float.c core/term_compare.c
-    core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/engine.c core/executor.c core/world.c core/work_budget.c core/md5.c core/process.c core/heap.c core/bif_info.c core/bif_binary.c core/big.c core/bif_numeric.c core/decimal.c core/bif_decimal.c)
+    core/beam_transform.c core/beam_emit.c core/beam_verify.c core/code.c core/engine.c core/executor.c core/world.c core/work_budget.c core/md5.c core/process.c core/heap.c core/capability.c core/bif_info.c core/bif_binary.c core/big.c core/bif_numeric.c core/decimal.c core/bif_decimal.c)
 add_dependencies(libbeam_core libbeam_atom_definitions libbeam_opcode_definitions)
 target_link_libraries(libbeam_core PUBLIC ZLIB::ZLIB Threads::Threads m)
 target_include_directories(libbeam_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core ${LIBBEAM_ATOM_GEN} ${LIBBEAM_OPCODE_GEN})
@@ -335,6 +335,24 @@ if(BUILD_TESTING)
     add_dependencies(core_bif_work_test libbeam_process_info_fixture)
     add_test(NAME core_process_info_work COMMAND core_bif_work_test ${LIBBEAM_PROCESS_INFO_FIXTURE} process_info_slice)
     set_tests_properties(core_process_info_execution core_process_info_work PROPERTIES TIMEOUT 90)
+    set(LIBBEAM_CAPABILITY_FIXTURE ${CMAKE_CURRENT_BINARY_DIR}/fixtures/capability_slice.beam)
+    add_custom_command(OUTPUT ${LIBBEAM_CAPABILITY_FIXTURE}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/fixtures
+        COMMAND ${CMAKE_COMMAND} -E env "ERL_FLAGS=+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"
+            ${LIBBEAM_ERLC} -o ${CMAKE_CURRENT_BINARY_DIR}/fixtures
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/capability_slice.erl
+        DEPENDS tests/fixtures/capability_slice.erl VERBATIM)
+    add_custom_target(libbeam_capability_fixture DEPENDS ${LIBBEAM_CAPABILITY_FIXTURE})
+    add_executable(core_capability_test tests/core_capability_test.c)
+    target_link_libraries(core_capability_test PRIVATE libbeam_core)
+    add_dependencies(core_capability_test libbeam_capability_fixture)
+    add_test(NAME core_capability_execution COMMAND core_capability_test ${LIBBEAM_CAPABILITY_FIXTURE})
+    add_executable(api_capability_test tests/api_capability_test.cpp)
+    target_link_libraries(api_capability_test PRIVATE libbeam)
+    add_dependencies(api_capability_test libbeam_capability_fixture)
+    add_test(NAME api_capability_execution COMMAND api_capability_test ${LIBBEAM_CAPABILITY_FIXTURE})
+    set_tests_properties(core_capability_execution api_capability_execution PROPERTIES TIMEOUT 90)
+
     set(LIBBEAM_NODE_FIXTURE ${CMAKE_CURRENT_BINARY_DIR}/fixtures/node_slice.beam)
     set(LIBBEAM_NODE_LOCATIONS ${CMAKE_CURRENT_BINARY_DIR}/fixtures/node_locations.beam)
     add_custom_command(OUTPUT ${LIBBEAM_NODE_FIXTURE} ${LIBBEAM_NODE_LOCATIONS}

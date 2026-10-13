@@ -224,6 +224,10 @@ void lb_call_complete(LbCall *call,LbProcess *process,LbTaskStatus status)
     case LB_TASK_MEMORY_LIMIT: call->status=LB_WORLD_MEMORY_LIMIT; break;
     case LB_TASK_WORK_LIMIT: call->status=LB_WORLD_WORK_LIMIT; break;
     case LB_TASK_LIMIT: call->status=LB_WORLD_RESOURCE_LIMIT; break;
+    case LB_TASK_CAPABILITY_DENIED:
+        assert(call->budget && call->budget->capability_failure);
+        call->capability_failure=call->budget->capability_failure;
+        call->status=LB_WORLD_CAPABILITY_DENIED; break;
     case LB_TASK_REFUSED: call->status=LB_WORLD_EXECUTION_REFUSED; break;
     case LB_TASK_ENVIRONMENT: call->status=LB_WORLD_ENVIRONMENT; break;
     case LB_TASK_CANCELLED: call->status=LB_WORLD_CANCELLED; break;
@@ -265,6 +269,15 @@ LbWorldStatus lb_call_poll(LbCall *call,LbBytesView *out)
     status=call->consumed?LB_WORLD_CLOSED:call->status;
     if(status==LB_WORLD_OK) *out=(LbBytesView){call->bytes,call->size};
     lb_engine_leave(call->world->engine); return status;
+}
+const LbCapabilityFailure *lb_call_capability_failure(LbCall *call)
+{
+    if(!call) return NULL;
+    lb_engine_enter(call->world->engine);
+    const LbCapabilityFailure *failure=(!call->consumed && call->status==LB_WORLD_CAPABILITY_DENIED)
+        ?call->capability_failure:NULL;
+    lb_engine_leave(call->world->engine);
+    return failure;
 }
 LbWorldStatus lb_call_consume(LbCall *call)
 {

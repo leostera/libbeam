@@ -294,7 +294,7 @@ LbCodeStatus lb_code_compile_prepared(LoaderState *prepared)
         if(lb_beam_select_specific(op,&selection)!=LB_BEAM_OK) return LB_CODE_UNSUPPORTED;
         st->specific_op=(int)selection.opcode;
         st->program->error.stage=opc[selection.opcode].name;
-        if(selection.opcode!=op_label_L && selection.opcode!=op_line_I &&
+        if(selection.opcode!=op_label_L && selection.opcode!=op_line_I && selection.opcode!=op_nif_start &&
            selection.opcode!=op_i_func_info_IaaI && selection.opcode!=op_int_code_end &&
            !lb_instruction_supported(selection.opcode)) return LB_CODE_UNSUPPORTED;
         for(i=0;i<op->arity && i<sizeof(selection.r_mask)*CHAR_BIT;++i)

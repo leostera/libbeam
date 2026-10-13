@@ -9,7 +9,7 @@ typedef struct LbProcess LbProcess;
  * outcomes, not guest exceptions or false guard results. */
 typedef enum { LB_PROCESS_READY, LB_PROCESS_YIELDED, LB_PROCESS_DONE,
                LB_PROCESS_EXCEPTION, LB_PROCESS_NO_MEMORY, LB_PROCESS_INVALID,
-               LB_PROCESS_LIMIT, LB_PROCESS_REFUSED, LB_PROCESS_ENVIRONMENT, LB_PROCESS_WORK_LIMIT } LbProcessStatus;
+               LB_PROCESS_LIMIT, LB_PROCESS_REFUSED, LB_PROCESS_ENVIRONMENT, LB_PROCESS_WORK_LIMIT, LB_PROCESS_CAPABILITY_DENIED } LbProcessStatus;
 /* Internal synchronous executor, not host API success or a scheduler. Entry,
  * registers, stack, result and literal roots retain actual code until free.
  * Initial Eterm arguments are namespace-relative immediate values only.

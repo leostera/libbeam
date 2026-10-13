@@ -38,6 +38,18 @@ def main():
     source = source.replace(declaration, 'static const char *const lb_predefined_names[]')
     header = header.replace(external, '/* Names are private immutable data in atoms.c. */')
     header = header.replace('__ERL_ATOM_TABLE_H__', 'LIBBEAM_GENERATED_ATOMS_H')
+    # Owned preloaded-wrapper boundary name absent from pinned naming inputs.
+    # Append only: every existing native atom index stays unchanged.
+    extra_names = ('set_cookie',)
+    names = re.findall(r'^  ".*",$', source, re.M)
+    indices = [int(value) for value in re.findall(r'^#define am_\w+ make_atom\((\d+)\)$', header, re.M)]
+    if not names or not indices or max(indices)+1 != len(names) or source.count('  0\n};') != 1:
+        raise RuntimeError('Unexpected predefined atom sentinel/layout')
+    for index, name in enumerate(extra_names, len(names)):
+        if f'#define am_{name} ' in header:
+            raise RuntimeError(f'Owned atom is now predefined upstream: {name}')
+        source = source.replace('  0\n};', f'  "{name}",\n  0\n}};')
+        header += f'\n#define am_{name} make_atom({index})\n'
     # Input license/attribution banners remain intact in the admitted files;
     # upstream generated output only has a do-not-edit warning. Add attribution.
     notice = ('/* SPDX-License-Identifier: Apache-2.0\n'

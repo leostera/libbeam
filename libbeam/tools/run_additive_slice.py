@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 
 
@@ -45,11 +46,18 @@ def main():
         with (Path(tempfile.gettempdir()) / f'otp-realm-validation-{os.getuid()}.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             files = sorted(set((root / 'libbeam/core').glob('*.[ch]')) |
+                           set((root / 'libbeam/core').glob('*.def')) |
                            {p for p in (root / 'libbeam/core/otp/opcodes').rglob('*') if p.is_file()} |
                            {p for p in (root / 'libbeam/tests/fixtures/two_isolates').rglob('*') if p.is_file()} |
                            {root / 'libbeam/CMakeLists.txt', root / 'libbeam/src/engine.cpp',
                             root / 'libbeam/examples/run_beam.cpp', root / 'libbeam/include/libbeam/engine.hpp',
                             root / 'libbeam/tests/api_memory_test.cpp', root / 'libbeam/tests/core_memory_test.c',
+                            root / 'libbeam/tests/core_capability_test.c', root / 'libbeam/tests/api_capability_test.cpp',
+                            root / 'libbeam/tests/fixtures/capability_slice.erl',
+                            root / 'libbeam/core/otp/capability-denial-sources.json',
+                            root / 'libbeam/core/otp/bif-batch-contracts.json', root / 'libbeam/core/otp/bif-batch-wrapper-plan.json',
+                            root / 'libbeam/core/otp/bif-batch-request.txt', root / 'libbeam/tools/audit_bif_batch.py',
+                            root / 'libbeam/tools/test_audit_bif_batch.py',
                             root / 'libbeam/tests/core_work_test.c', root / 'libbeam/tests/core_work_runtime_test.c',
                             root / 'libbeam/tests/api_work_test.cpp', root / 'libbeam/tests/fixtures/work_slice.erl',
                             root / 'libbeam/tests/fixtures/memory_slice.erl',
@@ -442,6 +450,13 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError(f'Node reference changed: {filename}')
             summary['node_sources'] = node_sources
+            capability_sources = json.loads((root / 'libbeam/core/otp/capability-denial-sources.json').read_text())
+            for filename, expected in capability_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Capability provenance changed: {filename}')
+            summary['capability_sources'] = capability_sources
+            run('capability-policy-inventory', [sys.executable, '-B', '-m', 'unittest', 'discover',
+                '-s', root / 'libbeam/tools', '-p', 'test_audit_bif_batch.py', '-v'])
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
@@ -970,7 +985,7 @@ def main():
             run('terms-ubsan-fixture', [out / 'terms-ubsan', fixture])
             program_sources = ['alloc', 'utf8', 'atoms', 'beam_image', 'opcodes', 'beam_reader',
                                'beam_program', 'beam_decode', 'beam_metadata', 'beam_literals', 'beam_select', 'binary']
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','work_budget','md5','process','heap','bif_info','term_compare','big','bif_numeric','bif_binary','bif_map','map_hamt','map_runtime','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','stacktrace','raise_trace','bif_exception','pid_table','bif_process','bif_process_info','bif_external','bif_dict','fun','apply','message','receive','registry','receive_marker','monitor','preloaded','binary_match']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','work_budget','md5','process','heap','capability','bif_info','term_compare','big','bif_numeric','bif_binary','bif_map','map_hamt','map_runtime','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','stacktrace','raise_trace','bif_exception','pid_table','bif_process','bif_process_info','bif_external','bif_dict','fun','apply','message','receive','registry','receive_marker','monitor','preloaded','binary_match']
             run('program-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -1001,9 +1016,9 @@ def main():
                 'core_engine_test', 'core_executor_test', 'core_batch_admission_test', 'api_batch_admission_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'api_memory_test', 'core_memory_test', 'core_work_test', 'core_work_runtime_test', 'api_work_test', 'core_alloc_test', 'engine_lifecycle', 'two_isolates', 'run_beam'])
             run('profile-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
                 'core_hamt_test', 'core_map_test', 'core_map_execution_test', 'core_external_fun_test', 'core_raise_trace_test',
-                'core_raise_execution_test', 'core_raise_work_test', 'core_max_test', 'core_setelement_test', 'core_bif_work_test', 'core_times_test',  'core_div_test', 'core_abs_test', 'core_negate_test', 'core_list_integer_test', 'core_map_key_test', 'core_integer_predicate_test', 'core_list_parts_test', 'core_not_test', 'core_atom_list_test', 'core_apply_test', 'core_function_exported_test', 'core_process_info_test', 'core_etf_arena_test', 'core_external_decode_test', 'core_module_loaded_test', 'core_dict_test', 'core_error2_test', 'core_make_tuple_test', 'core_tuple_list_test', 'core_list_tuple_test', 'core_floor_test', 'core_node_test'])
+                'core_raise_execution_test', 'core_raise_work_test', 'core_max_test', 'core_setelement_test', 'core_bif_work_test', 'core_times_test',  'core_div_test', 'core_abs_test', 'core_negate_test', 'core_list_integer_test', 'core_map_key_test', 'core_integer_predicate_test', 'core_list_parts_test', 'core_not_test', 'core_atom_list_test', 'core_apply_test', 'core_function_exported_test', 'core_process_info_test', 'core_etf_arena_test', 'core_external_decode_test', 'core_module_loaded_test', 'core_dict_test', 'core_error2_test', 'core_make_tuple_test', 'core_tuple_list_test', 'core_list_tuple_test', 'core_floor_test', 'core_node_test', 'core_capability_test', 'api_capability_test'])
             run('profile-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
-                '-R', '^(core_hamt_runtime|core_map_runtime|core_map_execution|core_external_fun_runtime|core_raise_trace_prepare|core_raise_execution|core_raise_work|core_max_execution|core_setelement_execution|core_setelement_work|core_times_execution|core_times_work|core_div_execution|core_div_work|core_abs_execution|core_abs_work|core_negate_execution|core_negate_work|core_rem_execution|core_rem_work|core_list_integer_execution|core_list_integer_work|core_min_execution|core_min_work|core_map_key_execution|core_map_key_work|core_integer_predicate_execution|core_integer_predicate_work|core_list_parts_execution|core_list_parts_work|core_list_predicate_execution|core_list_predicate_work|core_not_execution|core_not_work|core_atom_predicate_execution|core_atom_predicate_work|core_atom_list_execution|core_atom_list_work|core_binary_predicate_execution|core_binary_predicate_work|core_apply_components|core_apply_work|core_function_exported_execution|core_function_exported_work|core_process_info_execution|core_process_info_work|core_etf_arena|core_external_decode_execution|core_external_decode_work|core_module_loaded_execution|core_module_loaded_work|core_dict_execution|core_dict_work|core_error2_execution|core_error2_work|core_make_tuple_execution|core_make_tuple_work|core_tuple_list_execution|core_tuple_list_work|core_list_tuple_execution|core_list_tuple_work|core_floor_execution|core_floor_work|core_node_execution|core_node_work)$'])
+                '-R', '^(core_hamt_runtime|core_map_runtime|core_map_execution|core_external_fun_runtime|core_raise_trace_prepare|core_raise_execution|core_raise_work|core_max_execution|core_setelement_execution|core_setelement_work|core_times_execution|core_times_work|core_div_execution|core_div_work|core_abs_execution|core_abs_work|core_negate_execution|core_negate_work|core_rem_execution|core_rem_work|core_list_integer_execution|core_list_integer_work|core_min_execution|core_min_work|core_map_key_execution|core_map_key_work|core_integer_predicate_execution|core_integer_predicate_work|core_list_parts_execution|core_list_parts_work|core_list_predicate_execution|core_list_predicate_work|core_not_execution|core_not_work|core_atom_predicate_execution|core_atom_predicate_work|core_atom_list_execution|core_atom_list_work|core_binary_predicate_execution|core_binary_predicate_work|core_apply_components|core_apply_work|core_function_exported_execution|core_function_exported_work|core_process_info_execution|core_process_info_work|core_etf_arena|core_external_decode_execution|core_external_decode_work|core_module_loaded_execution|core_module_loaded_work|core_dict_execution|core_dict_work|core_error2_execution|core_error2_work|core_make_tuple_execution|core_make_tuple_work|core_tuple_list_execution|core_tuple_list_work|core_list_tuple_execution|core_list_tuple_work|core_floor_execution|core_floor_work|core_node_execution|core_node_work|core_capability_execution|api_capability_execution)$'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
                 '-R', '^(core_batch_admission|api_batch_admission|beam_runner_eager_dependency_groups|core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|api_memory_gate|core_allocation_lifetime|core_memory_scope|core_work_ledger|core_work_runtime_gate|api_work_gate|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:

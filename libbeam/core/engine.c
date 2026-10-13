@@ -118,12 +118,15 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_make_tuple_2,{am_erlang,am_make_tuple,2,lb_bif_make_tuple_2,BIF_KIND_HEAVY}},
         {BIF_tuple_to_list_1,{am_erlang,am_tuple_to_list,1,lb_bif_tuple_to_list_1,BIF_KIND_HEAVY}},
         {BIF_list_to_tuple_1,{am_erlang,am_list_to_tuple,1,lb_bif_list_to_tuple_1,BIF_KIND_HEAVY}},
-        {BIF_floor_1,{am_erlang,am_floor,1,lb_bif_floor_1,BIF_KIND_HEAVY}}
+        {BIF_floor_1,{am_erlang,am_floor,1,lb_bif_floor_1,BIF_KIND_HEAVY}},
+#define LB_DENIAL(id, name, arity, category) {id,{am_erlang,am_##name,arity,lb_bif_deny_##name##_##arity,BIF_KIND_HEAVY}},
+#include "capability_denials.def"
+#undef LB_DENIAL
     };
     size_t i;
     _Static_assert(sizeof(natives)/sizeof(natives[0])==LB_NATIVE_COUNT,"native catalog size");
     _Static_assert(BIF_get_module_info_1<BIF_SIZE && BIF_get_module_info_2<BIF_SIZE && BIF_splus_2<BIF_SIZE && BIF_integer_to_binary_1<BIF_SIZE,"native identities");
-    _Static_assert(BIF_SIZE<UINT_MAX-4u,"native extension identities");
+    _Static_assert(BIF_SIZE<UINT_MAX-LB_NATIVE_EXTENSION_COUNT,"native extension identities");
     if(!out) return LB_ENGINE_INVALID;
     *out=NULL;
     LbResourceLimits selected=limits?*limits:lb_resource_defaults();
@@ -139,13 +142,14 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
     engine->empty_tuple[1]=THE_NON_VALUE;
     engine->numeric_locale=(void *)newlocale(LC_NUMERIC_MASK,"C",(locale_t)0);
     if(!engine->numeric_locale) { lb_release(domain,engine); if(lb_alloc_domain_destroy(domain)!=LB_ALLOC_OK) abort(); return LB_ENGINE_NO_MEMORY; }
-    if(lb_alloc_domain_allocate(domain,(BIF_SIZE+5u)*sizeof(BifEntry),&memory)!=LB_ALLOC_OK) {
+    if(lb_alloc_domain_allocate(domain,(BIF_SIZE+LB_NATIVE_EXTENSION_COUNT)*sizeof(BifEntry),&memory)!=LB_ALLOC_OK) {
         release_control(engine); return LB_ENGINE_NO_MEMORY;
     }
-    catalog=memory; engine->bifs=catalog; memset(catalog,0,(BIF_SIZE+5u)*sizeof(*catalog));
+    catalog=memory; engine->bifs=catalog; memset(catalog,0,(BIF_SIZE+LB_NATIVE_EXTENSION_COUNT)*sizeof(*catalog));
     for(i=0;i<LB_NATIVE_COUNT;++i) {
-        /* These real implementations may collect. Generated numeric identities
-         * are not permissions: only these populated descriptors are admitted. */
+        /* Implementations may collect; explicit denials never perform their
+         * prohibited effects. Numeric identities alone are not permissions. */
+        assert(natives[i].id<BIF_SIZE+LB_NATIVE_EXTENSION_COUNT && !catalog[natives[i].id].f);
         engine->native_ids[i]=natives[i].id;
         catalog[natives[i].id]=natives[i].entry;
     }

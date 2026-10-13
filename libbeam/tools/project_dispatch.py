@@ -175,7 +175,7 @@ def owned_send(body):
         'ERTS_REQ_PROC_MAIN_LOCK(c_p);':'',
         'PROCESS_MAIN_CHK_LOCKS(c_p);':'',
         'HTOP = HEAP_TOP(c_p);':'SWAPIN;',
-        'FCALLS = c_p->fcalls;':'FCALLS-=1+(Sint)c_p->last_native_cost;\n  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;\n  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;\n  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;'
+        'FCALLS = c_p->fcalls;':'FCALLS-=1+(Sint)c_p->last_native_cost;\n  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;\n  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;\n  if(c_p->status==LB_PROCESS_CAPABILITY_DENIED) goto capability_denied;\n  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;'
     }
     for old,new in replacements.items():
         if body.count(old)!=1: raise RuntimeError('Changed native send boundary '+old)
@@ -211,6 +211,7 @@ def owned_bif_call(body):
         '      FCALLS-=(Sint)c_p->last_native_cost;\n'
         '      if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;\n'
         '      if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;\n'
+        '      if(c_p->status==LB_PROCESS_CAPABILITY_DENIED) goto capability_denied;\n'
         '      if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n'
         '      if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;\n'
         '      if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;\n'

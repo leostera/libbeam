@@ -5,6 +5,7 @@
 #define LIBBEAM_CORE_WORLD_H
 #include "engine.h"
 #include "load_report.h"
+#include "capability.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -17,7 +18,7 @@ typedef enum {
     LB_WORLD_BAD_BEAM, LB_WORLD_UNSUPPORTED, LB_WORLD_NOT_FOUND,
     LB_WORLD_EXCEPTION, LB_WORLD_CANCELLED, LB_WORLD_BAD_RESULT,
     LB_WORLD_RESOURCE_LIMIT, LB_WORLD_EXECUTION_REFUSED, LB_WORLD_ENVIRONMENT,
-    LB_WORLD_MEMORY_LIMIT, LB_WORLD_WORK_LIMIT
+    LB_WORLD_MEMORY_LIMIT, LB_WORLD_WORK_LIMIT, LB_WORLD_CAPABILITY_DENIED
 } LbWorldStatus;
 typedef struct { const unsigned char *data; size_t size; } LbBytesView;
 #define LB_CALL_BYTES_LIMIT (64u * 1024u)
@@ -48,6 +49,8 @@ void lb_world_release(LbWorld *);
 /* Poll never runs BEAM. The result view is borrowed until consume/release.
  * A host-copy allocation failure can leave a ready completion unconsumed. */
 LbWorldStatus lb_call_poll(LbCall *,LbBytesView *);
+/* Static diagnostic on an unconsumed denied completion, otherwise NULL. */
+const LbCapabilityFailure *lb_call_capability_failure(LbCall *);
 LbWorldStatus lb_call_consume(LbCall *);
 /* Pending invocation cancellation uses causal containment, not state rollback.
  * Private families permit reuse; escaped effects require world closure. */

@@ -103,6 +103,9 @@ def audit(root, request, contracts_path=None, wrappers_path=None):
                 'sha256': digest,
             })
     engine = (root / 'libbeam/core/engine.c').read_text()
+    denials_path = root / 'libbeam/core/capability_denials.def'
+    has_denials = denials_path.is_file() and '#include "capability_denials.def"' in engine
+    registered = engine + ('\n' + denials_path.read_text() if has_denials else '')
     preloaded_path = root / 'beam/erts/preloaded/src/erlang.erl'
     preloaded = preloaded_path.read_text()
     requested = requested_mfas(request)
@@ -124,7 +127,7 @@ def audit(root, request, contracts_path=None, wrappers_path=None):
             row['native_declaration'] = native
             row['native_source_candidates'] = definitions.get(native['symbol'], [])
             row['native_id_in_engine_catalog'] = bool(re.search(
-                r'\{BIF_' + re.escape(native['symbol']) + r'\s*,', engine))
+                r'(?:\{BIF_|LB_DENIAL\(BIF_)' + re.escape(native['symbol']) + r'\s*,', registered))
         else:
             row['native_declaration'] = None
             row['requires_wrapper_or_intrinsic_review'] = True
@@ -136,6 +139,8 @@ def audit(root, request, contracts_path=None, wrappers_path=None):
             for match in re.finditer(pattern, preloaded)]
         rows.append(row)
     sources = [table_path, preloaded_path, root / 'libbeam/core/engine.c', request]
+    if has_denials:
+        sources.append(denials_path)
     if contracts_path:
         sources.append(contracts_path)
     if wrappers_path:

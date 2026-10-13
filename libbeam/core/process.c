@@ -57,6 +57,7 @@ const BeamInstr lb_host_return[1]={op_normal_exit};
 int lb_instruction_supported(unsigned op)
 {
     switch(op) {
+    case op_i_load_nif: return 1; /* reviewed capability boundary, never NIF execution */
 #include "lb_dispatch_support.inc"
     default:return 0;
     }
@@ -330,6 +331,17 @@ dispatch:
         if(held!=LB_ALLOC_OK) goto malformed_code;
     }
     switch(next_op) {
+    OpCase(i_load_nif): {
+        /* Native ops.tab lowers direct load_nif/2 calls to this instruction.
+         * The authorized policy boundary replaces the entire effectful native
+         * operation, before code-modification permission or library access. */
+        SWAPOUT;
+        Eterm denied=lb_bif_deny_load_nif_2(c_p,reg,I);
+        SWAPIN; FCALLS-=(Sint)c_p->last_native_cost;
+        assert(is_non_value(denied));
+        if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+        goto capability_denied;
+    }
 #include "lb_dispatch_generated.inc"
     OpCase(call_bif_W): {
         /* Owned adaptation of generated call_bif_W and nif_bif__epilogue. The
@@ -356,6 +368,7 @@ dispatch:
             if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
             if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
             if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+            if(c_p->status==LB_PROCESS_CAPABILITY_DENIED) goto capability_denied;
             if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
             goto find_func_info;
         }
@@ -375,6 +388,7 @@ context_switch3:
     c_p->flags &= ~(1u<<13); /* native F_DELAY_GC cannot cross schedule-out */
     c_p->status=LB_PROCESS_YIELDED; goto stop;
 find_func_info: {
+    if(c_p->status==LB_PROCESS_CAPABILITY_DENIED) goto capability_denied;
     if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;
     /* Materialize the native error value, not handle_error/stacktrace/catch.
      * Keep the original code/flags and extended payload for future handling.
@@ -412,6 +426,9 @@ find_func_info: {
     }
     c_p->status=LB_PROCESS_EXCEPTION; goto stop;
 }
+capability_denied:
+    assert(c_p->capability_failure);
+    c_p->status=LB_PROCESS_CAPABILITY_DENIED; goto stop;
 execution_refused:
     c_p->status=LB_PROCESS_REFUSED; goto stop;
 environment_failure:
@@ -439,7 +456,8 @@ stop:
     LbAllocStatus failure=lb_alloc_domain_failure(c_p->entry_module->space->domain);
     if(failure==LB_ALLOC_WORK_LIMIT) c_p->status=LB_PROCESS_WORK_LIMIT;
     if(c_p->status!=LB_PROCESS_YIELDED) {
-        lb_monitor_exit(c_p,c_p->status!=LB_PROCESS_WORK_LIMIT && failure!=LB_ALLOC_LIMIT);
+        lb_monitor_exit(c_p,c_p->status!=LB_PROCESS_WORK_LIMIT &&
+                        c_p->status!=LB_PROCESS_CAPABILITY_DENIED && failure!=LB_ALLOC_LIMIT);
         lb_registry_remove(c_p);
         c_p->receive_message=NULL; c_p->receive_root=NIL;
         lb_message_queue_clear(&c_p->messages);

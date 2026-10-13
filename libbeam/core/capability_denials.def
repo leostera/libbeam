@@ -1,0 +1,32 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright 2026 Leandro Ostera <leandro@ostera.io>
+ * Exact reviewed erlang bindings. Not an unresolved-import fallback.
+ * Extension IDs 0..4 are the existing conversion wrappers; 5..17 are below.
+ */
+LB_DENIAL(BIF_call_on_load_function_1, call_on_load_function, 1, CODE_LOADING)
+LB_DENIAL(BIF_delete_module_1, delete_module, 1, CODE_LOADING)
+LB_DENIAL(BIF_display_1, display, 1, HOST_OUTPUT)
+LB_DENIAL(BIF_SIZE+5u, display_string, 1, HOST_OUTPUT)
+LB_DENIAL(BIF_display_string_2, display_string, 2, HOST_OUTPUT)
+LB_DENIAL(BIF_dist_ctrl_put_data_2, dist_ctrl_put_data, 2, DISTRIBUTION)
+LB_DENIAL(BIF_finish_after_on_load_2, finish_after_on_load, 2, CODE_LOADING)
+LB_DENIAL(BIF_finish_loading_1, finish_loading, 1, CODE_LOADING)
+LB_DENIAL(BIF_SIZE+6u, halt, 0, HOST_CONTROL)
+LB_DENIAL(BIF_SIZE+7u, halt, 1, HOST_CONTROL)
+LB_DENIAL(BIF_halt_2, halt, 2, HOST_CONTROL)
+LB_DENIAL(BIF_has_prepared_code_on_load_1, has_prepared_code_on_load, 1, CODE_LOADING)
+LB_DENIAL(BIF_load_nif_2, load_nif, 2, NATIVE_LIBRARY)
+LB_DENIAL(BIF_monitor_node_2, monitor_node, 2, DISTRIBUTION)
+LB_DENIAL(BIF_monitor_node_3, monitor_node, 3, DISTRIBUTION)
+LB_DENIAL(BIF_SIZE+8u, open_port, 2, HOST_PORT)
+LB_DENIAL(BIF_SIZE+9u, port_close, 1, HOST_PORT)
+LB_DENIAL(BIF_SIZE+10u, port_command, 2, HOST_PORT)
+LB_DENIAL(BIF_SIZE+11u, port_command, 3, HOST_PORT)
+LB_DENIAL(BIF_SIZE+12u, port_connect, 2, HOST_PORT)
+LB_DENIAL(BIF_SIZE+13u, port_control, 3, HOST_PORT)
+LB_DENIAL(BIF_port_set_data_2, port_set_data, 2, HOST_PORT)
+LB_DENIAL(BIF_SIZE+14u, prepare_loading, 2, CODE_LOADING)
+LB_DENIAL(BIF_SIZE+15u, process_display, 2, HOST_OUTPUT)
+LB_DENIAL(BIF_SIZE+16u, purge_module, 1, CODE_LOADING)
+LB_DENIAL(BIF_SIZE+17u, set_cookie, 2, DISTRIBUTION)
+LB_DENIAL(BIF_setnode_2, setnode, 2, DISTRIBUTION)

@@ -250,7 +250,14 @@ LbCodeStatus lb_emit(LoaderState *st,BeamOp *op)
     case op_line_I:
         /* Explicit no-line-instrumentation profile; metadata is retained below. */
         st->ci-=2; break;
-    case op_nif_start: case op_i_nif_padding: case op_on_load: case op_i_debug_line_IIt:
+    case op_nif_start:
+        /* emu_load.c removes this entry marker. No NIF installation exists in
+         * this profile, so no mutable are_nifs patch table is needed. The
+         * verifier requires a function header; native compiler placement can
+         * follow allocation/init prologues. No register/heap facts change. */
+        VERIFY(st->function_number>0 && st->ci>st->last_func_start);
+        --st->ci; break;
+    case op_i_nif_padding: case op_on_load: case op_i_debug_line_IIt:
         return LB_CODE_UNSUPPORTED;
     case op_i_bs_match_string_xfWW: case op_i_bs_match_string_yfWW:
         ALLOC(string_patch(st,st->ci-1,st->codev[st->ci-2]/8+(st->codev[st->ci-2]%8!=0))); break;

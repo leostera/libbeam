@@ -4,6 +4,7 @@
 #ifndef LIBBEAM_CORE_WORK_BUDGET_INTERNAL_H
 #define LIBBEAM_CORE_WORK_BUDGET_INTERNAL_H
 #include "work_budget.h"
+#include "capability.h"
 struct LbWorkBudget {
     LbWorld *world;
     LbAllocDomain *domain;
@@ -12,5 +13,6 @@ struct LbWorkBudget {
     size_t references;
     uint64_t limit,remaining,denied_charge;
     int exhausted,escaped;
+    const LbCapabilityFailure *capability_failure; /* first causal denial; static storage */
 };
 #endif

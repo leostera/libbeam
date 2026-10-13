@@ -17,6 +17,7 @@
 #include "monitor.h"
 #include "work_budget.h"
 #include "process_dict.h"
+#include "capability.h"
 #define F_INSLPQUEUE (1u<<1)
 #define F_TIMO (1u<<2)
 #define F_DELAY_GC (1u<<13) /* pinned native matching/schedule-out flag */
@@ -59,9 +60,12 @@ struct LbProcess {
     size_t collections, heap_reserved;
     size_t last_binary_bytes; /* zero/copy work reported by one storage operation */
     LbProcessStatus status;
+    const LbCapabilityFailure *capability_failure; /* static diagnostic, not a term */
     int running;
 };
 LbProcessStatus lb_process_identity(LbProcess *,Eterm *);
+/* Charge before denial; failure must bypass guest handlers and guards. */
+Eterm lb_process_deny_capability(LbProcess *,const LbCapabilityFailure *);
 /* Prepare an unpublished local-fun/0 child with copied environment and PID.
  * Domain/namespace serialization is required; queue publication is separate. */
 LbProcessStatus lb_process_create_fun(LbProcess *,Eterm,size_t,LbProcess **);

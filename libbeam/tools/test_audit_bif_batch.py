@@ -111,6 +111,19 @@ class BifInventoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             wrapper_plans(path, {('alias', 0)})
 
+    def test_denial_declarations_match_policy(self):
+        import re
+        root = Path(__file__).resolve().parents[2]
+        expected = set(requested_mfas(root / 'libbeam/core/otp/bif-batch-request.txt'))
+        _, contracts = contracts_for_mfas(root / 'libbeam/core/otp/bif-batch-contracts.json', expected)
+        expected = {mfa for mfa, contract in contracts.items() if contract['classification'] == 'denial'}
+        declarations = re.findall(r'^LB_DENIAL\(([^,]+), (\w+), (\d+), (\w+)\)$',
+                                 (root / 'libbeam/core/capability_denials.def').read_text(), re.M)
+        self.assertEqual({(name, int(arity)) for _, name, arity, _ in declarations}, expected)
+        self.assertEqual(len(declarations), len(expected))
+        self.assertEqual(len({identity for identity, _, _, _ in declarations}), len(expected))
+        self.assertEqual(next(category for _, name, _, category in declarations if name == 'load_nif'), 'NATIVE_LIBRARY')
+
     def test_pinned_inventory(self):
         root = Path(__file__).resolve().parents[2]
         result = audit(root, root / 'libbeam/core/otp/bif-batch-request.txt',

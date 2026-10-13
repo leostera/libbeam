@@ -247,7 +247,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         p->error.stage="operation arity"; p->error.offset=op->offset;
         REQUIRE(op->op<NUM_GENERIC_OPS);
         switch(op->op) {
-        case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_label_1:case genop_line_1:
+        case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_label_1:case genop_line_1:case genop_nif_start_0:
         case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_return_0:case genop_send_0:
         case genop_loop_rec_2:case genop_loop_rec_end_1:case genop_remove_message_0:
         case genop_wait_1:case genop_wait_timeout_2:case genop_timeout_0:
@@ -273,6 +273,11 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
            op->op!=genop_new_map_3 && op->op!=genop_put_map_assoc_5 && op->op!=genop_put_map_exact_5 &&
            op->op!=genop_get_map_elements_3 && op->op!=genop_has_map_fields_3)
             REQUIRE(op->arity==(unsigned)gen_opc[op->op].arity);
+        if(op->op==genop_nif_start_0) {
+            /* Native entry metadata, not permission to install or call a NIF. */
+            p->error.stage="nif_start entry metadata";
+            REQUIRE(function>0); /* Native metadata may follow allocation/init prologues. */
+        }
         nodes[i].op=op;
         if(op->op==genop_int_func_start_5) {
             size_t r,arity=(Uint)op->a[4].val;
@@ -303,7 +308,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         if(++steps>1048576) return LB_CODE_LIMIT;
         op=nodes[index].op; a=op->a; p->error.stage="register/stack/heap admission"; p->error.offset=op->offset;
         switch(op->op) {
-        case genop_int_func_start_5:case genop_label_1:case genop_line_1:break;
+        case genop_int_func_start_5:case genop_label_1:case genop_line_1:case genop_nif_start_0:break;
         case genop_move_2:
             REQUIRE(root_source(st,&f,a[0])); s=shape(st,&f,a[0]); REQUIRE(destination(&f,a[1],s)); break;
         case genop_swap_2:

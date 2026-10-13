@@ -78,12 +78,17 @@ static int finish_task(LbTask *task,LbTaskStatus status)
 {
     LbCall *call=task->completion;
     int limited=status==LB_TASK_MEMORY_LIMIT?1:(status==LB_TASK_WORK_LIMIT?2:0);
-    if(status!=LB_TASK_CANCELLED && status!=LB_TASK_MEMORY_LIMIT && status!=LB_TASK_WORK_LIMIT) {
+    if(status!=LB_TASK_CANCELLED && status!=LB_TASK_MEMORY_LIMIT &&
+       status!=LB_TASK_WORK_LIMIT && status!=LB_TASK_CAPABILITY_DENIED) {
         lb_monitor_exit(task->process,1);
         if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_LIMIT) { status=LB_TASK_MEMORY_LIMIT; limited=1; }
         if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_WORK_LIMIT) { status=LB_TASK_WORK_LIMIT; limited=2; }
     }
     if(status==LB_TASK_WORK_LIMIT && call && task->domain->failed_work && call->budget!=task->domain->failed_work)
+        status=LB_TASK_CANCELLED;
+    /* A denial belongs to its causal owner, not an unrelated root whose
+     * execution happened to borrow that owner's work. */
+    if(status==LB_TASK_CAPABILITY_DENIED && call && !call->budget->capability_failure)
         status=LB_TASK_CANCELLED;
     task->status=status;
     if(call) {
@@ -131,7 +136,7 @@ static void step(LbTask *task)
 {
     /* Scheduling bounds are separate from stable causal invocation credit. */
     LbWorld *world=task->world; LbAllocDomain *domain=task->domain;
-    int limited=0;
+    int limited=0,denied=0;
     lb_alloc_domain_begin_operation(domain);
     lb_work_domain_borrow(domain,task->process->work_active);
     LbProcessStatus result=lb_process_run(task->process,1024,128);
@@ -151,6 +156,11 @@ static void step(LbTask *task)
         limited=finish_task(task,lb_alloc_domain_failure(domain)==LB_ALLOC_LIMIT?LB_TASK_MEMORY_LIMIT:LB_TASK_NO_MEMORY); break;
     case LB_PROCESS_LIMIT: limited=finish_task(task,LB_TASK_LIMIT); break;
     case LB_PROCESS_WORK_LIMIT: limited=finish_task(task,LB_TASK_WORK_LIMIT); break;
+    case LB_PROCESS_CAPABILITY_DENIED:
+        assert(task->process->capability_failure);
+        if(owner && !owner->capability_failure) owner->capability_failure=task->process->capability_failure;
+        denied=1;
+        limited=finish_task(task,LB_TASK_CAPABILITY_DENIED); break;
     case LB_PROCESS_REFUSED: limited=finish_task(task,LB_TASK_REFUSED); break;
     case LB_PROCESS_ENVIRONMENT: limited=finish_task(task,LB_TASK_ENVIRONMENT); break;
     default: abort();
@@ -164,6 +174,9 @@ static void step(LbTask *task)
     lb_work_domain_clear_failure(domain);
     if(limited) {
         if(owner) lb_task_cancel_family_locked(owner,limited==2?LB_TASK_WORK_LIMIT:LB_TASK_MEMORY_LIMIT);
+        else if(world) lb_world_close_for_limit_locked(world);
+    } else if(denied) {
+        if(owner) lb_task_cancel_family_locked(owner,LB_TASK_CAPABILITY_DENIED);
         else if(world) lb_world_close_for_limit_locked(world);
     }
     lb_work_budget_release(owner);
