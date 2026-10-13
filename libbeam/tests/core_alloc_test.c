@@ -126,19 +126,22 @@ int main(void)
         void *p, *q, *out;
         CHECK(lb_alloc_domain_create(&system, &a) == LB_ALLOC_OK);
         CHECK(lb_alloc_domain_create(&system, &b) == LB_ALLOC_OK);
+        CHECK(a->block_count==0 && b->block_count==0);
         CHECK(lb_alloc_domain_allocate(a, 71, &p) == LB_ALLOC_OK);
         CHECK(lb_alloc_domain_allocate(b, 19, &q) == LB_ALLOC_OK);
+        CHECK(a->block_count==1 && b->block_count==1);
         CHECK((uintptr_t)p % _Alignof(max_align_t) == 0);
         memset(q, 0x5a, 19);
         CHECK(lb_alloc_domain_destroy(a) == LB_ALLOC_BUSY && host.live == 4);
         CHECK(lb_alloc_domain_release(b, p) == LB_ALLOC_INVALID);
         CHECK(lb_alloc_domain_release(a, (char *)p + 1) == LB_ALLOC_INVALID);
+        CHECK(a->block_count==1 && b->block_count==1);
         CHECK(lb_alloc_domain_allocate(a, SIZE_MAX, &out) == LB_ALLOC_NO_MEMORY && !out);
         CHECK(lb_alloc_domain_allocate(a, 0, &out) == LB_ALLOC_INVALID && !out);
-        CHECK(lb_alloc_domain_release(a, p) == LB_ALLOC_OK);
+        CHECK(lb_alloc_domain_release(a, p) == LB_ALLOC_OK && a->block_count==0);
         CHECK(lb_alloc_domain_destroy(a) == LB_ALLOC_OK && host.live == 2);
         CHECK(((unsigned char *)q)[18] == 0x5a);
-        CHECK(lb_alloc_domain_release(b, q) == LB_ALLOC_OK);
+        CHECK(lb_alloc_domain_release(b, q) == LB_ALLOC_OK && b->block_count==0);
         CHECK(lb_alloc_domain_destroy(b) == LB_ALLOC_OK && host.live == 0);
     }
     {

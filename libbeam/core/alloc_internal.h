@@ -14,6 +14,7 @@ struct LbAllocDomain {
     LbBlock *blocks;
     LbAllocDomain *parent;
     size_t children,current,peak,limit;
+    size_t block_count; /* exact live registry length, including allocation headers */
     LbAllocStatus failure;
     LbWorkBudget *work; /* borrowed only within the serialized operation's owned lease */
     /* First denied owner stays leased until cleanup; later quota/OOM results

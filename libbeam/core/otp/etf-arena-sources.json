@@ -1,0 +1,15 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Shared ETF parser preparation: explicit literal versus temporary storage, one-term consumption, charged parsing loops. This does not admit binary_to_term/1.",
+  "sources": {
+    "beam/erts/emulator/beam/external.c": "cbfdfcef0f756c468c6f2fc8a23d478a01daeddb3a4db8e240a8590252a4414b"
+  },
+  "adaptations": [
+    "Reuse the existing native-derived intrusive pending-slot decoder rather than executing an auxiliary VM or duplicating term parsing. Temporary storage does not acquire TAG_LITERAL_PTR; literal callers retain existing pointer tags and strict full-buffer checks.",
+    "Expose consumed length through the bounded reader so a later binary_to_term adapter can accept trailing bytes as native ETF decoding does. Atom writes and external-fun bindings remain deferred; partially decoded arenas must never be traversed or published.",
+    "Pass the storage class through big integers, tuples, list links, binary references and map/HAMT postprocessing. Charge decoder node walks and sized construction/validation loops, preserving allocator/work failure causes independently from parser error categories.",
+    "Tests prove a temporary composite and HAMT can be copied into a process, survive arena destruction and moving GC, and retain no literal-pointer tags, including HAMT descendants. Check pending atoms without interning, exact consumed length, every truncated prefix, allocator/quota and work prefixes, and final balance. Independent OTP confirms scalar values, signed zero bits, bytes, maps, trailing consumption and malformed prefixes.",
+    "This manifest records parser preparation, not BIF or application acceptance. The subsequent bounded runtime data adapter and its transactional publication/accounting are described in external-sources.json. Compression, fun/resource identities and their additional ownership requirements remain outside that adapter's admitted profile."
+  ],
+  "other_inputs": ["loader-sources.json", "binary-sources.json", "flatmap-error-sources.json"]
+}

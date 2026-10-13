@@ -1,0 +1,14 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Native list_to_tuple/1 proper-list boundary and shallow tuple construction, with structural native-return proofs.",
+  "sources": {
+    "beam/erts/emulator/beam/bif.c": "4bb45111028b9e86edf72626dd92c8ef78397dd8906979e64a899bc5ccfd4bbb"
+  },
+  "adaptations": [
+    "Charge each cons visited while establishing a proper-list length bounded by MAX_ARITYVAL. Reject improper/non-list inputs with badarg, except that exhausted traversal work remains a resource outcome. Stop over-limit traversal explicitly; no maximum-sized-list conversion is claimed.",
+    "NIL returns the immutable Engine-owned empty tuple. Nonempty input reserves tuple storage plus primitive heap credit, reloads its root after collection, and copies element references in order without modifying source cells. All fallible steps precede tuple publication; memory/quota/work causes remain distinct.",
+    "The compiler emits unchecked test_arity after local forwarding calls whose successful return must be a tuple. The verifier now proves known native tuple-return contracts for direct calls and exact branchless native-tail-call forwarding bodies. It does not trust type hints, follow branches, infer recursive summaries or invent element-arity facts. Every callee still undergoes complete verification. Normalized tests reject mixed/unknown returns, recursive guesses, wrong arities, stale X facts and extraction without an arity proof.",
+    "Share the bidirectional component harness with tuple_to_list while retaining direction-specific fixtures and assertions. Cover empty/mixed/repeated elements, ordering, source and reference preservation, moving GC, allocation/quota/work prefixes, heap credit and exact balance. An improper 65-cell prefix verifies work denial before tail discovery versus badarg after a complete walk without allocation or mutation. Independent OTP and shared-worker exact/one-below/reuse/peer/reclamation tests complement the component evidence."
+  ],
+  "other_inputs": ["make-tuple-sources.json", "tuple-list-sources.json", "loader-sources.json"]
+}

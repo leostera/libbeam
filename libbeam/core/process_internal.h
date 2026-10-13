@@ -16,6 +16,7 @@
 #include "receive_marker.h"
 #include "monitor.h"
 #include "work_budget.h"
+#include "process_dict.h"
 #define F_INSLPQUEUE (1u<<1)
 #define F_TIMO (1u<<2)
 #define F_DELAY_GC (1u<<13) /* pinned native matching/schedule-out flag */
@@ -46,10 +47,13 @@ struct LbProcess {
     Eterm *heap, *htop, *stop, *hend;
     LbOffHeap off_heap, writable;
     uint64_t bin_vheap_sz; /* owned soft collection threshold, in words */
+    LbProcDict *dictionary; /* independent owned metadata; data[] are moving roots */
+    Eterm error_handler; /* atom-only process setting; defaults independently on spawn */
     Eterm construction_root; /* explicit temporary root during fallible append */
     LbDecimal *decimal; /* sole pending native continuation; independent scratch */
     Uint freason; /* Native encoded scalar, never a GC root. */
     Eterm fvalue,exception_value; /* Pending payload and expanded terminal value. */
+    Eterm ftrace; /* Owned opaque supplied trace; moving root, never a raw code pointer. */
     const BeamInstr *native_callsite,*native_trace_previous; /* owned code leases, not heap aliases */
     Uint arity, last_gc_cost, last_native_cost;
     size_t collections, heap_reserved;

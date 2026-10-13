@@ -262,6 +262,8 @@ def main():
                  source / 'erts/emulator/beam/register.h',
                  tools.parent / 'tests/native_ownership_tree_test.c',
                  tools.parent / 'tests/native_constant_arena_test.c',
+                 tools.parent / 'tests/native_shared_preparation_test.c',
+                 tools.parent / 'examples/engine_prepare_probe.cpp',
                  tools.parent / 'examples/engine_lifecycle.cpp',
                  tools.parent / 'CMakeLists.txt',
                  source / 'erts/emulator/beam/erl_persistent_state.h',
@@ -371,6 +373,8 @@ def main():
                 (output / 'compile-settings.log').read_text().splitlines()
                 if line.startswith(('CC=', 'CFLAGS=', 'INCLUDES=')))
             components = [
+                ('shared-preparation', 'native_shared_preparation_test.c',
+                 'NATIVE_SHARED_PREFIX_OK world_tables=false constants_release=true io_release=true early_scheduler_release=true thread_progress_release=true engine_shutdown=false'),
                 ('constant-arena', 'native_constant_arena_test.c',
                  'NATIVE_CONSTANT_ARENA_OK retained_bases=true offheap_release=true peer_survival=true engine_shutdown=false'),
                 ('ownership-tree', 'native_ownership_tree_test.c',

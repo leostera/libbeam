@@ -16,11 +16,13 @@ typedef struct LbProcess LbProcess;
 typedef Eterm (*LbBifFn)(LbProcess *,Eterm *,const BeamInstr *);
 typedef enum { BIF_KIND_REGULAR, BIF_KIND_HEAVY, BIF_KIND_GUARD } BifKind;
 typedef struct { Eterm module,name; int arity; LbBifFn f; BifKind kind; } BifEntry;
-#define LB_NATIVE_COUNT 15
+#define LB_NATIVE_COUNT 83
 struct LbEngine {
     LbAllocDomain *domain;
     LbResourceLimits limits;
+    Eterm empty_tuple[2]; /* immutable after construction; native read-ahead word */
     const BifEntry *bifs; /* immutable catalog, owned until shutdown */
+    void *numeric_locale; /* Engine-owned C numeric locale for exact text parsing */
     unsigned native_ids[LB_NATIVE_COUNT];
     size_t spaces;
     uint64_t reference_counter; /* serialized native reference-number generator */

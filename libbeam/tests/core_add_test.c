@@ -165,7 +165,8 @@ static void exceptional_values(LbCodeSpace *space,LbCodeModule *module)
         CHECK(!fegetenv(&saved));
         p=start(space,module,"guarded",2,16); p->reg[0]=floating(p,0); p->reg[1]=make_small(42);
         environment_failure=(int)i;
-        CHECK(run(p,0)==LB_PROCESS_EXCEPTION && lb_process_exception(p)==am_notsup && !environment_failure);
+        CHECK(run(p,0)==LB_PROCESS_ENVIRONMENT && !environment_failure);
+        CHECK(lb_process_result(p)==THE_NON_VALUE && p->exception_value==NIL);
         CHECK(!fesetenv(&saved)); lb_process_destroy(p);
     }
 }

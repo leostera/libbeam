@@ -1,11 +1,12 @@
 {
   "baseline": "29645963",
   "scope": "Native integer, Unicode, binary/string and floating segment writer dependencies; no bs_create_bin or other instruction admission.",
+  "reviewed_source_refresh": "source-refresh-59ab0dc.md",
   "sources": {
     "beam/erts/emulator/beam/erl_bits.c": "2b803014c329c7c2c30e60c0bffda90911985b9ce1703952e7315e28694ccdb6",
     "beam/erts/emulator/beam/erl_bits.h": "5a72bb9b9c14690d55ff94912faf3e8f0e9914e155593d2c6aa7474c3ff5bfec",
     "beam/erts/emulator/beam/emu/bs_instrs.tab": "49f203f8c900e9da964e3c483f186c7562fdb4ddb9bb2fa8a0f9af574c2d3279",
-    "beam/erts/emulator/sys/unix/erl_unix_sys.h": "5a5590588ca492e0c363c483363a515a3f1e8db7631bd42319e7f6ca8a7d27bc"
+    "beam/erts/emulator/sys/unix/erl_unix_sys.h": "1d536b01ca03d79bc77ec2b9a8a63f9ea6b9bef5a7c797c9c26796a60e166758"
   },
   "adaptations": [
     "fmt_small_be/le, fmt_big_be/le, SUBc, restore_and_shift, erts_bs_put_integer_be/le and erts_bs_put_utf8/16 retain native truncation, sign extension, little-endian short-byte grouping and scalar encoding algorithms. UTF-32 retains the instruction's scalar check followed by fixed-size integer writing.",

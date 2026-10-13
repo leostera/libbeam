@@ -29,12 +29,15 @@ static void begin(Program *p)
     memset(p,0,sizeof(*p));
     ADD(p,int_func_start_5,U(1),U(0),A(0),A(1),U(2)); ADD(p,label_1,U(2));
 }
-static void verify(LbCodeSpace *space,Program *input,LbCodeStatus expected)
+static void verify_using_bif(LbCodeSpace *space,Program *input,LbCodeStatus expected,Eterm *literals,size_t count,unsigned id)
 {
     LbBeamProgram program={0}; LoaderState st={0}; LbCodeStatus status;
-    BeamFile_ImportEntry import={am_erlang,am_Plus,2};
-    const BifEntry *bif=&space->engine->bifs[BIF_splus_2];
-    program.ops=input->ops; st.program=&program; st.space=space; st.label_count=10;
+    const BifEntry *bif=&space->engine->bifs[id];
+    BeamFile_ImportEntry import={bif->module,bif->name,(unsigned)bif->arity};
+    LbCodeModule module={0}; Export entry={0}; Export *imports[]={&entry};
+    module.imports=imports; st.module_code=&module;
+    program.ops=input->ops; program.atoms=space->atoms; program.literals=literals; program.literal_count=count;
+    st.program=&program; st.space=space; st.label_count=10;
     st.beam.imports.count=1; st.beam.imports.entries=&import; st.bif_imports=&bif;
     status=lb_verify_program(&st);
     if(status!=expected) fprintf(stderr,"status=%d expected=%d stage=%s\n",status,expected,program.error.stage);
@@ -43,6 +46,79 @@ static void verify(LbCodeSpace *space,Program *input,LbCodeStatus expected)
         BeamOp *op; size_t arg;
         for(op=program.ops;op;op=op->next) for(arg=0;arg<op->arity;++arg)
             if(op->a[arg].type==TAG_x || op->a[arg].type==TAG_y) CHECK((Uint)op->a[arg].val<MAX_REG);
+    }
+}
+static void verify_literals(LbCodeSpace *space,Program *input,LbCodeStatus expected,Eterm *literals,size_t count)
+{ verify_using_bif(space,input,expected,literals,count,BIF_splus_2); }
+static void verify(LbCodeSpace *space,Program *input,LbCodeStatus expected)
+{ verify_literals(space,input,expected,NULL,0); }
+static void forwarding_returns(LbCodeSpace *space)
+{
+    for(unsigned mode=0;mode<10;++mode) {
+        Program p; begin(&p); ADD(&p,allocate_2,U(0),U(2));
+        unsigned id=mode==2?BIF_make_tuple_2:mode==5?BIF_splus_2:BIF_list_to_tuple_1;
+        unsigned arity=(unsigned)space->engine->bifs[id].arity;
+        if(mode==1) ADD(&p,call_ext_2,U(arity),U(0));
+        else ADD(&p,call_2,U(2),F(6));
+        if(mode==7) ADD(&p,move_2,X(1),X(0)); /* Calls still clobber non-result X facts. */
+        if(mode!=8) ADD(&p,test_arity_3,F(3),X(0),U(2));
+        ADD(&p,get_tuple_element_3,X(0),U(1),X(0)); ADD(&p,deallocate_1,U(0)); ret(&p);
+        ADD(&p,label_1,U(3)); ADD(&p,move_2,A(0),X(0)); ADD(&p,deallocate_1,U(0)); ret(&p);
+        ADD(&p,int_func_start_5,U(5),U(0),A(0),A(2),U(2)); ADD(&p,label_1,U(6));
+        if(mode==3) ADD(&p,is_nil_2,F(7),X(0)); /* A reachable non-tuple return below. */
+        if(mode==4) ret(&p);
+        else if(mode==9) ADD(&p,call_only_2,U(2),F(6)); /* No recursive guess. */
+        else ADD(&p,call_ext_only_2,U(mode==6?2:arity),U(0));
+        if(mode==3) { ADD(&p,label_1,U(7)); ADD(&p,move_2,A(0),X(0)); ret(&p); }
+        verify_using_bif(space,&p,mode<=2?LB_CODE_OK:LB_CODE_FORMAT,NULL,0,id);
+    }
+}
+static void apply_boundaries(LbCodeSpace *space)
+{
+    for(unsigned kind=0;kind<6;++kind) {
+        Program p; begin(&p); ADD(&p,allocate_2,U(0),U(2));
+        if(kind!=1) ADD(&p,move_2,A(0),X(2));
+        if(kind==2) ADD(&p,apply_1,U(MAX_ARG+1));
+        else if(kind==3) ADD(&p,apply_last_2,U(1),U(1));
+        else if(kind==4) ADD(&p,apply_last_2,U(1),U(0));
+        else ADD(&p,apply_1,U(1));
+        if(kind==5) ADD(&p,move_2,X(1),X(0)); /* all but the result were clobbered */
+        ADD(&p,deallocate_1,U(0)); ret(&p);
+        verify(space,&p,(kind==0 || kind==4)?LB_CODE_OK:LB_CODE_FORMAT);
+    }
+}
+static void predicate_scratch(LbCodeSpace *space)
+{
+    Eterm big[]={_make_header(2,POS_BIG_SUBTAG),0,1};
+    Eterm floating[2]={_make_header(1,FLOAT_SUBTAG),0}; double value=1.0;
+    memcpy(floating+1,&value,sizeof(value));
+    Eterm cons[]={make_small(1),NIL};
+    Eterm binary[]={_make_header(2,HEAP_BITS_SUBTAG),8,0};
+    for(unsigned kind=0;kind<3;++kind) for(unsigned failure=0;failure<2;++failure) for(unsigned unsafe=0;unsafe<2;++unsafe) {
+        Eterm literal=failure?make_boxed(floating):kind==1?make_list(cons):kind==2?make_boxed(binary):make_boxed(big); Program p; begin(&p);
+        ADD(&p,test_heap_2,U(2),U(2)); ADD(&p,put_tuple2_2,X(MAX_REG-1),U(1),X(0));
+        if(kind==1) ADD(&p,is_list_2,F(3),((BeamOpArg){TAG_q,0}));
+        else if(kind==2) ADD(&p,is_binary_2,F(3),((BeamOpArg){TAG_q,0}));
+        else ADD(&p,is_integer_2,F(3),((BeamOpArg){TAG_q,0}));
+        if(!failure) {
+            if(unsafe) ADD(&p,get_tuple_element_3,X(MAX_REG-1),U(0),X(0));
+            else ADD(&p,move_2,X(MAX_REG-1),X(0));
+        }
+        ret(&p); ADD(&p,label_1,U(3));
+        if(failure) {
+            if(unsafe) ADD(&p,get_tuple_element_3,X(MAX_REG-1),U(0),X(0));
+            else ADD(&p,move_2,X(MAX_REG-1),X(0));
+        }
+        ret(&p); verify_literals(space,&p,unsafe?LB_CODE_FORMAT:LB_CODE_OK,&literal,1);
+    }
+}
+static void list_is_not_cons(LbCodeSpace *space)
+{
+    for(unsigned nonempty=0;nonempty<2;++nonempty) {
+        Program p; begin(&p);
+        if(nonempty) ADD(&p,is_nonempty_list_2,F(1),X(0));
+        ADD(&p,is_list_2,F(1),X(0)); ADD(&p,get_hd_2,X(0),X(0)); ret(&p);
+        verify(space,&p,nonempty?LB_CODE_OK:LB_CODE_FORMAT);
     }
 }
 static void joins(LbCodeSpace *space)
@@ -130,8 +206,8 @@ int main(void)
 {
     LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    joins(space); transfers(space); arithmetic_edges(space);
+    joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); predicate_scratch(space); list_is_not_cons(space);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
-    puts("CORE_SHAPE_PROOF_OK failure_edges=true late_joins=true backedges=true bounds=true alias_moves=true call_clobbers=true y_facts=true hints_not_authority=true arithmetic_edges=true trim_facts=true execution=false");
+    puts("CORE_SHAPE_PROOF_OK failure_edges=true late_joins=true backedges=true bounds=true alias_moves=true call_clobbers=true y_facts=true hints_not_authority=true arithmetic_edges=true predicate_scratch=true list_not_cons=true trim_facts=true execution=false");
     return 0;
 }

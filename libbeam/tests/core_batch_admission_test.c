@@ -82,6 +82,13 @@ static void failures(LbEngine *engine,Memory *memory,const unsigned char *alpha,
     status=lb_code_load_batch(space,refused,3,&error,&report);
     CHECK(status==LB_CODE_UNSUPPORTED && !space->modules && report.has_module_index && report.module_index==2);
     CHECK(memory->live==live && memory->bytes==bytes && lb_atoms_count(space->atoms)==atoms);
+    /* Large rollback: hundreds of independently prepared controls precede
+     * duplicate-name refusal. No staged atom or program may survive teardown. */
+    LbCodeInput repeated[256];
+    for(size_t i=0;i<256;++i) repeated[i]=(LbCodeInput){alpha,alpha_size};
+    status=lb_code_load_batch(space,repeated,256,&error,&report);
+    CHECK(status==LB_CODE_EXISTS && !space->modules && report.has_module_index && report.module_index==1);
+    CHECK(memory->live==live && memory->bytes==bytes && lb_atoms_count(space->atoms)==atoms);
     /* A failed partial graph is retryable in the same still-loading world. */
     LbCodeInput group[2]={{beta,beta_size},{alpha,alpha_size}};
     CHECK(lb_code_load_batch(space,group,2,&error,&report)==LB_CODE_OK);

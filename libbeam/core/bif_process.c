@@ -164,6 +164,12 @@ Eterm lb_bif_error_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     p->last_native_cost=1; p->fvalue=args[0]; p->freason=LB_EXC_ERROR;
     return THE_NON_VALUE;
 }
+Eterm lb_bif_throw_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction;
+    p->last_native_cost=1; p->fvalue=args[0]; p->freason=LB_EXC_THROWN;
+    return THE_NON_VALUE;
+}
 /* Complete native error_3 option scan and error_2 fallback. Reserve before
  * borrowing moving list/map operands; args points to registered X slots. */
 Eterm lb_bif_error_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)

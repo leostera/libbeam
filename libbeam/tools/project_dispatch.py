@@ -15,8 +15,8 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'i_allocate_zero_tt i_allocate_heap_zero_tIt allocate_tt allocate_heap_tIt '
          'i_call_ext_e i_move_call_ext_ce deallocate_Q i_is_eq_exact_immed_frc '
          'i_is_eq_exact_immed_fxc move_jump_fcr move_jump_fcx '
-         'move_xy move_yr move_yx move_yy move_ry move_cy swap_xx swap_yx swap_yy '
-         'i_call_f i_call_last_fQ i_call_only_f '
+         'move_xy move_yr move_yx move_yy move_ry move_cy swap_xx swap_yx swap_yy swap2_xxx '
+         'i_call_f i_call_last_fQ i_call_only_f i_times_jssd i_int_div_jssd '
          'move_call_cf move_call_xf move_call_yf move_call_last_cfQ move_call_last_xfQ move_call_last_yfQ '
          'move_call_only_cf move_call_only_xf '
          'move_deallocate_return_cQ move_deallocate_return_nQ move_deallocate_return_xQ move_deallocate_return_yQ '
@@ -25,7 +25,7 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'i_is_eq_exact_immed_fyc i_is_eq_exact_literal_fxc i_is_eq_exact_literal_fyc '
          'i_is_ne_exact_immed_fxc i_is_ne_exact_immed_fyc i_is_ne_exact_literal_fxc i_is_ne_exact_literal_fyc '
          'is_eq_exact_fxx is_eq_exact_fxy is_eq_exact_fyy is_ne_exact_fSS is_nil_fx is_nil_fy '
-         'is_tuple_fr is_tuple_fx is_tuple_fy is_tuple_of_arity_frA is_tuple_of_arity_fxA is_tuple_of_arity_fyA '
+         'i_get_sd i_get_hash_cWd i_apply i_apply_last_Q i_apply_only apply_t apply_last_tQ is_binary_fx is_binary_fy is_list_fx is_list_fy is_integer_fx is_integer_fy is_integer_allocate_fxtt is_tuple_fr is_tuple_fx is_tuple_fy is_tuple_of_arity_frA is_tuple_of_arity_fxA is_tuple_of_arity_fyA '
          'is_tagged_tuple_frAa is_tagged_tuple_fxAa is_tagged_tuple_fyAa is_tagged_tuple_ff_ffrAa is_tagged_tuple_ff_ffxAa '
          'test_arity_fxA test_arity_fyA test_arity_get_tuple_element_fxAPx '
          'i_get_tuple_element_xPx i_get_tuple_element_xPy i_get_tuple_element_yPx i_get_tuple_element_yPy '
@@ -38,7 +38,11 @@ NAMES = ('move_cr move_cx move_xr move_xx move_rx move_nx move_x1_c move_x2_c mo
          'put_list_cxx put_list_cyx put_list_rnr put_list_rnx put_list_rxr put_list_rxx '
          'put_list_xcx put_list_xnx put_list_xny put_list_xxr put_list_xxx put_list_xyx '
          'put_list_ycx put_list_ynx put_list_yny put_list_yxx put_list_yyx put_list_ssd '
-         'update_list_cx update_list_xx update_list_yx i_trim_t move_trim_yxt move2_par_xxxy move_window2_xxy move_shift_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y is_atom_fx is_atom_fy is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt send recv_marker_reserve_S recv_marker_bind_SS recv_marker_clear_S recv_marker_use_S i_loop_rec_f loop_rec_end_f remove_message timeout timeout_locked bs_test_tail_imm2_fxW bs_test_tail_imm2_fyW bs_test_zero_tail2_fx bs_test_zero_tail2_fy i_bs_eq_ftW i_bs_extract_integer_td is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx').split()
+         'update_list_cx update_list_xx update_list_yx i_trim_t move_trim_yxt move2_par_xxxy move_window2_xxy move_shift_xxy bs_init_writable i_bs_create_bin_jIWdW self_x self_y node_x node_y is_atom_fx is_atom_fy is_pid_fx is_reference_fx i_call_fun_t i_call_fun_last_tQ i_make_fun3_Fdtt send recv_marker_reserve_S recv_marker_bind_SS recv_marker_clear_S recv_marker_use_S i_loop_rec_f loop_rec_end_f remove_message timeout timeout_locked bs_test_tail_imm2_fxW bs_test_tail_imm2_fyW bs_test_zero_tail2_fx bs_test_zero_tail2_fy i_bs_eq_ftW i_bs_extract_integer_td is_function_fx is_function_fy hot_is_function2_fSt cold_is_function2_fxx '
+         'new_map_dtI i_new_small_map_lit_dtq i_get_map_elements_fsI is_map_fx is_map_fy '
+         'i_get_map_element_fxxx i_get_map_element_fxxy i_get_map_element_fxyx i_get_map_element_fxyy '
+         'i_get_map_element_fyxx i_get_map_element_fyxy i_get_map_element_fyyx i_get_map_element_fyyy '
+         'i_get_map_element_hash_fxcWx i_get_map_element_hash_fxcWy i_get_map_element_hash_fycWx i_get_map_element_hash_fycWy').split()
 
 
 def case(source, name):
@@ -88,25 +92,59 @@ def fallible_equality(body):
     return body[:branch]+prefix+body[branch:call.start()]+'lb_equal'+body[end:]
 
 
-def fallible_addition(body):
+def fallible_arithmetic(body):
     """Adapt native fragments to owned collection without stale destinations."""
-    if 'erts_mixed_plus' not in body: return body
+    if 'erts_unary_minus' in body:
+        native, owned, bif = 'erts_unary_minus', 'lb_unary_minus', 'BIF_sminus_1'
+    else:
+        operation = 'times' if 'erts_mixed_times' in body else 'plus'
+        native, owned, bif = f'erts_mixed_{operation}', f'lb_mixed_{operation}', f'BIF_s{operation}_2'
+    if native not in body: return body
     body=re.sub(r'#ifdef DEBUG\s*Eterm\* orig_htop = HTOP;\s*Eterm\* orig_stop = E;\s*#endif','',body)
     for text in ('DEBUG_SWAPOUT;','DEBUG_SWAPIN;','c_p->fcalls = FCALLS;',
                  'FCALLS = c_p->fcalls;','ASSERT(orig_htop == HTOP && orig_stop == E);','ERTS_HOLE_CHECK(c_p);'):
         body=body.replace(text,'')
-    body,count=re.subn(r'result = erts_mixed_plus\s*\(c_p, ([^;]+)\);',
-        r'SWAPOUT; result = lb_mixed_plus(c_p, \1); SWAPIN;\n'
+    body,count=re.subn(rf'result = {native}\s*\(c_p, ([^;]+)\);',
+        rf'SWAPOUT; result = {owned}(c_p, \1); SWAPIN;\n'
         r'      dst_ptr = REG_TARGET_PTR(dst); FCALLS -= (Sint)c_p->last_native_cost;\n'
+        r'      if (lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;\n'
         r'      if (c_p->status == LB_PROCESS_NO_MEMORY) goto memory_failure;\n'
+        r'      if (c_p->status == LB_PROCESS_LIMIT) goto resource_limit;\n'
+        r'      if (c_p->status == LB_PROCESS_ENVIRONMENT) goto environment_failure;\n'
         r'      if (c_p->status == LB_PROCESS_EXCEPTION) goto find_func_info;',body)
-    error='I = handle_error(c_p, I, reg, &BIF_TRAP_EXPORT(BIF_splus_2)->info.mfa);\n      goto post_error_handling;'
-    expected_errors=1 if 'OpCase(i_plus_xxjd)' in body else 0
+    error=f'I = handle_error(c_p, I, reg, &BIF_TRAP_EXPORT({bif})->info.mfa);\n      goto post_error_handling;'
+    expected_errors=0 if 'OpCase(i_increment_rWd)' in body else 1
     if count!=1 or body.count(error)!=expected_errors: raise RuntimeError('Unreviewed arithmetic boundary')
     # Preserve native tagged arithmetic without shifting a negative signed
     # increment when the compiler-overflow fast path is enabled.
     body=body.replace('(Sint)increment_val << _TAG_IMMED1_SIZE', '(Sint)((Uint)increment_val << _TAG_IMMED1_SIZE)')
     return body.replace(error,'goto find_func_info;')
+
+
+def fallible_integer_division(body):
+    if 'OpCase(i_int_div_jssd)' in body:
+        operands, bif = 'op1, op2', 'BIF_intdiv_2'
+    elif 'rem__execute:' in body:
+        operands, bif = 'RemOp1, RemOp2', 'BIF_rem_2'
+    else:
+        return body
+    body=re.sub(r'#ifdef DEBUG\s*Eterm\* orig_htop = HTOP;\s*Eterm\* orig_stop = E;\s*#endif','',body)
+    for text in ('DEBUG_SWAPOUT;','DEBUG_SWAPIN;','c_p->fcalls = FCALLS;',
+                 'FCALLS = c_p->fcalls;','ASSERT(orig_htop == HTOP && orig_stop == E);','ERTS_HOLE_CHECK(c_p);'):
+        body=body.replace(text,'')
+    call=f'succeeded = erts_int_div_rem(c_p, {operands}, &q, &r);'
+    if body.count(call)!=1: raise RuntimeError('Unreviewed integer division boundary')
+    body=body.replace(call,
+        f'SWAPOUT; succeeded = lb_int_div_rem(c_p, {operands}, &q, &r); SWAPIN;\n'
+        '        dst_ptr = REG_TARGET_PTR(dst); FCALLS -= (Sint)c_p->last_native_cost;\n'
+        '        if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;\n'
+        '        if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n'
+        '        if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;\n'
+        '        if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;')
+    pattern=rf'I = handle_error\(c_p, I, reg, &BIF_TRAP_EXPORT\({bif}\)->info.mfa\);\s*goto post_error_handling;'
+    body,count=re.subn(pattern,'goto find_func_info;',body)
+    if count!=2: raise RuntimeError('Unreviewed integer division error paths')
+    return body
 
 
 def fallible_writable_init(body):
@@ -148,22 +186,37 @@ def owned_send(body):
     return body
 
 
-def owned_predicate_bif(body):
+def owned_bif_call(body):
     if 'i_bif__call:' not in body and 'i_bif_body__call:' not in body: return body
-    # Only positively linked nonallocating predicates can reach these entire
-    # native groups. Native source fetching, result publication and guard
-    # failure branches remain intact; no trap/GC effect is silently admitted.
+    # Positive nonallocating BIFs and gc_bif1 abs/1 and floor/1 share these complete native
+    # groups. Both stage numeric payloads before collection; guest badarg
+    # precedes collection, so the native error operands cannot become stale.
+    # Infrastructure failures bypass the guest guard-failure branch.
     body=body.replace('Eterm tmp_reg[3];','Eterm tmp_reg[3]={NIL,NIL,NIL};')
     body=re.sub(r'#ifdef DEBUG\s*Eterm\* orig_htop = HTOP;\s*Eterm\* orig_stop = E;\s*#endif',
                 'Eterm* orig_htop=HTOP; Eterm* orig_stop=E;',body)
     body=body.replace('ASSERT(orig_htop == HTOP && orig_stop == E);',
-                      'if(orig_htop!=HTOP || orig_stop!=E) goto malformed_code;')
+                      'if(bf!=lb_bif_abs_1 && bf!=lb_bif_floor_1 && (orig_htop!=HTOP || orig_stop!=E)) goto malformed_code;\n'
+                      '      dst_ptr=REG_TARGET_PTR(dst);')
     for text in ('c_p->fcalls = FCALLS;','FCALLS = c_p->fcalls;',
                  'ERTS_DBG_CHK_REDS(c_p, FCALLS);','ASSERT(!ERTS_PROC_IS_EXITING(c_p));',
                  'ASSERT(!ERTS_PROC_IS_EXITING(c_p) || is_non_value(result));',
                  'ERTS_CHK_MBUF_SZ(c_p);','ERTS_HOLE_CHECK(c_p);'):
         body=body.replace(text,'')
     body=body.replace('DEBUG_SWAPOUT;','SWAPOUT;').replace('DEBUG_SWAPIN;','SWAPIN;')
+    call='result = (*bf)(c_p, tmp_reg, I);'
+    if body.count(call)!=1: raise RuntimeError('Changed owned BIF call boundary')
+    body=body.replace(call,
+        'c_p->last_native_cost=0; '+call+'\n'
+        '      FCALLS-=(Sint)c_p->last_native_cost;\n'
+        '      if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;\n'
+        '      if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;\n'
+        '      if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n'
+        '      if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;\n'
+        '      if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;\n'
+        '      if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;')
+    body=body.replace('SET_I((BeamInstr *) I+4);',
+        'SET_I((BeamInstr *) I+4); if(FCALLS<=0) goto context_switch3;')
     error='I = handle_error(c_p, I, reg, ubif2mfa((void *) bf));\n    goto post_error_handling;'
     expected=1 if 'i_bif_body__call:' in body else 0
     if body.count(error)!=expected: raise RuntimeError('Changed predicate error boundary')
@@ -194,6 +247,35 @@ def owned_make_fun(body):
     return body.replace(old,'  if(FCALLS<=0) goto context_switch3;\n'+old)
 
 
+def owned_apply(body):
+    if not re.search(r'OpCase\((?:i_apply|i_apply_last_Q|i_apply_only|apply_t|apply_last_tQ)\):',body): return body
+    pattern=r'HEAVY_SWAPOUT;\s+ep = (fixed_apply|apply)\(c_p, reg, (.*?)\);\s+HEAVY_SWAPIN;'
+    def call(match):
+        arguments=match[2]
+        if match[1]=='fixed_apply':
+            # The first operand is the arity expression; remaining native
+            # arguments only adjust tracing/error-handler stack metadata.
+            arity=arguments.split(', ',1)[0]
+            helper=f'lb_fixed_apply(c_p,{arity})'
+        else:
+            helper='lb_apply(c_p)'
+        return ('SWAPOUT; c_p->heap_reserved=0; ep='+helper+'; SWAPIN;\n'
+                '    FCALLS-=(Sint)c_p->last_native_cost;\n'
+                '    if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;\n'
+                '    if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;\n'
+                '    if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n'
+                '    if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;\n'
+                '    if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;')
+    body,count=re.subn(pattern,call,body)
+    if count!=1: raise RuntimeError('Changed native apply boundary')
+    body,count=re.subn(r'static ErtsCodeMFA apply3_mfa = \{am_erlang, am_apply, 3\};\s*I = handle_error\(c_p, I, reg, &apply3_mfa\);\s*goto post_error_handling;',
+        'c_p->current=&c_p->entry_module->space->apply_export.info.mfa;\n        goto find_func_info;',body)
+    if count!=1: raise RuntimeError('Changed native apply error boundary')
+    body,count=re.subn(r' else if \(ERTS_PROC_GET_SAVED_CALLS_BUF\(c_p\)\) \{\s*save_calls\(c_p, ep\);\s*\}', '',body)
+    if count!=1: raise RuntimeError('Changed apply saved-call instrumentation')
+    return body
+
+
 def owned_call_fun(body):
     if not re.search(r'OpCase\(i_call_fun_(?:t|last_tQ)\):',body): return body
     pattern=r'HEAVY_SWAPOUT;\s+next = call_fun\(c_p, (.*?), reg, THE_NON_VALUE\);\s+HEAVY_SWAPIN;'
@@ -220,6 +302,14 @@ def fallible_self(body):
         '  if(identity_status!=LB_PROCESS_READY) goto malformed_code;\n'
         '  BeamInstr next_pf')
     return body.replace('c_p->common.id','identity').replace('GotoPF(next_pf);','if(FCALLS<=0) goto context_switch3; GotoPF(next_pf);')
+
+
+def owned_node(body):
+    if not re.search(r'OpCase\(node_[xy]\):',body): return body
+    if body.count('erts_this_node->sysname')!=1:
+        raise RuntimeError('Unreviewed node instruction boundary')
+    # Pure owned-state read, covered by the ordinary instruction work charge.
+    return body.replace('erts_this_node->sysname','c_p->entry_module->space->node_name')
 
 
 def binary_failure_checks():
@@ -381,19 +471,236 @@ def owned_receive_scan(body):
     return body
 
 
+def owned_map_single_lookup(body):
+    pattern=r'Eterm res = get_map_element(?:_hash)?\((.*?)\);'
+    match=re.search(pattern,body)
+    if not match: return body
+    args=[part.strip() for part in match[1].split(',')]
+    if len(args) not in (2,3): raise RuntimeError('Unreviewed map lookup operands')
+    replacement=('Eterm lb_map_term='+args[0]+'; Eterm lb_key='+args[1]+'; Eterm res; int lb_is_map=0;\n'
+        '  LbMapStatus lb_status=lb_map_is_map(lb_map_term,&lb_is_map); MAP_STATUS(lb_status);\n'
+        '  if(!lb_is_map) res=THE_NON_VALUE; else {\n'
+        '    c_p->last_native_cost=0;\n'
+        '    lb_status=lb_map_find(c_p,lb_map_term,lb_key,&res);\n'
+        '    FCALLS-=(Sint)c_p->last_native_cost;\n'
+        '    if(lb_status==LB_MAP_MISSING) res=THE_NON_VALUE; else MAP_STATUS(lb_status);\n'
+        '  }')
+    body=body[:match.start()]+replacement+body[match.end():]
+    body=body.replace('  I += 3;','  I += 3; if(FCALLS<=0) goto context_switch3;',1)
+    body=body.replace('  I += 5;','  I += 5; if(FCALLS<=0) goto context_switch3;',1)
+    return body
+
+
+def owned_map_bulk_lookup(body):
+    return '''OpCase(i_get_map_elements_fsI):
+{
+  Eterm packed=I[1], map;
+  GetSource(I[2],map);
+  Uint words=Ib(packed>>BEAM_WIDE_SHIFT);
+  if(words%3 || words/3>LB_FLATMAP_MAX_SIZE) goto malformed_code;
+  if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
+  FCALLS--;
+  int is_map=0;
+  LbMapStatus status=lb_map_is_map(map,&is_map);
+  MAP_STATUS(status);
+  if(!is_map) { I+=fb(packed&BEAM_WIDE_MASK); Goto(*I); }
+  const BeamInstr *args=I+3;
+  Uint count=words/3;
+  for(Uint i=0;i<count;++i) {
+    Eterm value,key;
+    GetSource(args[0],key);
+    c_p->last_native_cost=0;
+    status=lb_map_find(c_p,map,key,&value);
+    FCALLS-=(Sint)c_p->last_native_cost;
+    if(status==LB_MAP_MISSING) { I+=fb(packed&BEAM_WIDE_MASK); Goto(*I); }
+    MAP_STATUS(status);
+    MAP_PUT_TERM_REG(value,args[1]);
+    args+=3;
+  }
+  I+=3+words;
+  if(FCALLS<=0) goto context_switch3;
+  Goto(*I);
+}'''
+
+
+def owned_map_construction(body,name):
+    if name=='new_map_dtI':
+        return '''OpCase(new_map_dtI):
+{
+  Eterm packed=I[1], dst=db(packed&BEAM_LOOSE_MASK), result;
+  Uint words=I[2], live=tb(packed>>BEAM_LOOSE_SHIFT);
+  if((words&1) || words>2*LB_FLATMAP_MAX_SIZE || live>MAX_REG) goto malformed_code;
+  size_t count=words/2;
+  size_t reserve=LB_FLATMAP_WORDS+count+(count?count+1:2);
+  c_p->last_native_cost=0; SWAPOUT;
+  LbMapStatus status=lb_map_reserve(c_p,reserve,live);
+  SWAPIN; FCALLS-=(Sint)c_p->last_native_cost; MAP_STATUS(status);
+  Eterm keys[LB_FLATMAP_MAX_SIZE],values[LB_FLATMAP_MAX_SIZE];
+  for(size_t i=0;i<count;++i) { GetSource(I[3+2*i],keys[i]); GetSource(I[4+2*i],values[i]); }
+  c_p->last_native_cost=0; SWAPOUT;
+  status=lb_map_create(c_p,keys,values,count,&result);
+  SWAPIN; FCALLS-=(Sint)c_p->last_native_cost; c_p->heap_reserved=0; MAP_STATUS(status);
+  *REG_TARGET_PTR(dst)=result; I+=3+words;
+  if(FCALLS<=0) goto context_switch3;
+  Goto(*I);
+}'''
+    if name=='i_new_small_map_lit_dtq':
+        return '''OpCase(i_new_small_map_lit_dtq):
+{
+  Eterm packed=I[1], dst=db(packed&BEAM_LOOSE_MASK), keys=I[2], result;
+  Uint live=tb(packed>>BEAM_LOOSE_SHIFT);
+  if(!is_tuple(keys) || live>MAX_REG) goto malformed_code;
+  size_t count=(size_t)arityval(*tuple_val(keys));
+  if(count>LB_FLATMAP_MAX_SIZE) goto execution_refused;
+  size_t reserve=LB_FLATMAP_WORDS+count+(count?count+1:2);
+  c_p->last_native_cost=0; SWAPOUT;
+  LbMapStatus status=lb_map_reserve(c_p,reserve,live);
+  SWAPIN; FCALLS-=(Sint)c_p->last_native_cost; MAP_STATUS(status);
+  Eterm values[LB_FLATMAP_MAX_SIZE];
+  for(size_t i=0;i<count;++i) GetSource(I[3+i],values[i]);
+  c_p->last_native_cost=0; SWAPOUT;
+  status=lb_map_create_literal(c_p,keys,values,count,&result);
+  SWAPIN; FCALLS-=(Sint)c_p->last_native_cost; c_p->heap_reserved=0; MAP_STATUS(status);
+  *REG_TARGET_PTR(dst)=result; I+=3+count;
+  if(FCALLS<=0) goto context_switch3;
+  Goto(*I);
+}'''
+    return body
+
+
+def owned_map_update_group(body,name):
+    if name=='update_map_assoc_cdtI':
+        return '''{
+  Eterm map;
+  OpCase(update_map_assoc_cdtI): { map=I[1]; } goto map_assoc_execute;
+  OpCase(update_map_assoc_xdtI): { map=xb(I[1]); } goto map_assoc_execute;
+  OpCase(update_map_assoc_ydtI): { map=yb(I[1]); } goto map_assoc_execute;
+map_assoc_execute: {
+  Eterm packed=I[2],dst=db(packed&BEAM_LOOSE_MASK);
+  Uint live=tb(packed>>BEAM_LOOSE_SHIFT),words=I[3];
+  if(words&1 || words>2*LB_FLATMAP_MAX_SIZE || live>=MAX_REG) goto malformed_code;
+  size_t count=words/2, reserve=0; int is_map=0;
+  reg[live]=map;
+  LbMapStatus status=lb_map_is_map(reg[live],&is_map); MAP_STATUS(status);
+  if(!is_map) { c_p->heap_reserved=0; c_p->freason=LB_EXC_BADMAP; c_p->fvalue=reg[live]; goto find_func_info; }
+  if(count) {
+    status=lb_map_reservation_words(reg[live],count,0,&reserve); MAP_STATUS(status);
+    c_p->last_native_cost=0; SWAPOUT;
+    status=lb_map_reserve(c_p,reserve,live+1);
+    SWAPIN; FCALLS-=(Sint)c_p->last_native_cost; MAP_STATUS(status);
+  }
+  map=reg[live];
+  Eterm keys[LB_FLATMAP_MAX_SIZE],values[LB_FLATMAP_MAX_SIZE],result;
+  for(size_t i=0;i<count;++i) { GetSource(I[4+2*i],keys[i]); GetSource(I[5+2*i],values[i]); }
+  c_p->last_native_cost=0; SWAPOUT;
+  status=lb_map_update_assoc(c_p,map,keys,values,count,&result);
+  SWAPIN; FCALLS-=(Sint)c_p->last_native_cost; c_p->heap_reserved=0; MAP_STATUS(status);
+  *REG_TARGET_PTR(dst)=result; I+=4+words;
+  if(FCALLS<=0) goto context_switch3;
+  Goto(*I);
+}
+}'''
+    if name=='update_map_exact_xjdtI':
+        return '''{
+  Eterm map;
+  OpCase(update_map_exact_xjdtI): { map=xb(I[1]); } goto map_exact_execute;
+  OpCase(update_map_exact_yjdtI): { map=yb(I[1]); } goto map_exact_execute;
+map_exact_execute: {
+  Eterm packed=I[2], ext=I[3], dst=db(packed>>BEAM_WIDE_SHIFT);
+  Sint fail=jb(packed&BEAM_WIDE_MASK);
+  Uint live=tb(ext&BEAM_WIDE_MASK),words=Ib(ext>>BEAM_WIDE_SHIFT);
+  if((words&1) || words>2*LB_FLATMAP_MAX_SIZE || live>=MAX_REG) goto malformed_code;
+  size_t count=words/2,reserve=0; int is_map=0;
+  reg[live]=map;
+  LbMapStatus status=lb_map_is_map(reg[live],&is_map); MAP_STATUS(status);
+  if(!is_map) {
+    c_p->heap_reserved=0;
+    if(fail) { I+=fail; Goto(*I); }
+    c_p->freason=LB_EXC_BADMAP; c_p->fvalue=reg[live]; goto find_func_info;
+  }
+  if(count) {
+    status=lb_map_reservation_words(reg[live],count,1,&reserve); MAP_STATUS(status);
+    c_p->last_native_cost=0; SWAPOUT;
+    status=lb_map_reserve(c_p,reserve,live+1);
+    SWAPIN; FCALLS-=(Sint)c_p->last_native_cost; MAP_STATUS(status);
+  }
+  map=reg[live];
+  Eterm keys[LB_FLATMAP_MAX_SIZE],values[LB_FLATMAP_MAX_SIZE],result,missing=NIL;
+  for(size_t i=0;i<count;++i) { GetSource(I[4+2*i],keys[i]); GetSource(I[5+2*i],values[i]); }
+  c_p->last_native_cost=0; SWAPOUT;
+  status=lb_map_update_exact_missing(c_p,map,keys,values,count,&result,&missing);
+  SWAPIN; FCALLS-=(Sint)c_p->last_native_cost; c_p->heap_reserved=0;
+  if(status==LB_MAP_MISSING) {
+    if(fail) { I+=fail; Goto(*I); }
+    c_p->freason=LB_EXC_BADKEY; c_p->fvalue=missing; goto find_func_info;
+  }
+  MAP_STATUS(status);
+  *REG_TARGET_PTR(dst)=result; I+=4+words;
+  if(FCALLS<=0) goto context_switch3;
+  Goto(*I);
+}
+}'''
+    return body
+
+
+def owned_map_test(name):
+    source='xb' if name=='is_map_fx' else 'yb'
+    return '''OpCase(%s):
+{
+  Eterm packed=I[1],value=%s(packed>>BEAM_WIDE_SHIFT);
+  Sint fail=fb(packed&BEAM_WIDE_MASK); int is_map=0;
+  if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
+  FCALLS--;
+  LbMapStatus status=lb_map_is_map(value,&is_map); MAP_STATUS(status);
+  if(!is_map) { I+=fail; Goto(*I); }
+  I+=2; if(FCALLS<=0) goto context_switch3; Goto(*I);
+}''' % (name,source)
+
+
 def project(source):
     bodies=[]
-    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd','i_bif1_sfbd','i_bif1_body_sbd','wait_locked_f','i_bs_start_match3_xtjd','i_bs_ensure_bits_read_xtf','i_bs_ensure_bits_unit_xItf','i_bs_ensure_bits_xIf')]
+    groups=[group(source,name) for name in ('deallocate_return0','i_select_tuple_arity2_xfAA','i_select_tuple_arity_xfI','i_increment_rWd','i_plus_xxjd','i_rem_ssjd','i_unary_minus_cjd','i_bif1_sfbd','i_bif1_body_sbd','wait_locked_f','i_bs_start_match3_xtjd','i_bs_ensure_bits_read_xtf','i_bs_ensure_bits_unit_xItf','i_bs_ensure_bits_xIf')]
+    map_assoc=group(source,'update_map_assoc_cdtI')
+    map_exact=group(source,'update_map_exact_xjdtI')
+    groups.extend((map_assoc,map_exact))
     names=NAMES+[name for shared in groups for name in re.findall(r'OpCase\((\w+)\)',shared)]
-    selected=[(name,case(source,name)) for name in NAMES]+[('shared group',shared) for shared in groups]
+    selected=([(name,case(source,name)) for name in NAMES]+
+        [('shared group',shared) for shared in groups[:-2]]+
+        [('update_map_assoc_cdtI',map_assoc),('update_map_exact_xjdtI',map_exact)])
     for name, body in selected:
+        if name in ('i_get_sd','i_get_hash_cWd'):
+            call = ('erts_pd_hash_get(c_p, targ1)' if name=='i_get_sd'
+                    else 'erts_pd_hash_get_with_hx(c_p, I[2], I[1])')
+            source = 'targ1' if name=='i_get_sd' else 'I[1]'
+            old = '*dst_ptr = '+call+';'
+            if body.count(old)!=1: raise RuntimeError('Changed native dictionary lookup boundary')
+            check = '' if name=='i_get_sd' else (
+                'ASSERT(is_small(I[1]) || is_atom(I[1]));\n'
+                '    ASSERT(I[2]==(is_small(I[1])?I[1]>>_TAG_IMMED1_SIZE:atom_val(I[1])));\n')
+            body=body.replace(old,check+'Eterm args[1]={'+source+'};\n'
+                '    Eterm result=lb_bif_get_1(c_p,args,I);\n'
+                '    FCALLS-=(Sint)c_p->last_native_cost;\n'
+                '    if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;\n'
+                '    if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;\n'
+                '    if(is_non_value(result)) goto malformed_code;\n'
+                '    *dst_ptr=result;')
+            body=body.replace('GotoPF(next_pf);','if(FCALLS<=0) goto context_switch3; GotoPF(next_pf);')
+        if name in ('is_binary_fx','is_binary_fy'):
+            operand=('xb' if name=='is_binary_fx' else 'yb')+'((tmp_packed1>>BEAM_WIDE_SHIFT))'
+            predicate=f'is_not_bitstring({operand}) || TAIL_BITS(bitstring_size({operand})) != 0'
+            if body.count(predicate)!=1: raise RuntimeError('Changed native binary predicate boundary')
+            body=body.replace(predicate,f'!lb_is_binary({operand})')
+        body=body.replace('is_not_integer(', '!lb_is_integer(')
         body=fallible_equality(body)
-        body=fallible_addition(body)
+        body=fallible_arithmetic(body)
+        body=fallible_integer_division(body)
         body=fallible_writable_init(body)
         body=fallible_self(body)
+        body=owned_node(body)
+        body=owned_apply(body)
         body=owned_call_fun(body)
         body=owned_make_fun(body)
-        body=owned_predicate_bif(body)
+        body=owned_bif_call(body)
         body=owned_send(body)
         body=body.replace('erts_msgq_recv_marker_bind(',
             'if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_RECV_MARKERS)) goto work_failure; lb_receive_marker_bind(')
@@ -445,7 +752,7 @@ def project(source):
         body=re.sub(r'FCALLS -= erts_garbage_collect_nobump\(c_p, need, reg, (.*), FCALLS\);',
             r'if (!lb_process_collect_live(c_p, need, \1)) goto memory_failure;\n      FCALLS -= (Sint)c_p->last_gc_cost;', body)
         body=re.sub(r'if \(ERTS_PSFLG_EXITING & erts_atomic32_read_nob\(&c_p->state\)\) \{\s*goto context_switch3;\s*\};', '', body)
-        if name in {'allocate_tt', 'allocate_heap_tIt'} or name.startswith('is_nonempty_list_allocate_'):
+        if name in {'allocate_tt', 'allocate_heap_tIt', 'is_integer_allocate_fxtt'} or name.startswith('is_nonempty_list_allocate_'):
             # Host instruction-budget yields introduce safepoints between
             # allocate and init_yregs. Keep all physical stack slots valid roots;
             # the verifier still rejects logical reads before initialization.
@@ -464,6 +771,16 @@ def project(source):
         if 'select_val_lin__execute:' in body:
             body=body.replace('    for (;;) {',
                 '    for (;;) {\n      if(!lb_work_domain_charge(c_p->entry_module->space->domain,2)) goto work_failure;')
+        if name.startswith(('i_get_map_element_',)):
+            body=owned_map_single_lookup(body)
+        elif name=='i_get_map_elements_fsI':
+            body=owned_map_bulk_lookup(body)
+        elif name in ('new_map_dtI','i_new_small_map_lit_dtq'):
+            body=owned_map_construction(body,name)
+        elif name in ('is_map_fx','is_map_fy'):
+            body=owned_map_test(name)
+        elif name in ('update_map_assoc_cdtI','update_map_exact_xjdtI'):
+            body=owned_map_update_group(body,name)
         dependency_code=re.sub(r'/\*.*?\*/|//[^\n]*', '', body, flags=re.S)
         if 'erts_' in dependency_code or 'ERTS_PROC_GET_' in dependency_code or 'save_calls(' in dependency_code:
             raise RuntimeError('Unadapted execution dependency in '+name)

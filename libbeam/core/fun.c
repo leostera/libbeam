@@ -40,18 +40,35 @@ static LbAllocStatus retain(LbCodeSpace *space,LbFunLease **leases,const LbFunEn
        !entry->owner->published || !entry->dispatch.addresses[0] || entry->pend_purge_address) return LB_ALLOC_INVALID;
     for(LbFunLease *lease=*leases;lease;lease=lease->next) {
         if(!lb_work_domain_charge(space->domain,1)) return LB_ALLOC_WORK_LIMIT;
-        if(lease->entry->owner==entry->owner) return LB_ALLOC_OK;
+        if(lease->owner==entry->owner) return LB_ALLOC_OK;
     }
     if(entry->owner->users==SIZE_MAX) return LB_ALLOC_NO_MEMORY;
     void *memory;
     if(lb_alloc_domain_allocate(space->domain,sizeof(LbFunLease),&memory)!=LB_ALLOC_OK) return LB_ALLOC_NO_MEMORY;
-    LbFunLease *lease=memory; *lease=(LbFunLease){*leases,entry,0};
+    LbFunLease *lease=memory; *lease=(LbFunLease){*leases,entry,entry->owner,0};
     ++entry->owner->users; *leases=lease; return LB_ALLOC_OK;
 }
 LbAllocStatus lb_fun_retain(LbProcess *p,const LbFunEntry *entry)
 {
     if(!p || !p->entry_module) return LB_ALLOC_INVALID;
     return retain(p->entry_module->space,&p->fun_leases,entry);
+}
+LbAllocStatus lb_fun_retain_export(LbCodeSpace *space,LbFunLease **leases,const Export *export,Uint *cost)
+{
+    if(!space || !leases || !export || !cost || !export->dispatch.addresses[0]) return LB_ALLOC_INVALID;
+    LbCodeModule *owner=export->owner;
+    if(!owner) return LB_ALLOC_OK; /* Code-space native/instruction export; no module lease. */
+    if(owner->space!=space || !owner->published) return LB_ALLOC_INVALID;
+    for(LbFunLease *lease=*leases;lease;lease=lease->next) {
+        if(!lb_work_domain_charge(space->domain,1)) return LB_ALLOC_WORK_LIMIT;
+        ++*cost;
+        if(lease->owner==owner) return LB_ALLOC_OK;
+    }
+    if(owner->users==SIZE_MAX) return LB_ALLOC_NO_MEMORY;
+    void *memory;
+    if(lb_alloc_domain_allocate(space->domain,sizeof(LbFunLease),&memory)!=LB_ALLOC_OK) return LB_ALLOC_NO_MEMORY;
+    LbFunLease *lease=memory; *lease=(LbFunLease){*leases,NULL,owner,0};
+    ++owner->users; *leases=lease; return LB_ALLOC_OK;
 }
 /* Prepare code ownership before copying a valid owned term into this process.
  * Term storage is not mutated; a failed preparation remains wholly owned by
@@ -69,13 +86,17 @@ static LbAllocStatus retain_roots(LbCodeSpace *space,LbFunLease **leases,Eterm t
         else if(is_boxed(value)) {
             const Eterm *pointer=boxed_val(value);
             if(is_arity_value(*pointer)) { children=pointer+1; n=arityval(*pointer); }
-            else if(*pointer==LB_FLATMAP_HEADER) {
-                (void)lb_flatmap_words(pointer); children=pointer+2; n=pointer[1]+1;
+            else if((*pointer&_HEADER_SUBTAG_MASK)==MAP_SUBTAG) {
+                (void)lb_map_object_words(pointer);
+                children=pointer+lb_map_object_child_offset(pointer);
+                n=lb_map_object_child_count(pointer);
             } else if(pin && *pointer==LB_HEADER_SUB_BITS) {
                 if(!lb_bitstring_pin(value)) { status=LB_ALLOC_INVALID; break; }
             } else if((*pointer&_TAG_HEADER_MASK)==FUN_SUBTAG) {
                 const LbFun *fun=lb_fun(value);
-                status=retain(space,leases,fun->entry.fun); if(status!=LB_ALLOC_OK) break;
+                if(lb_fun_is_external(fun)) status=lb_fun_retain_export(space,leases,(const Export *)fun->entry.exp,cost);
+                else status=retain(space,leases,fun->entry.fun);
+                if(status!=LB_ALLOC_OK) break;
                 children=fun->env; n=lb_fun_free(fun);
             }
         }
@@ -110,8 +131,8 @@ LbAllocStatus lb_fun_retain_term(LbProcess *p,Eterm term,Uint *cost)
 }
 static void release(LbCodeSpace *space,LbFunLease *lease)
 {
-    LbCodeModule *owner=lease->entry->owner;
-    if(!owner->users) abort();
+    LbCodeModule *owner=lease->owner;
+    if(!owner || !owner->users) abort();
     --owner->users; lb_release(space->domain,lease);
 }
 void lb_fun_release_prefix(LbCodeSpace *space,LbFunLease **leases,LbFunLease *stop)
@@ -137,8 +158,16 @@ void lb_fun_marks_clear(LbProcess *p)
 void lb_fun_mark(LbProcess *p,const LbFunEntry *entry)
 {
     for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next)
-        if(lease->entry->owner==entry->owner) { lease->marked=1; return; }
+        if(lease->owner==entry->owner) { lease->marked=1; return; }
     abort(); /* no code pointer may outlive its defining-module lease */
+}
+void lb_fun_mark_export(LbProcess *p,const Export *export)
+{
+    if(!export) abort();
+    if(!export->owner) return;
+    for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next)
+        if(lease->owner==export->owner) { lease->marked=1; return; }
+    abort(); /* external code is protected by an explicit module lease */
 }
 static int contains_code(LbCodeModule *module,Uint address)
 {
@@ -149,7 +178,7 @@ Uint lb_fun_mark_code(LbProcess *p)
     if(!p->running && p->status!=LB_PROCESS_READY && p->status!=LB_PROCESS_YIELDED) return 0;
     Uint cost=0;
     for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next) {
-        LbCodeModule *module=lease->entry->owner; ++cost;
+        LbCodeModule *module=lease->owner; ++cost;
         if(contains_code(module,(Uint)p->i)) { lease->marked=1; continue; }
         /* Continuations are untagged native code words among initialized Y
          * roots. Conservatively retain a module for any matching stack word;
@@ -175,7 +204,8 @@ LbAllocStatus lb_fun_prepare_instruction(LbProcess *p,const BeamInstr *pc,Uint *
             if(!lb_work_domain_charge(space->domain,1)) return LB_ALLOC_WORK_LIMIT;
             ++*cost;
             if(use->pc!=index) continue;
-            LbAllocStatus status=lb_fun_retain(p,use->entry);
+            LbAllocStatus status=use->entry ? lb_fun_retain(p,use->entry) :
+                lb_fun_retain_export(space,&p->fun_leases,use->external,cost);
             if(status!=LB_ALLOC_OK) return status;
         }
         break;
@@ -191,19 +221,33 @@ const BeamInstr *lb_fun_call(LbProcess *p,unsigned arity)
     if(arity>MAX_ARG) { p->status=LB_PROCESS_INVALID; return NULL; }
     Eterm value=p->reg[arity]; const LbFun *fun=lb_fun(value);
     if(!fun) { p->current=NULL; p->freason=LB_EXC_BADFUN; p->fvalue=value; return NULL; }
-    const LbFunEntry *entry=fun->entry.fun; int retained=0;
-    for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next) {
-        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return NULL; }
-        ++p->last_native_cost;
-        if(lease->entry->owner==entry->owner) { retained=1; break; }
-    }
-    if(!retained || entry->owner->space!=p->entry_module->space ||
-       !entry->owner->published || entry->pend_purge_address || !entry->dispatch.addresses[0]) {
-        p->status=LB_PROCESS_REFUSED; return NULL;
-    }
-    if(lb_fun_arity(fun)==arity) {
-        unsigned count=(unsigned)lb_fun_free(fun);
-        if(arity+count>MAX_ARG || entry->arity!=(int)arity) { p->status=LB_PROCESS_INVALID; return NULL; }
+    if(lb_fun_is_external(fun)) {
+        const Export *export=fun->entry.exp;
+        if(!export || !export->dispatch.addresses[0]) { p->status=LB_PROCESS_REFUSED; return NULL; }
+        int retained=!export->owner;
+        for(LbFunLease *lease=p->fun_leases;!retained && lease;lease=lease->next) {
+            if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return NULL; }
+            ++p->last_native_cost;
+            retained=lease->owner==export->owner;
+        }
+        if(!retained || (export->owner && (export->owner->space!=p->entry_module->space || !export->owner->published))) {
+            p->status=LB_PROCESS_REFUSED; return NULL;
+        }
+        if(lb_fun_arity(fun)==arity && export->info.mfa.arity==arity) return export->dispatch.addresses[0];
+    } else {
+        const LbFunEntry *entry=fun->entry.fun; int retained=0;
+        for(LbFunLease *lease=p->fun_leases;lease;lease=lease->next) {
+            if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return NULL; }
+            ++p->last_native_cost;
+            if(lease->owner==entry->owner) { retained=1; break; }
+        }
+        if(!retained || entry->owner->space!=p->entry_module->space ||
+           !entry->owner->published || entry->pend_purge_address || !entry->dispatch.addresses[0]) {
+            p->status=LB_PROCESS_REFUSED; return NULL;
+        }
+        if(lb_fun_arity(fun)==arity) {
+            unsigned count=(unsigned)lb_fun_free(fun);
+            if(arity+count>MAX_ARG || entry->arity!=(int)arity) { p->status=LB_PROCESS_INVALID; return NULL; }
         int found=0;
         for(size_t i=0;i<lb_code_module_function_count(entry->owner);++i) {
             if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return NULL; }
@@ -216,8 +260,9 @@ const BeamInstr *lb_fun_call(LbProcess *p,unsigned arity)
         if(!lb_work_domain_charge(p->entry_module->space->domain,count+lb_work_bulk_units(count))) {
             p->status=LB_PROCESS_WORK_LIMIT; return NULL;
         }
-        for(unsigned i=0;i<count;++i) p->reg[arity+i]=fun->env[i];
-        return entry->dispatch.addresses[0];
+            for(unsigned i=0;i<count;++i) p->reg[arity+i]=fun->env[i];
+            return entry->dispatch.addresses[0];
+        }
     }
     /* Build the native {Fun,Args} badarity payload in one fallible reservation.
      * Both the argument registers and fun register survive moving collection. */

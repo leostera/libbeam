@@ -7,6 +7,8 @@
 #include "code_internal.h"
 #include "binary_error.h"
 #include "fun.h"
+#include "flatmap.h"
+#include "map_runtime.h"
 typedef Sint SWord;
 typedef LbFun ErlFunThing;
 typedef LbBeamLambda BeamFile_LambdaEntry;
@@ -205,6 +207,34 @@ static Eterm beam_load_get_term(LoaderState *st,BeamOpArg source)
     default:return THE_NON_VALUE;
     }
 }
+static int lb_load_map_key_sort(LoaderState *st,BeamOpArg size,BeamOpArg *rest)
+{
+    Uint words;
+    if(size.type!=TAG_u || size.val<0 || (Uint)size.val%2) {
+        st->status=LB_CODE_FORMAT; return 0;
+    }
+    words=(Uint)size.val;
+    if(words>2*LB_FLATMAP_MAX_SIZE) { st->status=LB_CODE_UNSUPPORTED; return 0; }
+    if(words<=2) return 1; /* one dynamic key is admitted by OTP */
+    for(Uint i=2;i<words;i+=2) {
+        BeamOpArg key=rest[i],value=rest[i+1];
+        Eterm term=beam_load_get_term(st,key);
+        Uint j=i;
+        if(is_non_value(term)) { st->status=LB_CODE_UNSUPPORTED; return 0; }
+        while(j) {
+            Eterm previous=beam_load_get_term(st,rest[j-2]); int order;
+            LbMapStatus compared=lb_map_compare_literals(previous,term,&order);
+            if(compared!=LB_MAP_OK) {
+                st->status=compared==LB_MAP_UNSUPPORTED?LB_CODE_UNSUPPORTED:LB_CODE_FORMAT;
+                return 0;
+            }
+            if(order<=0) break; /* stable order preserves last-update semantics */
+            rest[j]=rest[j-2]; rest[j+1]=rest[j-1]; j-=2;
+        }
+        rest[j]=key; rest[j+1]=value;
+    }
+    return 1;
+}
 static int dictionary_hash(LoaderState *st,Eterm key,Sint *out)
 {
     if(is_small(key)) { *out=(Sint)((Uint)key>>_TAG_IMMED1_SIZE); return 1; }
@@ -251,6 +281,32 @@ int lb_transform(LoaderState *st)
         for(size_t i=3;i<op->arity;++i) if(!segment_value_valid(st,op->a[i])) {
             st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
         }
+    }
+    /* These terminal stock rules lack an owned rewrite. Their specific
+     * selectors are admitted below with bounded native flatmap handling. */
+    if(st->genop->op==genop_new_map_3) return TE_FAIL;
+    if(st->genop->op==genop_get_map_elements_3) {
+        BeamOp *source=st->genop,*target; size_t count;
+        if(source->arity<3 || source->a[2].type!=TAG_u || source->a[2].val<0 ||
+           (Uint)source->a[2].val%2 || (Uint)source->a[2].val>2*LB_FLATMAP_MAX_SIZE ||
+           source->arity!=3+(Uint)source->a[2].val) { st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT; }
+        if(!lb_load_map_key_sort(st,source->a[2],source->a+3)) return TE_FAIL;
+        count=(Uint)source->a[2].val/2;
+        target=lb_load_new_op(st); if(!target) return TE_NO_MEMORY;
+        target->next=source->next; target->op=genop_i_get_map_elements_3; target->arity=3+3*count;
+        target->offset=source->offset;
+        if(target->arity>sizeof(target->def_args)/sizeof(target->def_args[0])) {
+            target->a=lb_palloc(st->program,target->arity,sizeof(*target->a));
+            if(!target->a) return TE_NO_MEMORY;
+        }
+        target->a[0]=source->a[0]; target->a[1]=source->a[1];
+        target->a[2]=(BeamOpArg){TAG_u,(Sint)(3*count)};
+        for(size_t i=0;i<count;++i) {
+            target->a[3+3*i]=source->a[3+2*i];
+            target->a[4+3*i]=source->a[4+2*i];
+            target->a[5+3*i]=(BeamOpArg){TAG_u,0}; /* flatmap path never reads the HAMT hash */
+        }
+        st->genop=target; lb_load_free_op(st,source); return TE_OK;
     }
     return lb_transform_engine(st);
 }

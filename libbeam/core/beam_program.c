@@ -3,6 +3,7 @@
  */
 #include "beam_program_internal.h"
 #include "utf8.h"
+#include "work_budget.h"
 #include <stdlib.h>
 int lb_pfail(LbBeamProgram *p,LbBeamStatus status)
 {
@@ -17,10 +18,17 @@ void *lb_palloc(LbBeamProgram *p,size_t count,size_t size)
        !lb_size_add(bytes,sizeof(*block),&bytes) || bytes>LB_BEAM_MAX_BYTES-p->bytes) {
         lb_pfail(p,LB_BEAM_LIMIT); return NULL;
     }
+    /* Reserve checked ownership-list teardown work before adding each arena
+     * block. Interleaved offheap payloads can make rollback non-LIFO: cumulative
+     * quadratic credit bounds that walk even after a later work denial.
+     * The arena's byte cap bounds block_count and this arithmetic. */
+    if(!lb_work_domain_charge(p->domain,8*(uint64_t)p->block_count+4*(uint64_t)p->name_count+16)) {
+        lb_pfail(p,LB_BEAM_LIMIT); return NULL;
+    }
     if(lb_alloc_domain_allocate(p->domain,bytes,&memory)!=LB_ALLOC_OK) {
         lb_pfail(p,LB_BEAM_NO_MEMORY); return NULL;
     }
-    block=memory; block->link.next=p->blocks; p->blocks=block; p->bytes+=bytes;
+    block=memory; block->link.next=p->blocks; p->blocks=block; p->bytes+=bytes; ++p->block_count;
     memset(block+1,0,bytes-sizeof(*block)); return block+1;
 }
 int lb_pname(LbBeamProgram *p,LbBeamBytes name,Eterm *destination)
@@ -40,6 +48,7 @@ void lb_beam_program_destroy(LbBeamProgram *p)
     while(p->blocks) {
         LbPrepBlock *block=p->blocks; p->blocks=block->link.next;
         if(lb_alloc_domain_release(domain,block)!=LB_ALLOC_OK) abort();
+        assert(p->block_count); --p->block_count;
     }
     lb_beam_image_destroy(p->image);
     lb_atoms_abort(p->transaction);
@@ -105,6 +114,7 @@ static LbBeamStatus begin(LbAllocDomain *domain,LbAtomTable *atoms,const void *b
         for(op=p->ops;op;op=op->next) for(i=0;i<op->arity;++i)
             if(op->a[i].type==TAG_a) op->a[i].val=(Sint)p->file_atoms[op->a[i].val];
         for(i=0;i<p->lambda_count;++i) p->lambdas[i].function=p->file_atoms[p->lambdas[i].function];
+        if(!lb_pvalidate_maps(p,NULL)) goto fail;
     }
     *out=p;
     if(error) *error=(LbBeamError){LB_BEAM_OK,0,bind_atoms?"decoded; not executable":"decoded; atoms staged"};
@@ -156,6 +166,7 @@ LbBeamStatus lb_program_bind_batch(LbBeamProgram *const *programs,size_t count)
             status==LB_ATOM_LIMIT?LB_BEAM_LIMIT:LB_BEAM_BAD_FORMAT);
         return first->error.status;
     }
+    first->transaction=transaction;
     at=0;
     for(i=0;i<count;++i) {
         LbBeamProgram *p=programs[i];
@@ -163,9 +174,9 @@ LbBeamStatus lb_program_bind_batch(LbBeamProgram *const *programs,size_t count)
         for(op=p->ops;op;op=op->next) for(j=0;j<op->arity;++j)
             if(op->a[j].type==TAG_a) op->a[j].val=(Sint)p->file_atoms[op->a[j].val];
         for(j=0;j<p->lambda_count;++j) p->lambdas[j].function=p->file_atoms[p->lambdas[j].function];
+        if(!lb_pvalidate_maps(p,NULL)) return p->error.status;
     }
     if(at!=total) abort();
-    first->transaction=transaction;
     return LB_BEAM_OK;
 }
 void lb_program_commit(LbBeamProgram *p)

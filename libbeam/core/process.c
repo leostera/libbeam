@@ -6,6 +6,7 @@
  * continuation return, and native BIF call/epilogue. No scheduler/TLS singleton.
  */
 #include "process_internal.h"
+#include "apply.h"
 #include "binary_match.h"
 #define ErlSubBits LbSubBits
 #define HEADER_SUB_BITS LB_HEADER_SUB_BITS
@@ -22,6 +23,9 @@ typedef unsigned char byte;
 #include "term_compare.h"
 #include "writable.h"
 #include "binary_build.h"
+#include "map_runtime.h"
+#include "big.h"
+#include "flatmap.h"
 #include "reference.h"
 #include "stacktrace.h"
 #include "receive.h"
@@ -40,6 +44,16 @@ typedef LbFun ErlFunThing;
 #define fun_arity(fun) lb_fun_arity(fun)
 #define make_fun(fun) make_boxed((Eterm *)(fun))
 const BeamInstr lb_host_return[1]={op_normal_exit};
+#define MAP_STATUS(status) do { \
+    LbMapStatus lb_map_status_=(status); \
+    if(lb_map_status_!=LB_MAP_OK) { c_p->heap_reserved=0; \
+        if(lb_map_status_==LB_MAP_NO_MEMORY) goto memory_failure; \
+        if(lb_map_status_==LB_MAP_LIMIT) goto resource_limit; \
+        if(lb_map_status_==LB_MAP_WORK_LIMIT) goto work_failure; \
+        if(lb_map_status_==LB_MAP_UNSUPPORTED) goto execution_refused; \
+        goto malformed_code; \
+    } \
+} while(0)
 int lb_instruction_supported(unsigned op)
 {
     switch(op) {
@@ -60,9 +74,9 @@ static LbProcessStatus create_owned(LbCodeModule *module,const BeamInstr *pc,con
     p->entry_module=module; p->heap=p->htop=memory; p->hend=p->heap+words; p->stop=p->hend-1;
     *p->stop=(Eterm)lb_host_return; p->bin_vheap_sz=LB_BINARY_VHEAP_MIN_WORDS;
     for(i=0;i<MAX_REG;++i) p->reg[i]=NIL;
-    p->fvalue=p->exception_value=p->construction_root=NIL; p->freason=LB_EXC_NULL;
+    p->fvalue=p->exception_value=p->construction_root=p->ftrace=NIL; p->freason=LB_EXC_NULL;
     p->local_mfa=*mfa; p->arity=mfa->arity; p->current=&p->local_mfa;
-    p->i=pc; p->status=LB_PROCESS_READY;
+    p->i=pc; p->status=LB_PROCESS_READY; p->error_handler=am_error_handler;
     ++module->users; *out=p; return LB_PROCESS_READY;
 }
 static int private_mfa(const LbCodeModule *module,const BeamInstr *pc,LbMFA *mfa)
@@ -85,6 +99,7 @@ LbProcessStatus lb_process_create_fun(LbProcess *parent,Eterm value,size_t words
     parent->last_native_cost=1;
     const LbFun *fun=lb_fun(value);
     if(!fun || lb_fun_arity(fun)!=0) return LB_PROCESS_INVALID;
+    if(lb_fun_is_external(fun)) return LB_PROCESS_REFUSED;
     const LbFunEntry *entry=fun->entry.fun; LbCodeModule *module=entry->owner;
     if(!module || module->space!=parent->entry_module->space || !module->published ||
        entry->pend_purge_address) return LB_PROCESS_REFUSED;
@@ -166,6 +181,7 @@ void lb_process_destroy(LbProcess *p)
     lb_message_queue_clear(&p->messages);
     lb_fun_leases_clear(p);
     lb_decimal_destroy(p->decimal);
+    lb_release(p->entry_module->space->domain,p->dictionary);
     lb_offheap_clear(&p->off_heap);
     lb_offheap_clear(&p->writable);
     lb_work_process_release(p);
@@ -186,6 +202,7 @@ static int pc_valid(LbProcess *p,const BeamInstr *pc)
 {
     LbCodeModule *m; Uint address=(Uint)pc; size_t i;
     if(pc==lb_host_return) return 1;
+    if(pc==p->entry_module->space->apply_export.dispatch.addresses[0]) return 1;
     for(i=0;i<LB_NATIVE_COUNT;++i) if(pc==p->entry_module->space->natives[i].dispatch.addresses[0]) return 1;
     if(address%sizeof(BeamInstr)) return 0;
     for(m=p->entry_module->space->modules;m;m=m->next)
@@ -237,6 +254,14 @@ static int32_t lb_packed_label(const BeamInstr *table,size_t index)
     } \
     CHECK_TERM(dst); \
 } while(0)
+#define MAP_PUT_TERM_REG(term,desc) do { \
+    Eterm lb_target_=(desc); \
+    switch(loader_tag(lb_target_)) { \
+    case LOADER_X_REG:x(loader_x_reg_index(lb_target_))=(term);break; \
+    case LOADER_Y_REG:y(loader_y_reg_index(lb_target_))=(term);break; \
+    default:goto malformed_code; \
+    } \
+} while(0)
 #define Ib(word) (word)
 #define tb(word) (word)
 #define fb(word) ((Sint)(int32_t)(word))
@@ -257,6 +282,8 @@ static int32_t lb_packed_label(const BeamInstr *table,size_t index)
 #define Goto(op) do { next_op=(op); goto dispatch; } while(0)
 #define GotoPF(op) Goto(op)
 #define BADARG LB_EXC_BADARG
+#define BADARITH LB_EXC_BADARITH
+#define SMALL_ZERO make_small(0)
 #define SYSTEM_LIMIT LB_EXC_SYSTEM_LIMIT
 #define BSF_LITTLE 2
 #define BADMATCH LB_EXC_BADMATCH
@@ -291,7 +318,7 @@ dispatch:
     /* pc_valid is also an assertion predicate: it must remain pure. Pay its
      * frozen native table bound and private-directory scan here, not inside
      * CHECK_ARGS where Debug-only validation would distort admission credit. */
-    if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_NATIVE_COUNT)) goto work_failure;
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_NATIVE_COUNT+1u)) goto work_failure;
     for(LbCodeModule *module=c_p->entry_module->space->modules;module;module=module->next)
         if(!lb_work_domain_charge(module->space->domain,2)) goto work_failure;
     if(!pc_valid(c_p,I) || !VALID_INSTR(next_op) || (c_p->decimal && next_op!=op_call_bif_W)) goto malformed_code;
@@ -325,6 +352,7 @@ dispatch:
             goto context_switch;
         }
         if(is_non_value(value)) {
+            if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;
             if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
             if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
             if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
@@ -353,8 +381,10 @@ find_func_info: {
      * Native error/3 arglist wrappers retain their raw payload separately;
      * this still grants no stacktrace construction or catch/unwind. */
     LbAllocStatus expanded;
-    if(LB_GET_EXC_CLASS(c_p->freason)!=LB_EXTAG_ERROR ||
-       (c_p->freason&(LB_EXF_RESTORE_NFUNC|LB_EXF_PANIC|LB_EXF_THROWN|LB_EXF_NATIVE))) goto malformed_code;
+    Uint exception_class=LB_GET_EXC_CLASS(c_p->freason);
+    if((exception_class!=LB_EXTAG_ERROR && exception_class!=LB_EXTAG_EXIT && exception_class!=LB_EXTAG_THROWN) ||
+       (c_p->freason&(LB_EXF_RESTORE_NFUNC|LB_EXF_PANIC|LB_EXF_NATIVE)) ||
+       ((c_p->freason&LB_EXF_THROWN) && exception_class!=LB_EXTAG_THROWN)) goto malformed_code;
     Eterm reason=c_p->fvalue;
     if(c_p->freason&LB_EXF_ARGLIST) {
         if(!is_tuple(reason)) goto malformed_code;
@@ -366,6 +396,20 @@ find_func_info: {
     if(expanded==LB_ALLOC_NO_MEMORY) goto memory_failure;
     if(expanded!=LB_ALLOC_OK) goto malformed_code;
     if(!(c_p->freason&(LB_EXF_HAS_EXT_INFO|LB_EXF_ARGLIST))) c_p->fvalue=NIL;
+    /* With catch admission still closed, every thrown value is uncaught.
+     * Preserve its trace while promoting the terminal reason to nocatch. */
+    if(c_p->freason&LB_EXF_THROWN) {
+        size_t need;
+        if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
+        if(!lb_size_add(3,c_p->heap_reserved,&need)) goto resource_limit;
+        SWAPOUT;
+        int reserved=lb_heap_reserve(c_p,need,MAX_REG);
+        SWAPIN;
+        if(!reserved) goto memory_failure;
+        c_p->exception_value=TUPLE2(HTOP,am_nocatch,c_p->exception_value); HTOP+=3;
+        c_p->freason=LB_EXC_ERROR|(c_p->freason&LB_EXF_HAS_EXT_INFO);
+        if(c_p->ftrace!=NIL) c_p->freason&=~LB_EXF_SAVETRACE;
+    }
     c_p->status=LB_PROCESS_EXCEPTION; goto stop;
 }
 execution_refused:
@@ -377,7 +421,11 @@ resource_limit:
 work_failure:
     c_p->status=LB_PROCESS_WORK_LIMIT; goto stop;
 memory_failure:
-    /* The failed collection left the old roots intact. */
+    /* The failed collection left the old roots intact. Native call setup and
+     * generated allocation paths also land here; preserve the domain's cause
+     * rather than turning an accounted denial into callback OOM. */
+    if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_LIMIT) goto resource_limit;
+    if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;
     c_p->status=LB_PROCESS_NO_MEMORY; goto stop;
 malformed_code:
     c_p->status=LB_PROCESS_INVALID;

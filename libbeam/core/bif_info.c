@@ -5,6 +5,52 @@
  * fallible preallocation and explicit process context replace ERTS factories.
  */
 #include "process_internal.h"
+
+/* dist.c:node_0 and instrs.tab:node read the current local node's name.
+ * Each owned namespace starts unnamed and cannot enable distribution. */
+Eterm lb_bif_node_0(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)args; (void)pc; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    return p->entry_module->space->node_name;
+}
+Eterm lb_bif_function_exported_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    LbCodeSpace *space=p->entry_module->space; (void)pc; p->last_native_cost=0;
+    if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost=1;
+    if(!is_atom(args[0]) || !is_atom(args[1]) || !is_small(args[2])) {
+        p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+    }
+    /* OTP narrows the small to C int before unsigned export lookup. Express
+     * the observed 32-bit wrap without implementation-defined signed casts. */
+    _Static_assert(sizeof(int)==4,"native export arity ABI");
+    uint32_t arity=(uint32_t)signed_val(args[2]);
+    for(const Export *entry=space->exports;entry;entry=entry->next) {
+        if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost;
+        if(entry->info.mfa.module==args[0] && entry->info.mfa.function==args[1] && entry->info.mfa.arity==arity)
+            return am_true;
+    }
+    return am_false;
+}
+/* module_loaded_1 in beam_bif_load.c queries current, fully published code,
+ * not the export namespace. This runtime does not admit on_load staging. */
+Eterm lb_bif_module_loaded_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    LbCodeSpace *space=p->entry_module->space; (void)pc; p->last_native_cost=0;
+    if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost=1;
+    if(!is_atom(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    for(const LbCodeModule *module=space->modules;module;module=module->next) {
+        if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost;
+        if(module->name==args[0] && module->published) return am_true;
+    }
+    return am_false;
+}
 static LbCodeModule *find_module(LbProcess *p,Eterm name)
 {
     LbCodeModule *m;

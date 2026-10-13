@@ -1,0 +1,17 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Native erlang:is_integer/1 and complete X/Y/fused-allocation integer guard cases. No other type predicate BIFs are admitted here.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_bif_op.c": "74ca827e5188657cf2726a4c8a9da6f4503675714a656041722ce10a066eead3",
+    "beam/erts/emulator/beam/erl_term.h": "8e016126fb7a1bc1db8d31111601c0bea21d72207211bf91e1f3c127e943b5c2",
+    "beam/erts/emulator/beam/emu/instrs.tab": "6191258ed0710adad9cdfd67779a8680461e695487fa5471594e1001a93d9647"
+  },
+  "adaptations": [
+    "Share the native small-or-bignum tag predicate. The BIF charges one bounded native step, returns true/false for valid owned terms, and neither allocates nor collects. Work denial remains infrastructure failure.",
+    "Project complete is_integer_fx, is_integer_fy and is_integer_allocate_fxtt cases. The fused case uses existing charged fallible GC and initializes every physical Y slot before an instruction-budget safepoint, while the verifier still rejects logical uninitialized reads. Failed integer guards bypass stack allocation.",
+    "Positively admit the exact BIF and generic integer guard opcode. Literal lowering overwrites native scratch x1023 before either branch; explicitly update both branches' register facts. Normalized verifier tests reject stale tuple reads on either branch and accept safe scalar reads. OTP refuses explicit x1023 source assembly, so these proof tests do not pretend to be executable compiler fixtures.",
+    "Compiler fixtures execute body/X/Y/fused guards; standard assembly supplies integer/float literal guards with independent OTP answers. Tests distinguish smalls and positive/negative bignums from floats, atoms, lists, tuples, maps, binaries, PIDs, references and local/external funs.",
+    "Force collection at the actual fused opcode and test every allocation prefix, callback OOM versus memory denial, failed guards under allocation denial, and every work prefix with/without collection. Shared-worker tests cover exact bytes, exact/one-below budgets, reuse, peers and reclamation."
+  ],
+  "other_inputs": ["numeric-sources.json", "execution-sources.json", "opcodes/manifest.json"]
+}

@@ -53,7 +53,88 @@ def main():
                             root / 'libbeam/tests/core_work_test.c', root / 'libbeam/tests/core_work_runtime_test.c',
                             root / 'libbeam/tests/api_work_test.cpp', root / 'libbeam/tests/fixtures/work_slice.erl',
                             root / 'libbeam/tests/fixtures/memory_slice.erl',
-                            root / 'libbeam/tests/fixtures/refused_map.erl',
+                            root / 'libbeam/tests/fixtures/refused_exception.erl',
+                            root / 'libbeam/tests/core_hamt_test.c', root / 'libbeam/tests/core_map_test.c',
+                            root / 'libbeam/tests/core_map_execution_test.c', root / 'libbeam/tests/fixtures/map_slice.erl',
+                            root / 'libbeam/tests/core_external_fun_test.c', root / 'libbeam/tests/fixtures/external_fun_slice.erl',
+                            root / 'libbeam/tests/core_raise_trace_test.c', root / 'libbeam/tests/fixtures/raise_trace_reference.erl',
+                            root / 'libbeam/tests/core_raise_execution_test.c', root / 'libbeam/tests/core_raise_work_test.c',
+                            root / 'libbeam/tests/fixtures/raise_slice.erl',
+                            root / 'libbeam/tests/core_max_test.c', root / 'libbeam/tests/core_setelement_test.c',
+                            root / 'libbeam/tests/core_bif_work_test.c', root / 'libbeam/tests/core_times_test.c',
+                            root / 'libbeam/tests/fixtures/times_slice.erl', root / 'libbeam/tests/fixtures/times_reference.erl',
+                            root / 'libbeam/core/otp/times-sources.json', root / 'libbeam/core/otp/div-sources.json',
+                            root / 'libbeam/tests/core_div_test.c', root / 'libbeam/tools/generate_div_vectors.py',
+                            root / 'libbeam/tests/fixtures/div_slice.erl', root / 'libbeam/tests/fixtures/div_reference.erl',
+                            root / 'libbeam/tests/core_abs_test.c', root / 'libbeam/core/otp/abs-sources.json',
+                            root / 'libbeam/tests/fixtures/abs_slice.erl', root / 'libbeam/tests/fixtures/abs_reference.erl',
+                            root / 'libbeam/tests/core_negate_test.c', root / 'libbeam/core/otp/negate-sources.json',
+                            root / 'libbeam/tests/fixtures/negate_slice.erl', root / 'libbeam/tests/fixtures/negate_reference.erl',
+                            root / 'libbeam/core/otp/rem-sources.json',
+                            root / 'libbeam/tests/fixtures/rem_slice.erl', root / 'libbeam/tests/fixtures/rem_reference.erl',
+                            root / 'libbeam/tests/core_list_integer_test.c', root / 'libbeam/core/otp/list-integer-sources.json',
+                            root / 'libbeam/tests/fixtures/list_integer_slice.erl', root / 'libbeam/tests/fixtures/list_integer_reference.erl',
+                            root / 'libbeam/tests/core_map_key_test.c', root / 'libbeam/core/otp/map-key-sources.json',
+                            root / 'libbeam/core/otp/map-size-sources.json',
+                            root / 'libbeam/core/otp/integer-predicate-sources.json', root / 'libbeam/tests/core_integer_predicate_test.c',
+                            root / 'libbeam/tests/fixtures/integer_predicate_slice.erl', root / 'libbeam/tests/fixtures/integer_predicate_reference.erl',
+                            root / 'libbeam/tests/fixtures/integer_predicate_literals.S',
+                            root / 'libbeam/core/otp/list-parts-sources.json', root / 'libbeam/tests/core_list_parts_test.c',
+                            root / 'libbeam/tests/fixtures/list_parts_slice.erl', root / 'libbeam/tests/fixtures/list_parts_reference.erl',
+                            root / 'libbeam/core/otp/list-predicate-sources.json',
+                            root / 'libbeam/tests/fixtures/list_predicate_slice.erl', root / 'libbeam/tests/fixtures/list_predicate_reference.erl',
+                            root / 'libbeam/tests/fixtures/list_predicate_literals.S',
+                            root / 'libbeam/core/otp/not-sources.json', root / 'libbeam/tests/core_not_test.c',
+                            root / 'libbeam/tests/fixtures/not_slice.erl', root / 'libbeam/tests/fixtures/not_guard_slice.S',
+                            root / 'libbeam/tests/fixtures/not_reference.erl',
+                            root / 'libbeam/core/otp/atom-predicate-sources.json',
+                            root / 'libbeam/tests/fixtures/atom_predicate_slice.erl', root / 'libbeam/tests/fixtures/atom_predicate_reference.erl',
+                            root / 'libbeam/tests/fixtures/atom_predicate_literals.S',
+                            root / 'libbeam/core/otp/node-sources.json', root / 'libbeam/tests/core_node_test.c',
+                            root / 'libbeam/tests/fixtures/node_slice.erl', root / 'libbeam/tests/fixtures/node_locations.S',
+                            root / 'libbeam/tests/fixtures/node_reference.erl',
+                            root / 'libbeam/core/otp/floor-sources.json', root / 'libbeam/tests/core_floor_test.c',
+                            root / 'libbeam/tests/fixtures/floor_slice.erl', root / 'libbeam/tests/fixtures/floor_reference.erl',
+                            root / 'libbeam/core/otp/list-tuple-sources.json', root / 'libbeam/tests/fixtures/list_tuple_slice.erl',
+                            root / 'libbeam/tests/fixtures/list_tuple_reference.erl',
+                            root / 'libbeam/core/otp/tuple-list-sources.json', root / 'libbeam/tests/core_tuple_list_test.c',
+                            root / 'libbeam/tests/fixtures/tuple_list_slice.erl', root / 'libbeam/tests/fixtures/tuple_list_reference.erl',
+                            root / 'libbeam/core/otp/make-tuple-sources.json', root / 'libbeam/tests/core_make_tuple_test.c',
+                            root / 'libbeam/tests/fixtures/make_tuple_slice.erl', root / 'libbeam/tests/fixtures/make_tuple_reference.erl',
+                            root / 'libbeam/core/otp/error2-sources.json', root / 'libbeam/tests/core_error2_test.c',
+                            root / 'libbeam/tests/fixtures/error2_slice.erl', root / 'libbeam/tests/fixtures/error2_reference.erl',
+                            root / 'libbeam/core/otp/process-dict-sources.json', root / 'libbeam/core/bif_dict.c',
+                            root / 'libbeam/core/process_dict.h', root / 'libbeam/tests/core_dict_test.c',
+                            root / 'libbeam/tests/fixtures/dict_slice.erl', root / 'libbeam/tests/fixtures/dict_locations.S',
+                            root / 'libbeam/tests/fixtures/dict_reference.erl',
+                            root / 'libbeam/core/otp/module-loaded-sources.json', root / 'libbeam/tests/core_module_loaded_test.c',
+                            root / 'libbeam/tests/fixtures/module_loaded_slice.erl', root / 'libbeam/tests/fixtures/module_loaded_reference.erl',
+                            root / 'libbeam/tests/fixtures/module_on_load_refused.erl',
+                            root / 'libbeam/core/otp/external-sources.json', root / 'libbeam/core/bif_external.c',
+                            root / 'libbeam/tests/core_external_decode_test.c', root / 'libbeam/tests/fixtures/external_slice.erl',
+                            root / 'libbeam/tests/fixtures/external_reference.erl',
+                            root / 'libbeam/core/otp/etf-arena-sources.json', root / 'libbeam/tests/core_etf_arena_test.c',
+                            root / 'libbeam/tests/fixtures/etf_arena_reference.erl',
+                            root / 'libbeam/core/otp/process-info-sources.json', root / 'libbeam/core/bif_process_info.c',
+                            root / 'libbeam/tests/core_process_info_test.c', root / 'libbeam/tests/fixtures/process_info_slice.erl',
+                            root / 'libbeam/tests/fixtures/process_info_reference.erl',
+                            root / 'libbeam/core/otp/function-exported-sources.json', root / 'libbeam/tests/core_function_exported_test.c',
+                            root / 'libbeam/tests/fixtures/function_exported_slice.erl', root / 'libbeam/tests/fixtures/function_exported_reference.erl',
+                            root / 'libbeam/core/otp/apply-sources.json', root / 'libbeam/core/apply.c', root / 'libbeam/core/apply.h',
+                            root / 'libbeam/tests/core_apply_test.c', root / 'libbeam/tests/fixtures/apply_host.erl',
+                            root / 'libbeam/tests/fixtures/apply_target.erl', root / 'libbeam/tests/fixtures/apply_reference.erl',
+                            root / 'libbeam/core/otp/binary-predicate-sources.json',
+                            root / 'libbeam/tests/fixtures/binary_predicate_slice.erl', root / 'libbeam/tests/fixtures/binary_predicate_reference.erl',
+                            root / 'libbeam/tests/fixtures/binary_predicate_literals.S',
+                            root / 'libbeam/core/otp/atom-list-sources.json', root / 'libbeam/tests/core_atom_list_test.c',
+                            root / 'libbeam/tests/fixtures/atom_list_slice.erl', root / 'libbeam/tests/fixtures/atom_list_reference.erl',
+                            root / 'libbeam/tests/fixtures/map_key_slice.erl', root / 'libbeam/tests/fixtures/map_key_reference.erl',
+                            root / 'libbeam/core/otp/min-sources.json',
+                            root / 'libbeam/tests/fixtures/min_slice.erl', root / 'libbeam/tests/fixtures/min_reference.erl',
+                            root / 'libbeam/tests/fixtures/setelement_slice.erl', root / 'libbeam/tests/fixtures/setelement_reference.erl',
+                            root / 'libbeam/core/otp/setelement-sources.json',
+                            root / 'libbeam/tests/fixtures/max_slice.erl', root / 'libbeam/tests/fixtures/max_reference.erl',
+                            root / 'libbeam/core/otp/raise-trace-sources.json', root / 'libbeam/core/otp/max-sources.json',
                             root / 'libbeam/tests/core_beam_image_test.c', root / 'libbeam/tests/core_alloc_test.c',
                             root / 'libbeam/tests/core_terms_atoms_test.c', root / 'libbeam/tools/generate_atoms.py',
                             root / 'libbeam/tools/check_term_representation.py', root / 'libbeam/tools/check_binary_representation.py',
@@ -201,11 +282,171 @@ def main():
                 if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
                     raise RuntimeError(f'Exception reference changed: {filename}')
             summary['exception_sources'] = exception_sources
+            raise_sources = json.loads((root / 'libbeam/core/otp/raise-trace-sources.json').read_text())
+            for filename, expected in raise_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Raise trace reference changed: {filename}')
+            summary['raise_trace_sources'] = raise_sources
+            max_sources = json.loads((root / 'libbeam/core/otp/max-sources.json').read_text())
+            for filename, expected in max_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Max reference changed: {filename}')
+            summary['max_sources'] = max_sources
+            setelement_sources = json.loads((root / 'libbeam/core/otp/setelement-sources.json').read_text())
+            for filename, expected in setelement_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Setelement reference changed: {filename}')
+            summary['setelement_sources'] = setelement_sources
+            times_sources = json.loads((root / 'libbeam/core/otp/times-sources.json').read_text())
+            for filename, expected in times_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Multiplication reference changed: {filename}')
+            summary['times_sources'] = times_sources
+            div_sources = json.loads((root / 'libbeam/core/otp/div-sources.json').read_text())
+            for filename, expected in div_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Integer division reference changed: {filename}')
+            summary['div_sources'] = div_sources
+            abs_sources = json.loads((root / 'libbeam/core/otp/abs-sources.json').read_text())
+            for filename, expected in abs_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Absolute-value reference changed: {filename}')
+            summary['abs_sources'] = abs_sources
+            negate_sources = json.loads((root / 'libbeam/core/otp/negate-sources.json').read_text())
+            for filename, expected in negate_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Unary-negation reference changed: {filename}')
+            summary['negate_sources'] = negate_sources
+            rem_sources = json.loads((root / 'libbeam/core/otp/rem-sources.json').read_text())
+            for filename, expected in rem_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Remainder reference changed: {filename}')
+            summary['rem_sources'] = rem_sources
+            list_integer_sources = json.loads((root / 'libbeam/core/otp/list-integer-sources.json').read_text())
+            for filename, expected in list_integer_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'List integer reference changed: {filename}')
+            summary['list_integer_sources'] = list_integer_sources
+            min_sources = json.loads((root / 'libbeam/core/otp/min-sources.json').read_text())
+            for filename, expected in min_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Minimum reference changed: {filename}')
+            summary['min_sources'] = min_sources
+            map_key_sources = json.loads((root / 'libbeam/core/otp/map-key-sources.json').read_text())
+            for filename, expected in map_key_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Map key reference changed: {filename}')
+            summary['map_key_sources'] = map_key_sources
+            map_size_sources = json.loads((root / 'libbeam/core/otp/map-size-sources.json').read_text())
+            for filename, expected in map_size_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Map size reference changed: {filename}')
+            summary['map_size_sources'] = map_size_sources
+            integer_predicate_sources = json.loads((root / 'libbeam/core/otp/integer-predicate-sources.json').read_text())
+            for filename, expected in integer_predicate_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Integer predicate reference changed: {filename}')
+            summary['integer_predicate_sources'] = integer_predicate_sources
+            list_parts_sources = json.loads((root / 'libbeam/core/otp/list-parts-sources.json').read_text())
+            for filename, expected in list_parts_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'List parts reference changed: {filename}')
+            summary['list_parts_sources'] = list_parts_sources
+            list_predicate_sources = json.loads((root / 'libbeam/core/otp/list-predicate-sources.json').read_text())
+            for filename, expected in list_predicate_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'List predicate reference changed: {filename}')
+            summary['list_predicate_sources'] = list_predicate_sources
+            not_sources = json.loads((root / 'libbeam/core/otp/not-sources.json').read_text())
+            for filename, expected in not_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Boolean not reference changed: {filename}')
+            summary['not_sources'] = not_sources
+            atom_predicate_sources = json.loads((root / 'libbeam/core/otp/atom-predicate-sources.json').read_text())
+            for filename, expected in atom_predicate_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Atom predicate reference changed: {filename}')
+            summary['atom_predicate_sources'] = atom_predicate_sources
+            atom_list_sources = json.loads((root / 'libbeam/core/otp/atom-list-sources.json').read_text())
+            for filename, expected in atom_list_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Atom list reference changed: {filename}')
+            summary['atom_list_sources'] = atom_list_sources
+            binary_predicate_sources = json.loads((root / 'libbeam/core/otp/binary-predicate-sources.json').read_text())
+            for filename, expected in binary_predicate_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Binary predicate reference changed: {filename}')
+            summary['binary_predicate_sources'] = binary_predicate_sources
+            apply_sources = json.loads((root / 'libbeam/core/otp/apply-sources.json').read_text())
+            for filename, expected in apply_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Apply reference changed: {filename}')
+            summary['apply_sources'] = apply_sources
+            function_exported_sources = json.loads((root / 'libbeam/core/otp/function-exported-sources.json').read_text())
+            for filename, expected in function_exported_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Function exported reference changed: {filename}')
+            summary['function_exported_sources'] = function_exported_sources
+            process_info_sources = json.loads((root / 'libbeam/core/otp/process-info-sources.json').read_text())
+            for filename, expected in process_info_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Process info reference changed: {filename}')
+            summary['process_info_sources'] = process_info_sources
+            etf_arena_sources = json.loads((root / 'libbeam/core/otp/etf-arena-sources.json').read_text())
+            for filename, expected in etf_arena_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'ETF arena reference changed: {filename}')
+            summary['etf_arena_sources'] = etf_arena_sources
+            external_sources = json.loads((root / 'libbeam/core/otp/external-sources.json').read_text())
+            for filename, expected in external_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'External decoding reference changed: {filename}')
+            summary['external_sources'] = external_sources
+            module_loaded_sources = json.loads((root / 'libbeam/core/otp/module-loaded-sources.json').read_text())
+            for filename, expected in module_loaded_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Module-loaded reference changed: {filename}')
+            summary['module_loaded_sources'] = module_loaded_sources
+            process_dict_sources = json.loads((root / 'libbeam/core/otp/process-dict-sources.json').read_text())
+            for filename, expected in process_dict_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Process dictionary reference changed: {filename}')
+            summary['process_dict_sources'] = process_dict_sources
+            error2_sources = json.loads((root / 'libbeam/core/otp/error2-sources.json').read_text())
+            for filename, expected in error2_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Error/2 reference changed: {filename}')
+            summary['error2_sources'] = error2_sources
+            make_tuple_sources = json.loads((root / 'libbeam/core/otp/make-tuple-sources.json').read_text())
+            for filename, expected in make_tuple_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Make-tuple reference changed: {filename}')
+            summary['make_tuple_sources'] = make_tuple_sources
+            tuple_list_sources = json.loads((root / 'libbeam/core/otp/tuple-list-sources.json').read_text())
+            for filename, expected in tuple_list_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Tuple-list reference changed: {filename}')
+            summary['tuple_list_sources'] = tuple_list_sources
+            list_tuple_sources = json.loads((root / 'libbeam/core/otp/list-tuple-sources.json').read_text())
+            for filename, expected in list_tuple_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'List-tuple reference changed: {filename}')
+            summary['list_tuple_sources'] = list_tuple_sources
+            floor_sources = json.loads((root / 'libbeam/core/otp/floor-sources.json').read_text())
+            for filename, expected in floor_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Floor reference changed: {filename}')
+            summary['floor_sources'] = floor_sources
+            node_sources = json.loads((root / 'libbeam/core/otp/node-sources.json').read_text())
+            for filename, expected in node_sources['sources'].items():
+                if hashlib.sha256((root / filename).read_bytes()).hexdigest() != expected:
+                    raise RuntimeError(f'Node reference changed: {filename}')
+            summary['node_sources'] = node_sources
             for filename, expected in {
                 'beam/erts/emulator/beam/beam_file.c': '52708b4a8fa136d005d962599914b095e01b7fc311c1748309d3682d4ff56d0d',
                 'beam/erts/emulator/beam/beam_file.h': '82a4760ac4c3b69d385a26c4c004103ca996960621d5f9bb4f62529e3b4f3718',
                 'beam/erts/emulator/beam/erl_term.h': '8e016126fb7a1bc1db8d31111601c0bea21d72207211bf91e1f3c127e943b5c2',
-                'beam/erts/emulator/beam/atom.c': '7d73c9f537444aa725c4dad64bce65460a7282fb0d3de4d2917f9f9cabd5a6d5',
+                'beam/erts/emulator/beam/atom.c': 'a83d7789ac31e475e4c006cb379f9cf74634b251d1c350358e321c60412610a8',
                 'beam/erts/emulator/beam/hash.c': '8a90d388e20ad89f981b9a38731459be3ea82efaf92f3347e9af702f94d5e40c',
                 'beam/erts/emulator/beam/hash.h': '9d4523310ac9362320b463cc48cefe28e6f5a46acdacd80229352a8252afbe22',
                 'beam/erts/emulator/beam/erl_vm.h': '5fc1308a52c46629307cbe0fa085ca561ba1244b0252de1a59b1a35c53d8d02b',
@@ -315,11 +556,144 @@ def main():
                  '--call', 'dependency', '--isolate', peer_fixture], accepted=(1,))
             if 'stage=unresolved import, import_index=' not in missing or 'mfa="first_slice":"literal"/0' not in missing:
                 raise RuntimeError('missing dependency diagnostic lost its owned MFA/location')
-            run('refused-map-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/refused_map.erl'])
-            refused = run('runner-unused-unsupported', [out / 'build/run_beam', '--entry', 'refused_map', 'identity',
-                 '--call', 'must-not-run', '--isolate', fixture_dir / 'refused_map.beam'], accepted=(1,))
-            if 'stage=put_map_assoc' not in refused or 'bytes=' in refused:
-                raise RuntimeError('unused map function did not fail closed with an opcode diagnostic')
+            run('refused-exception-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/refused_exception.erl'])
+            refused = run('runner-unused-unsupported', [out / 'build/run_beam', '--entry', 'refused_exception', 'identity',
+                 '--call', 'must-not-run', '--isolate', fixture_dir / 'refused_exception.beam'], accepted=(1,))
+            if 'stage=try' not in refused or 'bytes=' in refused:
+                raise RuntimeError('unused exception function did not fail closed with an opcode diagnostic')
+            run('node-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/node_slice.erl', root / 'libbeam/tests/fixtures/node_locations.S',
+                root / 'libbeam/tests/fixtures/node_reference.erl'])
+            run('node-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'node_reference', 'run', '-s', 'init', 'stop'])
+            run('floor-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/floor_slice.erl', root / 'libbeam/tests/fixtures/floor_reference.erl'])
+            run('floor-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'floor_reference', 'run', '-s', 'init', 'stop'])
+            run('list-tuple-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/list_tuple_slice.erl', root / 'libbeam/tests/fixtures/list_tuple_reference.erl'])
+            run('list-tuple-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'list_tuple_reference', 'run', '-s', 'init', 'stop'])
+            run('tuple-list-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/tuple_list_slice.erl', root / 'libbeam/tests/fixtures/tuple_list_reference.erl'])
+            run('tuple-list-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'tuple_list_reference', 'run', '-s', 'init', 'stop'])
+            run('make-tuple-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/make_tuple_slice.erl', root / 'libbeam/tests/fixtures/make_tuple_reference.erl'])
+            run('make-tuple-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'make_tuple_reference', 'run', '-s', 'init', 'stop'])
+            run('error2-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/error2_slice.erl', root / 'libbeam/tests/fixtures/error2_reference.erl'])
+            run('error2-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'error2_reference', 'run', '-s', 'init', 'stop'])
+            run('dict-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/dict_slice.erl', root / 'libbeam/tests/fixtures/dict_locations.S',
+                root / 'libbeam/tests/fixtures/dict_reference.erl'])
+            run('dict-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'dict_reference', 'run', '-s', 'init', 'stop'])
+            run('module-loaded-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/module_loaded_slice.erl', root / 'libbeam/tests/fixtures/module_loaded_reference.erl',
+                root / 'libbeam/tests/fixtures/apply_target.erl'])
+            run('module-loaded-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'module_loaded_reference', 'run', '-s', 'init', 'stop'])
+            run('external-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/external_slice.erl', root / 'libbeam/tests/fixtures/external_reference.erl'])
+            run('external-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'external_reference', 'run', '-s', 'init', 'stop'])
+            run('etf-arena-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/etf_arena_reference.erl'])
+            run('etf-arena-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'etf_arena_reference', 'run', '-s', 'init', 'stop'])
+            run('process-info-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/process_info_slice.erl', root / 'libbeam/tests/fixtures/process_info_reference.erl'])
+            run('process-info-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'process_info_reference', 'run', '-s', 'init', 'stop'])
+            run('function-exported-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/function_exported_slice.erl', root / 'libbeam/tests/fixtures/function_exported_reference.erl',
+                root / 'libbeam/tests/fixtures/apply_target.erl'])
+            run('function-exported-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'function_exported_reference', 'run', '-s', 'init', 'stop'])
+            run('apply-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/apply_host.erl', root / 'libbeam/tests/fixtures/apply_target.erl',
+                root / 'libbeam/tests/fixtures/apply_reference.erl'])
+            run('apply-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'apply_reference', 'run', '-s', 'init', 'stop'])
+            run('binary-predicate-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/binary_predicate_slice.erl', root / 'libbeam/tests/fixtures/binary_predicate_literals.S',
+                root / 'libbeam/tests/fixtures/binary_predicate_reference.erl'])
+            run('binary-predicate-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'binary_predicate_reference', 'run', '-s', 'init', 'stop'])
+            run('atom-list-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/atom_list_slice.erl', root / 'libbeam/tests/fixtures/atom_list_reference.erl'])
+            run('atom-list-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'atom_list_reference', 'run', '-s', 'init', 'stop'])
+            run('atom-predicate-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/atom_predicate_slice.erl', root / 'libbeam/tests/fixtures/atom_predicate_literals.S',
+                root / 'libbeam/tests/fixtures/atom_predicate_reference.erl'])
+            run('atom-predicate-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'atom_predicate_reference', 'run', '-s', 'init', 'stop'])
+            run('not-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/not_slice.erl', root / 'libbeam/tests/fixtures/not_guard_slice.S',
+                root / 'libbeam/tests/fixtures/not_reference.erl'])
+            run('not-reference', [args.erl, '-noshell', '-pa', fixture_dir, '-s', 'not_reference', 'run', '-s', 'init', 'stop'])
+            run('list-predicate-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/list_predicate_slice.erl', root / 'libbeam/tests/fixtures/list_predicate_literals.S',
+                root / 'libbeam/tests/fixtures/list_predicate_reference.erl'])
+            run('list-predicate-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'list_predicate_reference', 'run', '-s', 'init', 'stop'])
+            run('list-parts-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/list_parts_slice.erl', root / 'libbeam/tests/fixtures/list_parts_reference.erl'])
+            run('list-parts-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'list_parts_reference', 'run', '-s', 'init', 'stop'])
+            run('integer-predicate-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/integer_predicate_slice.erl', root / 'libbeam/tests/fixtures/integer_predicate_literals.S',
+                root / 'libbeam/tests/fixtures/integer_predicate_reference.erl'])
+            run('integer-predicate-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'integer_predicate_reference', 'run', '-s', 'init', 'stop'])
+            run('map-key-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/map_key_slice.erl', root / 'libbeam/tests/fixtures/map_key_reference.erl'])
+            run('map-key-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'map_key_reference', 'run', '-s', 'init', 'stop'])
+            run('min-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/min_slice.erl', root / 'libbeam/tests/fixtures/min_reference.erl'])
+            run('min-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'min_reference', 'run', '-s', 'init', 'stop'])
+            run('list-integer-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/list_integer_slice.erl', root / 'libbeam/tests/fixtures/list_integer_reference.erl'])
+            run('list-integer-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'list_integer_reference', 'run', '-s', 'init', 'stop'])
+            run('rem-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/rem_slice.erl', root / 'libbeam/tests/fixtures/rem_reference.erl'])
+            run('rem-reference', [args.erl, '-noshell', '-pa', fixture_dir, '-eval',
+                'rem_reference:run('+json.dumps(str(out / 'build/fixtures/div_vectors.txt'))+'),halt().'])
+            run('negate-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/negate_slice.erl', root / 'libbeam/tests/fixtures/negate_reference.erl'])
+            run('negate-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'negate_reference', 'run', '-s', 'init', 'stop'])
+            run('abs-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/abs_slice.erl', root / 'libbeam/tests/fixtures/abs_reference.erl'])
+            run('abs-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'abs_reference', 'run', '-s', 'init', 'stop'])
+            run('div-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/div_slice.erl', root / 'libbeam/tests/fixtures/div_reference.erl'])
+            run('div-reference', [args.erl, '-noshell', '-pa', fixture_dir, '-eval',
+                'div_reference:run('+json.dumps(str(out / 'build/fixtures/div_vectors.txt'))+'),halt().'])
+            run('times-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/times_slice.erl', root / 'libbeam/tests/fixtures/times_reference.erl'])
+            run('times-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'times_reference', 'run', '-s', 'init', 'stop'])
+            run('setelement-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/setelement_slice.erl', root / 'libbeam/tests/fixtures/setelement_reference.erl'])
+            run('setelement-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'setelement_reference', 'run', '-s', 'init', 'stop'])
+            run('max-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/max_slice.erl', root / 'libbeam/tests/fixtures/max_reference.erl'])
+            run('max-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'max_reference', 'run', '-s', 'init', 'stop'])
+            run('raise-reference-erlc', [args.erlc, '-o', fixture_dir,
+                root / 'libbeam/tests/fixtures/raise_trace_reference.erl', root / 'libbeam/tests/fixtures/raise_slice.erl'])
+            run('raise-reference', [args.erl, '-noshell', '-pa', fixture_dir,
+                '-s', 'raise_trace_reference', 'run', '-s', 'raise_trace_reference', 'execution', '-s', 'init', 'stop'])
             run('binary-erlc', [args.erlc, '-o', fixture_dir, root / 'libbeam/tests/fixtures/binary_slice.erl'])
             binary_fixture = fixture_dir / 'binary_slice.beam'
             run('flatmap-representation', ['python3', '-B', root / 'libbeam/tools/check_flatmap_representation.py',
@@ -596,14 +970,14 @@ def main():
             run('terms-ubsan-fixture', [out / 'terms-ubsan', fixture])
             program_sources = ['alloc', 'utf8', 'atoms', 'beam_image', 'opcodes', 'beam_reader',
                                'beam_program', 'beam_decode', 'beam_metadata', 'beam_literals', 'beam_select', 'binary']
+            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','work_budget','md5','process','heap','bif_info','term_compare','big','bif_numeric','bif_binary','bif_map','map_hamt','map_runtime','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','stacktrace','raise_trace','bif_exception','pid_table','bif_process','bif_process_info','bif_external','bif_dict','fun','apply','message','receive','registry','receive_marker','monitor','preloaded','binary_match']
             run('program-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
-                *[f'libbeam/core/{s}.c' for s in program_sources], 'libbeam/tests/core_beam_program_test.c',
-                '-lz', '-o', out / 'program-ubsan'])
+                *[f'libbeam/core/{s}.c' for s in execution_sources_c], 'libbeam/tests/core_beam_program_test.c',
+                '-pthread', '-lz', '-lm', '-o', out / 'program-ubsan'])
             for i, image in enumerate([fixture, binary_fixture, *probes]):
                 run(f'program-ubsan-{i}', [out / 'program-ubsan', image])
-            execution_sources_c = program_sources + ['beam_transform','beam_emit','beam_verify','code','engine','executor','world','work_budget','md5','process','heap','bif_info','term_compare','big','bif_numeric','decimal','bif_decimal','bit_copy','bit_writer','bit_float','writable','binary_error','binary_size','binary_vheap','binary_build','exception','stacktrace','pid_table','bif_process','fun','message','receive','registry','receive_marker','monitor','preloaded','binary_match']
             run('execution-ubsan-compile', ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                 '-fsanitize=undefined', '-fno-sanitize-recover=all', '-Ilibbeam/core',
                 '-I'+str(out / 'build/generated/atoms'), '-I'+str(out / 'build/generated/opcodes'),
@@ -625,6 +999,11 @@ def main():
                 '-DCMAKE_C_FLAGS='+sanitizer_flags+' -DHAVE_OVERFLOW_CHECK_BUILTINS', '-DCMAKE_CXX_FLAGS='+sanitizer_flags])
             run('engine-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
                 'core_engine_test', 'core_executor_test', 'core_batch_admission_test', 'api_batch_admission_test', 'core_world_test', 'core_local_test', 'core_compare_test', 'core_shape_test', 'core_shape_verify_test', 'core_big_test', 'core_add_test', 'core_decimal_test', 'core_bit_copy_test', 'core_bit_writer_test', 'core_bit_segment_test', 'core_flatmap_test', 'core_binary_transform_test', 'core_binary_emit_test', 'core_binary_size_test', 'core_exception_test', 'core_binary_flow_test', 'core_binary_vheap_test', 'core_writable_init_test', 'api_writable_init_test', 'core_binary_build_test', 'api_binary_build_test', 'core_pid_test', 'api_engine_test', 'api_world_test', 'api_memory_test', 'core_memory_test', 'core_work_test', 'core_work_runtime_test', 'api_work_test', 'core_alloc_test', 'engine_lifecycle', 'two_isolates', 'run_beam'])
+            run('profile-ubsan-build', ['cmake', '--build', out / 'engine-ubsan', '--target',
+                'core_hamt_test', 'core_map_test', 'core_map_execution_test', 'core_external_fun_test', 'core_raise_trace_test',
+                'core_raise_execution_test', 'core_raise_work_test', 'core_max_test', 'core_setelement_test', 'core_bif_work_test', 'core_times_test',  'core_div_test', 'core_abs_test', 'core_negate_test', 'core_list_integer_test', 'core_map_key_test', 'core_integer_predicate_test', 'core_list_parts_test', 'core_not_test', 'core_atom_list_test', 'core_apply_test', 'core_function_exported_test', 'core_process_info_test', 'core_etf_arena_test', 'core_external_decode_test', 'core_module_loaded_test', 'core_dict_test', 'core_error2_test', 'core_make_tuple_test', 'core_tuple_list_test', 'core_list_tuple_test', 'core_floor_test', 'core_node_test'])
+            run('profile-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
+                '-R', '^(core_hamt_runtime|core_map_runtime|core_map_execution|core_external_fun_runtime|core_raise_trace_prepare|core_raise_execution|core_raise_work|core_max_execution|core_setelement_execution|core_setelement_work|core_times_execution|core_times_work|core_div_execution|core_div_work|core_abs_execution|core_abs_work|core_negate_execution|core_negate_work|core_rem_execution|core_rem_work|core_list_integer_execution|core_list_integer_work|core_min_execution|core_min_work|core_map_key_execution|core_map_key_work|core_integer_predicate_execution|core_integer_predicate_work|core_list_parts_execution|core_list_parts_work|core_list_predicate_execution|core_list_predicate_work|core_not_execution|core_not_work|core_atom_predicate_execution|core_atom_predicate_work|core_atom_list_execution|core_atom_list_work|core_binary_predicate_execution|core_binary_predicate_work|core_apply_components|core_apply_work|core_function_exported_execution|core_function_exported_work|core_process_info_execution|core_process_info_work|core_etf_arena|core_external_decode_execution|core_external_decode_work|core_module_loaded_execution|core_module_loaded_work|core_dict_execution|core_dict_work|core_error2_execution|core_error2_work|core_make_tuple_execution|core_make_tuple_work|core_tuple_list_execution|core_tuple_list_work|core_list_tuple_execution|core_list_tuple_work|core_floor_execution|core_floor_work|core_node_execution|core_node_work)$'])
             run('engine-ubsan-test', ['ctest', '--test-dir', out / 'engine-ubsan', '--output-on-failure',
                 '-R', '^(core_batch_admission|api_batch_admission|beam_runner_eager_dependency_groups|core_engine_lifetime|core_executor_native_lifetime|core_world_lifetime|core_exact_comparison|core_shape_proof|core_big_components|core_decimal_components|core_bit_copy_components|core_bit_writer_components|core_bit_segment_components|core_flatmap_components|core_binary_transform_components|core_binary_emit_components|core_binary_size_components|core_exception_components|core_binary_flow_proof|core_binary_vheap_policy|core_writable_init_gate|core_binary_build_gate|core_pid_gate|api_engine_lifetime|api_memory_gate|core_allocation_lifetime|core_memory_scope|core_work_ledger|core_work_runtime_gate|api_work_gate|engine_lifecycle_acceptance)$'])
             if run('bit-segment-ubsan-vectors', [out / 'engine-ubsan/core_bit_segment_test', '--reference']) != segment_reference:

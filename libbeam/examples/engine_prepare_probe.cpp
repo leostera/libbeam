@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include <string>
 #ifdef __APPLE__
 #include <mach/mach.h>
 #elif defined(__linux__)
@@ -77,8 +78,28 @@ int main(int argc, char** argv) {
         inventory.loaded_code_bytes != 93 || inventory.init_process_created != 94 ||
         inventory.system_process_roots != 95) return 11;
 
-    if (erl_prepare_runtime(engine, argc, argv) != 0 ||
-        erl_runtime_startup_phase(engine) != ERL_RUNTIME_PREPARED) return 12;
+    // Rejection before claim must leave the candidate reusable. This is not
+    // evidence of rollback after native initialization has begun.
+    if (erl_prepare_shared_runtime(engine, 0, nullptr) != 2 ||
+        erl_runtime_is_claimed() ||
+        erl_runtime_startup_phase(engine) != ERL_RUNTIME_UNCLAIMED) return 17;
+    {
+        std::vector<std::string> arguments;
+        for (int i = 0; i < argc; ++i) arguments.emplace_back(argv[i]);
+        std::vector<char*> pointers;
+        for (auto& argument : arguments) pointers.push_back(argument.data());
+        pointers.push_back(nullptr);
+        if (erl_prepare_shared_runtime(engine, argc, pointers.data()) != 0 ||
+            erl_runtime_startup_phase(engine) != ERL_RUNTIME_SHARED_PREPARED ||
+            erl_prepared_runtime_inventory(engine, &inventory) != 1 ||
+            inventory.processes != 91 || os_threads() != before) return 18;
+        // Destroy caller strings/vector before completing the next phase.
+        for (auto& argument : arguments) std::fill(argument.begin(), argument.end(), 'x');
+    }
+    if (erl_complete_runtime_preparation(engine) != 0 ||
+        erl_runtime_startup_phase(engine) != ERL_RUNTIME_PREPARED ||
+        erl_complete_runtime_preparation(engine) != 1) return 12;
+    std::puts("HOST_SHARED_PREPARE_OK caller_arguments_released=true os_threads_unchanged=true");
     if (erl_prepared_runtime_inventory(engine, &inventory) != 0 ||
         inventory.processes != 0 || inventory.ports != 0 ||
         inventory.loaded_code_bytes != 0 || inventory.init_process_created ||

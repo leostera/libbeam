@@ -31,6 +31,7 @@ int main(int argc, char **argv)
     int i, j;
     CHECK(engine && erl_prepare_runtime(engine, argc, argv) == 0);
     CHECK(engine->global_literals);
+    CHECK(erts_discard_shared_global_literals(engine) == 1); /* world tables exist */
     CHECK(erts_global_literal_arena_discard(engine->global_literals) == 1);
     CHECK(!erts_global_literal_arena_create(0));
     CHECK(!erts_global_literal_arena_create(~(Uint)0));

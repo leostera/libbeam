@@ -1,0 +1,15 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Native atom_to_list_1 Unicode-scalar semantics using the owned validated atom namespace, with a shared trusted-name decoder for the existing atom_to_binary Latin-1 path.",
+  "sources": {
+    "beam/erts/emulator/beam/bif.c": "4bb45111028b9e86edf72626dd92c8ef78397dd8906979e64a899bc5ccfd4bbb"
+  },
+  "adaptations": [
+    "Return Unicode code points, not encoded UTF-8 bytes. Namespace admission already guarantees canonical scalar UTF-8 with at most 255 characters, including embedded NUL. Empty atoms return NIL without allocation.",
+    "Precharge bounded decoding and construction work, count scalars, reserve the final cons storage while preserving existing heap credit, then decode into the unpublished list and publish last. No dynamic scratch or process-heap pointer survives collection. Borrowed namespace name storage remains immutable and nonmoving under its owning code-space lease.",
+    "Share the trusted namespace-name decoder with atom_to_binary/2 Latin-1 conversion; retain its rejection of code points above 255. No new external UTF-8 parsing boundary or atom interning is performed by atom_to_list/1.",
+    "Compiler and independent OTP fixtures cover empty/NUL names, ASCII, two/three/four-byte code points, scalar boundaries and a 255-character name occupying 1020 UTF-8 bytes. Native tests also check binary conversion regression, non-atom badarg, source/namespace preservation and output survival across moving GC.",
+    "Direct-helper and actual heavy-BIF trampoline tests cover every allocation prefix and separate callback OOM from accounted memory denial. Tests preserve outstanding heap credit, verify allocation-free empty names under denial, and enumerate work prefixes with/without forced primitive collection for mixed and maximum-size names. Shared-worker tests retain exact bytes/budgets/reuse/peer survival/reclamation."
+  ],
+  "other_inputs": ["numeric-sources.json", "execution-sources.json", "opcodes/manifest.json"]
+}

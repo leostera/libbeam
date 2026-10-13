@@ -1,0 +1,15 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Native is_map_key_2/maps_is_key_2 outcomes through the existing bounded flatmap/HAMT lookup profile. Only erlang:is_map_key/2 gains a native registration here.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_map.c": "85bc8e09ec1c45855fb91838694ee14ed8daaa1a663a1a7a5a935a2cc025d698"
+  },
+  "adaptations": [
+    "Share checked lookup and failure classification with map_get/2. Found values produce true for membership; only an actual missing lookup produces false. Non-map operands retain the supplied value in badmap, not badarg.",
+    "Positively admit the exact is_map_key/2 native import in the nonallocating BIF group. Compiler-lowered map guards use existing map instructions. Unadmitted key comparisons/hash classes remain explicit profile refusals in both body and guard paths, not false results.",
+    "Charge map checking, search, key comparison and hashing through existing causal work helpers. Lookup does not publish or mutate a guest map, and does not collect the heap. Resource statuses remain distinct from missing-key outcomes.",
+    "Compiled fixtures and independent OTP reference cover flatmap/HAMT hits and misses, empty maps, badmap payload, guard behavior and nested tuple keys. Unsupported binary HAMT queries are valid in OTP but explicitly refused in the current native profile.",
+    "Nested flatmap lookup succeeds with both a full memory quota and an allocator denying all allocations: the tested path needs no scratch allocation. Tests do not claim to inject OOM into an allocation-free lookup. All work prefixes are tested on flatmap/HAMT hits/misses and HAMT guards. Shared-worker tests cover exact bytes, exact/one-below budgets, private reuse, peer survival and reclamation."
+  ],
+  "other_inputs": ["flatmap-error-sources.json", "term-compare-sources.json", "execution-sources.json", "opcodes/manifest.json"]
+}

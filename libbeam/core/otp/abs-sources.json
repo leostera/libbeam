@@ -1,0 +1,14 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Native abs_1 semantics and positively linked gc_bif1 body/guard execution, not general allocating-BIF admission.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_bif_guard.c": "6a254bcedaf5f57a01a8cdd6cf94f8140693be99b4735a9283d8bffa4288cc67"
+  },
+  "adaptations": [
+    "Preserve small magnitudes, MIN_SMALL promotion, positive bignum reuse, and copying negative bignums without mutating the source. Copy both float zeros to positive zero; preserve positive nonzero float identity and clear negative finite sign bits without changing the host floating environment.",
+    "Precharge negative-bignum staging and publication, then copy to accounted independent scratch before possible collection. Native local tmp_reg operands never need dereferencing after collection. Guest badarg precedes collection; quota/OOM/work failures bypass guest guard branches.",
+    "Admit abs through gc_bif1 only for its actual catalog entry; unary minus has a separately admitted native instruction group. The complete existing native BIF groups permit moving heap changes only for that positively linked function, restoring aliases and recomputing destinations afterward; other admitted predicates/max retain their nonallocating invariant.",
+    "Tests cover compiler-produced X/Y destinations, independent OTP integer/float-bit vectors, signed zero/subnormals/finite extremes, positive value identity, source immutability, maximum-size bignums, outstanding credit, moving GC, every allocation/work failure prefix, and shared-worker exact/one-below budgets, reuse, peers and reclamation."
+  ],
+  "other_inputs": ["numeric-sources.json", "execution-sources.json", "opcodes/manifest.json"]
+}

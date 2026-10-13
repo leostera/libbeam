@@ -302,9 +302,15 @@ LbCodeStatus lb_finish_emit(LoaderState *st)
         st->codev[p->pos]=term;
         const LbFun *fun=lb_fun(term);
         if(fun) {
-            VERIFY(p->pc<st->ci && fun->entry.fun->owner==st->module_code && !lb_fun_free(fun));
+            VERIFY(p->pc<st->ci && !lb_fun_free(fun));
             LbLiteralFunUse *use=lb_palloc(st->program,1,sizeof(*use)); ALLOC(use);
-            *use=(LbLiteralFunUse){p->pc,fun->entry.fun,st->module_code->literal_fun_uses};
+            if(lb_fun_is_external(fun)) {
+                VERIFY(fun->entry.exp);
+                *use=(LbLiteralFunUse){p->pc,NULL,fun->entry.exp,st->module_code->literal_fun_uses};
+            } else {
+                VERIFY(fun->entry.fun->owner==st->module_code);
+                *use=(LbLiteralFunUse){p->pc,fun->entry.fun,NULL,st->module_code->literal_fun_uses};
+            }
             st->module_code->literal_fun_uses=use;
         }
     }

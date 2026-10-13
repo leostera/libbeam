@@ -59,6 +59,7 @@ LbAllocStatus lb_alloc_domain_allocate(LbAllocDomain *domain,size_t size,void **
     block=domain->system.allocate(domain->system.context,charge);
     if(!block) return failed(domain,LB_ALLOC_NO_MEMORY);
     block->info.next=domain->blocks; block->info.charge=charge; domain->blocks=block;
+    assert(domain->block_count<SIZE_MAX); ++domain->block_count;
     domain->current+=charge; if(domain->current>domain->peak) domain->peak=domain->current;
     *out=block+1; return LB_ALLOC_OK;
 }
@@ -72,6 +73,7 @@ LbAllocStatus lb_alloc_domain_release(LbAllocDomain *domain,void *allocation)
             *link=block->info.next;
             if(charge>domain->current) abort();
             domain->system.release(domain->system.context,block);
+            assert(domain->block_count); --domain->block_count;
             domain->current-=charge; return LB_ALLOC_OK;
         }
     }
@@ -81,7 +83,7 @@ LbAllocStatus lb_alloc_domain_destroy(LbAllocDomain *domain)
 {
     LbSystemAllocator system;
     if(!domain || !domain->system.allocate) return LB_ALLOC_INVALID;
-    if(domain->blocks || domain->children || domain->work || domain->failed_work) return LB_ALLOC_BUSY;
+    if(domain->blocks || domain->block_count || domain->children || domain->work || domain->failed_work) return LB_ALLOC_BUSY;
     if(domain->current) abort();
     if(domain->parent) {
         if(!domain->parent->children) abort(); --domain->parent->children;

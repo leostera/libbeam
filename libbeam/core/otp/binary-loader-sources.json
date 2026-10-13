@@ -3,10 +3,11 @@
   "emission_baseline": "2610d153",
   "flow_baseline": "3cc20f12",
   "scope": "Complete native create_bin loader generator and word emission/string fixups, with checked structural descriptors, whole string spans and fallible arena allocation. Register/root and private-slot consumption facts are checked before transformation. Runtime uniqueness remains mandatory; dispatch/resource policy remain unadmitted.",
+  "reviewed_source_refresh": "source-refresh-59ab0dc.md",
   "sources": {
     "beam/erts/emulator/beam/emu/bs_instrs.tab": "49f203f8c900e9da964e3c483f186c7562fdb4ddb9bb2fa8a0f9af574c2d3279",
     "beam/erts/emulator/beam/erl_bits.c": "2b803014c329c7c2c30e60c0bffda90911985b9ce1703952e7315e28694ccdb6",
-    "beam/erts/emulator/beam/emu/emu_load.c": "f2ece111cd5d8a3ccc467c275b9c01137a91b812a60830be3d05d6469353b378",
+    "beam/erts/emulator/beam/emu/emu_load.c": "16725d44035c5f83a17b78b1d325b96d5fa196d5c46804682d988bb733481974",
     "beam/erts/emulator/beam/emu/generators.tab": "e2980f167ddb6f30a920c1bd9fe5bda682d0e73b8b744a7abfba4723e7965138",
     "beam/erts/emulator/beam/emu/ops.tab": "d204cbdd007a51df81203211675354274b5fcabd67e8fe65e0f4badf4071e234",
     "beam/erts/emulator/beam/beam_transform_helpers.c": "5997b24ba2cd4c143753fb0a8617489573ba27fcfc7ecf36a5aa020e1f0c281c",

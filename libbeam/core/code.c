@@ -37,6 +37,7 @@ LbCodeStatus lb_code_space_create_in_domain(LbEngine *engine,LbAllocDomain *doma
     if(engine->spaces==SIZE_MAX) return LB_CODE_LIMIT;
     if(lb_alloc_domain_allocate(domain,sizeof(*space),&memory)!=LB_ALLOC_OK) return LB_CODE_NO_MEMORY;
     space=memory; memset(space,0,sizeof(*space)); space->engine=engine; space->domain=domain;
+    space->node_name=am_Noname;
     status=lb_atoms_create(domain,1048576,&space->atoms);
     if(status!=LB_ATOM_OK) { lb_release(domain,space); return status==LB_ATOM_NO_MEMORY?LB_CODE_NO_MEMORY:LB_CODE_LIMIT; }
     for(i=0;i<LB_NATIVE_COUNT;++i) {
@@ -53,6 +54,12 @@ LbCodeStatus lb_code_space_create_in_domain(LbEngine *engine,LbAllocDomain *doma
         e->dispatch.addresses[0]=&e->trampoline.op;
         e->next=space->exports; space->exports=e;
     }
+    Export *apply=&space->apply_export;
+    apply->bif_number=-1; apply->info.op=op_i_func_info_IaaI;
+    apply->info.mfa=(LbMFA){am_erlang,am_apply,3};
+    apply->trampoline.op=op_i_apply_only;
+    apply->dispatch.addresses[0]=&apply->trampoline.op;
+    apply->next=space->exports; space->exports=apply;
     lb_engine_space_published(engine); *out=space; return LB_CODE_OK;
 }
 LbCodeStatus lb_code_space_create(LbEngine *engine,LbCodeSpace **out)
@@ -111,13 +118,21 @@ static LbCodeStatus setup(LoaderState *st)
                             module->exports[j].info.mfa.arity==e.arity) return LB_CODE_FORMAT;
     }
     st->beam.imports.count=module->import_count=info->import_count;
+    module->external_fun_count=p->external_fun_count;
+    if(!lb_size_add(module->import_count,module->external_fun_count,&module->dependency_count))
+        return LB_CODE_LIMIT;
     if(info->import_count) {
         st->beam.imports.entries=lb_palloc(p,info->import_count,sizeof(*st->beam.imports.entries));
         st->bif_imports=lb_palloc(p,info->import_count,sizeof(*st->bif_imports));
         module->imports=lb_palloc(p,info->import_count,sizeof(*module->imports));
         if(!st->beam.imports.entries || !st->bif_imports || !module->imports) return from_beam(p->error.status);
-        if(lb_alloc_domain_allocate(st->space->domain,info->import_count*sizeof(*module->dependencies),&memory)!=LB_ALLOC_OK) return LB_CODE_NO_MEMORY;
+    }
+    if(module->dependency_count) {
+        size_t bytes;
+        if(!lb_size_mul(module->dependency_count,sizeof(*module->dependencies),&bytes)) return LB_CODE_LIMIT;
+        if(lb_alloc_domain_allocate(st->space->domain,bytes,&memory)!=LB_ALLOC_OK) return LB_CODE_NO_MEMORY;
         module->dependencies=memory;
+        memset(module->dependencies,0,bytes);
     }
     for(i=0;i<info->import_count;++i) {
         LbBeamImport imp;
@@ -168,11 +183,33 @@ LbCodeStatus lb_code_resolve_imports(LoaderState *st,LbCodeModule *const *batch,
             st->program->error.stage="unresolved import"; st->program->error.offset=i;
             return LB_CODE_UNRESOLVED;
         }
-        if(export->owner && export->owner!=module && export->owner->importers>SIZE_MAX-module->import_count)
+        if(export->owner && export->owner!=module && export->owner->importers>SIZE_MAX-module->dependency_count)
             return LB_CODE_LIMIT;
         module->imports[i]=export;
         module->dependencies[i]=export->owner==module?NULL:export->owner;
         if(export->bif_number>=0) st->bif_imports[i]=&st->space->engine->bifs[export->bif_number];
+    }
+    {
+        LbExternalFunPatch *patch=st->program->external_funs;
+        size_t external_index=0;
+        for(;patch;patch=patch->next,++external_index) {
+            Export *export;
+            if(!is_atom(patch->module) || !is_atom(patch->function) || !is_small(patch->arity) ||
+               signed_val(patch->arity)<0 || signed_val(patch->arity)>255) return LB_CODE_FORMAT;
+            export=patch->module==module->name?local_export(module,patch->function,(unsigned)signed_val(patch->arity)):
+                batch_export_find(batch,count,patch->module,patch->function,(unsigned)signed_val(patch->arity));
+            if(!export) export=lb_export_find(st->space,patch->module,patch->function,(unsigned)signed_val(patch->arity));
+            if(!export) {
+                st->program->error.stage="unresolved external fun";
+                st->program->error.offset=external_index;
+                return LB_CODE_UNRESOLVED;
+            }
+            if(export->owner && export->owner!=module && export->owner->importers>SIZE_MAX-module->dependency_count)
+                return LB_CODE_LIMIT;
+            patch->fun_words[1]=(Eterm)(uintptr_t)export;
+            module->dependencies[module->import_count+external_index]=export->owner==module?NULL:export->owner;
+        }
+        if(external_index!=module->external_fun_count) abort();
     }
     return LB_CODE_OK;
 }
@@ -180,7 +217,7 @@ static LbCodeStatus validate_batch_importers(LbCodeSpace *space,LbCodeModule *co
 {
     LbCodeModule *module;
     size_t i,j;
-    for(i=0;i<count;++i) for(j=0;j<modules[i]->import_count;++j) {
+    for(i=0;i<count;++i) for(j=0;j<modules[i]->dependency_count;++j) {
         LbCodeModule *owner=modules[i]->dependencies[j];
         if(owner) {
             if(owner->pending_importers==SIZE_MAX) return LB_CODE_LIMIT;
@@ -197,7 +234,7 @@ static void clear_pending_importers(LbCodeModule *const *modules,size_t count)
 {
     size_t i,j;
     for(i=0;i<count;++i) if(modules[i] && modules[i]->dependencies)
-        for(j=0;j<modules[i]->import_count;++j)
+        for(j=0;j<modules[i]->dependency_count;++j)
             if(modules[i]->dependencies[j]) modules[i]->dependencies[j]->pending_importers=0;
 }
 static void checksum(LbCodeModule *module)
@@ -335,13 +372,14 @@ static LbCodeStatus load_code(LbCodeSpace *space,const void *bytes,size_t size,L
         if(error) *error=(LbBeamError){result==LB_CODE_NO_MEMORY?LB_BEAM_NO_MEMORY:result==LB_CODE_LIMIT?LB_BEAM_LIMIT:
             result==LB_CODE_UNSUPPORTED?LB_BEAM_UNSUPPORTED:result==LB_CODE_UNRESOLVED?LB_BEAM_NOT_FOUND:LB_BEAM_BAD_FORMAT,
             p->error.offset,p->error.stage};
-        if(result==LB_CODE_UNRESOLVED && report) report_import(p,report);
+        if(result==LB_CODE_UNRESOLVED && report && p->error.stage &&
+           strcmp(p->error.stage,"unresolved import")==0) report_import(p,report);
         lb_beam_program_destroy(p); lb_release(space->domain,module->dependencies); lb_release(space->domain,module); space->loading=0; return result;
     }
     /* Publication: all allocations, resolution, dispatch admission and fixups
      * succeeded. No fallible work or callback reentry after atom commit. */
     lb_program_commit(p);
-    for(i=0;i<module->import_count;++i) if(module->dependencies[i]) ++module->dependencies[i]->importers;
+    for(i=0;i<module->dependency_count;++i) if(module->dependencies[i]) ++module->dependencies[i]->importers;
     for(i=0;i<module->export_count;++i) { module->exports[i].next=space->exports; space->exports=&module->exports[i]; }
     module->next=space->modules; space->modules=module; module->published=1;
     if(module->literal_fun_uses) space->has_fun_literals=1;
@@ -383,7 +421,8 @@ static void batch_error(LbBeamError *error,LbLoadReport *report,LbCodeStatus sta
         if(module_index!=SIZE_MAX) {
             report->has_module_index=1; report->module_index=module_index;
         }
-        if(status==LB_CODE_UNRESOLVED && program) report_import(program,report);
+        if(status==LB_CODE_UNRESOLVED && program && program->error.stage &&
+           strcmp(program->error.stage,"unresolved import")==0) report_import(program,report);
     }
 }
 static void batch_cleanup(LbCodeSpace *space,LbCodeModule **modules,LbBeamProgram **programs,
@@ -391,10 +430,20 @@ static void batch_cleanup(LbCodeSpace *space,LbCodeModule **modules,LbBeamProgra
 {
     size_t i;
     clear_pending_importers(modules,count);
-    for(i=0;i<count;++i) if(modules[i] && modules[i]->dependencies)
-        lb_release(space->domain,modules[i]->dependencies);
-    for(i=0;i<count;++i) if(programs[i]) lb_beam_program_destroy(programs[i]);
-    for(i=0;i<count;++i) if(modules[i]) lb_release(space->domain,modules[i]);
+    /* Atom identities are private and no destructor needs their names. Drop
+     * the staged atom allocations before walking older preparation blocks:
+     * domain ownership lookup is linear, so oldest-first teardown makes a
+     * large failed batch quadratic in unrelated live allocation records. */
+    if(count && programs[0]) {
+        lb_atoms_abort(programs[0]->transaction);
+        programs[0]->transaction=NULL;
+    }
+    for(i=count;i>0;--i) if(modules[i-1] && modules[i-1]->dependencies)
+        lb_release(space->domain,modules[i-1]->dependencies);
+    for(i=count;i>0;--i) {
+        if(programs[i-1]) lb_beam_program_destroy(programs[i-1]);
+        if(modules[i-1]) lb_release(space->domain,modules[i-1]);
+    }
 }
 LbCodeStatus lb_code_load_batch(LbCodeSpace *space,const LbCodeInput *inputs,size_t count,
                                 LbBeamError *error,LbLoadReport *report)
@@ -522,7 +571,7 @@ LbCodeStatus lb_code_load_batch(LbCodeSpace *space,const LbCodeInput *inputs,siz
     /* Atom identities and all code become visible together. From this point
      * through publication, every operation is allocation-free and cannot fail. */
     lb_program_commit(programs[0]);
-    for(i=0;i<count;++i) for(j=0;j<modules[i]->import_count;++j) {
+    for(i=0;i<count;++i) for(j=0;j<modules[i]->dependency_count;++j) {
         LbCodeModule *owner=modules[i]->dependencies[j];
         if(owner && owner->pending_importers) {
             owner->importers+=owner->pending_importers;
@@ -562,7 +611,7 @@ LbCodeStatus lb_code_unload(LbCodeModule *module)
     *link=module->next; module->published=0;
     /* Physical code/literal/metadata retirement precedes dependency release. */
     lb_beam_program_destroy(module->program);
-    for(i=0;i<module->import_count;++i) if(module->dependencies[i]) {
+    for(i=0;i<module->dependency_count;++i) if(module->dependencies[i]) {
         if(!module->dependencies[i]->importers) abort(); --module->dependencies[i]->importers;
     }
     lb_release(space->domain,module->dependencies); lb_release(space->domain,module); return LB_CODE_OK;

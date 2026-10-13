@@ -1,0 +1,15 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Native function_exported_3 against the Isolate-owned published export namespace, including admitted native and instruction exports.",
+  "sources": {
+    "beam/erts/emulator/beam/bif.c": "4bb45111028b9e86edf72626dd92c8ef78397dd8906979e64a899bc5ccfd4bbb",
+    "beam/erts/emulator/beam/beam_common.c": "95889d02311752022b0c19bcd3d793d59c4bb28326103ca0d4c3c5dcd2e5d7c5"
+  },
+  "adaptations": [
+    "Require atom module/function and a small-integer arity; preserve native badarg for other types. Native C-int narrowing is expressed as defined uint32_t conversion: small arities 4294967297 and -4294967295 query arity 1, independently confirmed on installed OTP.",
+    "Charge one boundary step and each visited export. The actual published namespace includes available guest exports, native BIFs, and the apply/3 instruction export. Private/nonexistent exports and absent modules return false without autoloading, atom interning, code leases, payload traversal, allocation or collection.",
+    "Queries describe this runtime's actual available exports, not a fabricated complete OTP builtin catalog. Unadmitted capabilities are not reported as available. The fixed namespace remains owned by the code space throughout execution.",
+    "Compiler fixtures and an independent OTP oracle cover loaded/native/instruction hits, private/missing misses, arity wrapping and badarg. Native tests enumerate work prefixes for all cases, deny allocator and quota at the real BIF boundary, preserve source/heap/namespace identity and code-user counts, and distinguish two live Worlds' export scopes. Shared-worker byte/budget/reuse/peer/reclamation tests use the compiled copy wrapper."
+  ],
+  "other_inputs": ["execution-sources.json", "apply-sources.json", "opcodes/manifest.json"]
+}

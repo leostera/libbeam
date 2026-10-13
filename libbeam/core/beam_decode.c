@@ -36,7 +36,7 @@ static int integer(LbBeamProgram *p,LbTaggedNumber *value)
     if(!conv[n-1]) {
         --n; REQUIRE(n && conv[n-1]);
     }
-    if(!lb_pinteger(p,conv,n,negative,&term) || !lb_pdynamic(p,term,&value->word)) return 0;
+    if(!lb_pinteger(p,conv,n,negative,LB_ETF_LITERAL,&term) || !lb_pdynamic(p,term,&value->word)) return 0;
     value->tag=TAG_q; value->size=0; return 1;
 }
 static int allocation_list(LbBeamProgram *p,LbBeamReader *r,Sint *result)

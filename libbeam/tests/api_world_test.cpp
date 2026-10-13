@@ -23,9 +23,16 @@ template<class T> static T take(Result<T> result) {
     if (auto* error = std::get_if<Error>(&result)) std::fprintf(stderr,"runtime: %s\n",error->message.c_str());
     CHECK(std::holds_alternative<T>(result)); return std::move(std::get<T>(result));
 }
-template<class T> static void error(Result<T> result,ErrorCode code) {
-    CHECK(std::holds_alternative<Error>(result) && std::get<Error>(result).code == code);
+template<class T> static void expect_error(Result<T> result,ErrorCode code,int line) {
+    auto* actual=std::get_if<Error>(&result);
+    if(!actual || actual->code!=code) {
+        std::fprintf(stderr,"error assertion at line %d: expected=%d actual=%d message=%s\n",
+            line,static_cast<int>(code),actual?static_cast<int>(actual->code):-1,
+            actual?actual->message.c_str():"success");
+        std::exit(1);
+    }
 }
+#define error(result,code) expect_error((result),(code),__LINE__)
 static Deadline deadline() { return std::chrono::steady_clock::now()+std::chrono::seconds(5); }
 static ByteView view(const Bytes& b) { return {b.data(),b.size()}; }
 static Bytes image(const char* path) {
@@ -43,7 +50,12 @@ int main(int argc,char** argv) {
     auto engine=take(Engine::create());
     Bytes kept;
     {
-        auto a=take(engine.create_isolate()), b=take(engine.create_isolate());
+        // This loop must remain live while the peer runs unrelated checks.
+        // Budget exhaustion has separate api_work/core_work coverage; racing it
+        // against stop makes this cancellation assertion machine-speed dependent.
+        ResourceOverrides cancellation_limits;
+        cancellation_limits.invocation_work_limit=UINT64_MAX;
+        auto a=take(engine.create_isolate(cancellation_limits)), b=take(engine.create_isolate());
         Bytes invalid_image(64,0); auto refused=a.load_module(view(invalid_image));
         CHECK(refused && refused->code==ErrorCode::invalid_beam &&
               refused->message.find("stage=image")!=std::string::npos);

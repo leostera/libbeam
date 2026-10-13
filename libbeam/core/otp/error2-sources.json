@@ -1,0 +1,13 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Native terminal error/2 reason-and-arguments wrapper; no catch/unwind admission.",
+  "sources": {
+    "beam/erts/emulator/beam/bif.c": "4bb45111028b9e86edf72626dd92c8ef78397dd8906979e64a899bc5ccfd4bbb"
+  },
+  "adaptations": [
+    "Native error_2 allocates {Reason,Args} and sets EXC_ERROR_2 without validating Args. Reserve three words plus existing primitive heap credit before borrowing moving operands, charge the boundary/construction and preserve quota/work/OOM distinctions. Reload the actual argument registers after collection; publish wrapper and exception flags last.",
+    "Use the existing terminal exception expansion and monitor-reason stacktrace path. Retain the raw wrapper as a moving root, expose Reason as the error value, use supplied NIL/cons Args for the caller frame, and retain caller arity for non-list Args. Improper supplied lists are not converted to badarg.",
+    "Compiled calls, independent OTP traces and a shared-worker spawn_monitor witness cover reason identity, caller rather than error/2 frames, arbitrary argument terms, moving GC, monitor delivery and lifecycle reuse. Primitive allocation/quota/work prefixes check unpublished failure and heap-credit preservation; compiled-call tests separately account for the normal call-boundary credit reset. Catch/try admission and general unwind remain closed."
+  ],
+  "other_inputs": ["exception-sources.json", "raise-trace-sources.json"]
+}

@@ -81,6 +81,8 @@ typedef struct {
 /* Borrowed until collection/mutation/destruction. Valid owned terms only, not
  * an arbitrary-word validator. False for non-bitstrings; clears the view. */
 int lb_bitstring_view(Eterm,LbBitstringView *);
+/* Read-only byte-length predicate; starting bit alignment is irrelevant. */
+int lb_is_binary(Eterm);
 /* Explicit native pin before sharing/immutable flat-copy. Infallible for valid
  * bitstrings: revokes backing mutability and canonicalizes this view. Capacity
  * is retained until final release; other volatile views still resolve via BinRef.

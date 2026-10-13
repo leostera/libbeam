@@ -7,6 +7,7 @@
  * functions, arguments and continuation frames are real, never invented.
  */
 #include "stacktrace.h"
+#include "raise_trace.h"
 #include "process_internal.h"
 #include "flatmap.h"
 #define TRACE_DEPTH 8u /* pinned error.h DEFAULT_BACKTRACE_SIZE */
@@ -71,6 +72,16 @@ LbProcessStatus lb_error_down_reason(LbProcess *p,Eterm *out)
     int bif=0,copy_args=0,wrapper=!!(p->freason&LB_EXF_ARGLIST);
     Eterm args=am_true,info=NIL;
     if(p->status!=LB_PROCESS_EXCEPTION || LB_GET_EXC_CLASS(p->freason)!=LB_EXTAG_ERROR) return LB_PROCESS_INVALID;
+    if(!(p->freason&LB_EXF_SAVETRACE)) {
+        LbRaisedTrace supplied; size_t need;
+        if(!lb_raise_trace_unpack(p->ftrace,&supplied)) return LB_PROCESS_INVALID;
+        if(!lb_work_domain_charge(space->domain,1+lb_work_bulk_units(3))) return LB_PROCESS_WORK_LIMIT;
+        if(!lb_size_add(3,p->heap_reserved,&need)) return LB_PROCESS_LIMIT;
+        if(!lb_heap_reserve(p,need,MAX_REG)) return LB_PROCESS_NO_MEMORY;
+        if(!lb_raise_trace_unpack(p->ftrace,&supplied)) abort();
+        Eterm result=TUPLE2(p->htop,p->exception_value,supplied.symbolic); p->htop+=3;
+        *out=result; return LB_PROCESS_READY;
+    }
     if(!lb_work_domain_charge(space->domain,LB_NATIVE_COUNT)) return LB_PROCESS_WORK_LIMIT;
     for(size_t i=0;i<LB_NATIVE_COUNT;++i) if(pc==space->natives[i].dispatch.addresses[0]) { bif=1; break; }
     if(bif && p->current->function!=am_error) {

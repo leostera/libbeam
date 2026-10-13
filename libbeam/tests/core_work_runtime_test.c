@@ -54,7 +54,9 @@ static uint64_t remaining(LbCall *call)
 }
 static void result(LbCall *call,const char *expected)
 {
-    LbBytesView out; CHECK(poll(call,&out)==LB_WORLD_OK);
+    LbBytesView out; LbWorldStatus status=poll(call,&out);
+    if(status!=LB_WORLD_OK) fprintf(stderr,"result expected=%s status=%d remaining=%llu\n",expected,status,(unsigned long long)remaining(call));
+    CHECK(status==LB_WORLD_OK);
     CHECK(out.size==strlen(expected) && !memcmp(out.data,expected,out.size));
 }
 static void native_result(LbCall *call,int decimal)
@@ -166,13 +168,19 @@ int main(int argc,char **argv)
     // The root reply survives later exhaustion of its old background allowance.
     for(unsigned i=0;i<25;++i) tick(); result(call,"ready"); consume(call);
     CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && !usage.closed);
-    call=invoke(world,"registered_wait",0);
+    /* This witness targets explicit cancellation after registration, not work
+     * exhaustion. Give its own finite allowance enough startup headroom as the
+     * native export catalog grows; the 4096-unit exhaustion worlds stay intact. */
+    LbWorld *registered=make(engine,beam,1000000);
+    call=invoke(registered,"registered_wait",1);
     int escaped=0;
     for(unsigned i=0;i<10000 && !escaped;++i) {
         lb_engine_enter(engine); escaped=call->budget->escaped; lb_engine_leave(engine); if(!escaped) tick();
     }
+    if(!escaped || lb_task_observe(call->task).status!=LB_TASK_PENDING)
+        fprintf(stderr,"registered cancellation witness escaped=%d task_status=%d remaining=%llu\n",escaped,(int)lb_task_observe(call->task).status,(unsigned long long)remaining(call));
     CHECK(escaped && lb_call_cancel(call)==LB_WORLD_OK && poll(call,&out)==LB_WORLD_CANCELLED); consume(call);
-    CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && usage.closed);
+    CHECK(lb_world_resource_usage(registered,&usage)==LB_WORLD_OK && usage.closed); retire(registered);
     LbWorld *unsafe=make(engine,beam,4096); call=invoke(unsafe,"escaped_wait",1);
     CHECK(poll(call,&out)==LB_WORLD_WORK_LIMIT); consume(call);
     CHECK(lb_world_resource_usage(unsafe,&usage)==LB_WORLD_OK && usage.closed);
@@ -188,7 +196,11 @@ int main(int argc,char **argv)
     CHECK(remaining(noise)<noise_before); // Skipped candidate work belongs to its original sender.
     lb_engine_enter(engine); CHECK(birth->remaining==dormant); lb_work_budget_release(birth); lb_engine_leave(engine);
     consume(noise);
-    LbWorld *foreign=make(engine,beam,4000); LbCall *receiver=invoke(foreign,"foreign_wait",1);
+    /* Dedicated causal-transfer witness: leave enough for sender completion,
+     * but not the receiver's additional 32-KiB host copy. Native catalog growth
+     * changes PC-validation work; defaults and exact-threshold tests above stay
+     * unchanged. The assertions below require this interval to remain real. */
+    LbWorld *foreign=make(engine,beam,5000); LbCall *receiver=invoke(foreign,"foreign_wait",1);
     escaped=0;
     for(unsigned i=0;i<10000 && !escaped;++i) {
         lb_engine_enter(engine); escaped=receiver->budget->escaped; lb_engine_leave(engine); if(!escaped) tick();

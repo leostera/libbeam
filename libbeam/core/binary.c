@@ -195,6 +195,11 @@ int lb_bitstring_view(Eterm value,LbBitstringView *view)
     return 0;
 }
 
+int lb_is_binary(Eterm value)
+{
+    LbBitstringView view;
+    return lb_bitstring_view(value,&view) && !(view.bit_size&7);
+}
 int lb_bitstring_pin(Eterm value)
 {
     LbBitstringView view; LbSubBits *sub; LbBinRef *ref;

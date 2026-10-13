@@ -4,8 +4,8 @@
  * Full-copy collector adapted from erl_gc.h move_cons/move_boxed and erl_gc.c
  * sweep. Explicit heap/stack/X/result/exception roots replace global Process
  * machinery. Immutable and process-owned writable binary references join
- * tuple/list/big/float and small flatmap layouts. No generational collector,
- * external funs or HAMT nodes yet.
+ * tuple/list/big/float, small flatmap layouts and closed local/external funs.
+ * No generational collector or HAMT nodes.
  */
 #include "process_internal.h"
 #include "binary_match.h"
@@ -23,7 +23,7 @@ static size_t boxed_words(const Eterm *pointer)
     case POS_BIG_SUBTAG:case NEG_BIG_SUBTAG:case FLOAT_SUBTAG:case HEAP_BITS_SUBTAG:return arity+1;
     case BIN_REF_SUBTAG:ASSERT(header==LB_HEADER_BIN_REF); return LB_BIN_REF_WORDS;
     case SUB_BITS_SUBTAG:ASSERT(header==LB_HEADER_SUB_BITS); return LB_SUB_BITS_WORDS;
-    case MAP_SUBTAG:return lb_flatmap_words(pointer);
+    case MAP_SUBTAG:return lb_map_object_words(pointer);
     case REF_SUBTAG:(void)lb_reference(make_boxed(pointer)); return LB_REF_WORDS;
     case FUN_SUBTAG:return LB_FUN_WORDS+lb_fun_free(lb_fun(make_boxed(pointer)));
     default:abort(); /* internal invariant: these representations are not admitted */
@@ -36,7 +36,8 @@ static void move_root(LbProcess *p,Eterm *root,Eterm **top)
     if(is_boxed(term) && is_literal_ptr(term) && (*boxed_val(term)&_TAG_HEADER_MASK)==FUN_SUBTAG) {
         const LbFun *fun=lb_fun(term);
         if(lb_fun_free(fun)) abort(); /* only closed literal funs are admitted */
-        lb_fun_mark(p,fun->entry.fun);
+        if(lb_fun_is_external(fun)) lb_fun_mark_export(p,fun->entry.exp);
+        else lb_fun_mark(p,fun->entry.fun);
     }
     if(is_boxed(term) && !is_literal_ptr(term)) {
         ptr=boxed_val(term);
@@ -76,8 +77,9 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
     }
     // Includes the full-width binary-vheap rounding/growth bound, plus roots,
     // full copy/sweep and conservative per-lease code-mark searches.
-    uint64_t factor=used+live+2*stack+8;
-    uint64_t work=MAX_REG+2*used+2*stack+LB_BINARY_VHEAP_NEXT_MAX_WORK;
+    size_t dict_roots=p->dictionary?p->dictionary->usedSlots:0;
+    uint64_t factor=used+live+2*stack+9+dict_roots;
+    uint64_t work=MAX_REG+2*used+2*stack+LB_BINARY_VHEAP_NEXT_MAX_WORK+1+dict_roots;
     if(leases && factor>(UINT64_MAX-work)/leases) return 0;
     work+=factor*leases;
     if(!lb_work_domain_charge(domain,work)) return 0;
@@ -90,17 +92,21 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
     for(i=0;i<live;++i) move_root(p,&p->reg[i],&top);
     for(i=live;i<MAX_REG;++i) p->reg[i]=NIL;
     move_root(p,&p->fvalue,&top); move_root(p,&p->exception_value,&top);
+    move_root(p,&p->ftrace,&top);
     move_root(p,&p->construction_root,&top);
     move_root(p,&p->receive_root,&top);
+    for(i=0;i<dict_roots;++i) move_root(p,&p->dictionary->data[i],&top);
     for(i=0;i<stack;++i) move_root(p,&stop[i],&top); /* CP words are primary headers */
     scan=heap;
     while(scan<top) {
         Eterm value=*scan;
         if(is_header(value)) {
             if(is_arity_value(value)) scan+=(value>>_HEADER_ARITY_OFFS)?1:2;
-            else if(value==LB_FLATMAP_HEADER) { (void)lb_flatmap_words(scan); scan+=2; }
+            else if((value&_HEADER_SUBTAG_MASK)==MAP_SUBTAG) { (void)lb_map_object_words(scan); scan+=lb_map_object_child_offset(scan); }
             else if((value&_TAG_HEADER_MASK)==FUN_SUBTAG) {
-                const LbFun *fun=lb_fun(make_boxed(scan)); lb_fun_mark(p,fun->entry.fun);
+                const LbFun *fun=lb_fun(make_boxed(scan));
+                if(lb_fun_is_external(fun)) lb_fun_mark_export(p,fun->entry.exp);
+                else lb_fun_mark(p,fun->entry.fun);
                 scan+=LB_FUN_WORDS; /* the following environment words are roots */
             }
             else {
@@ -146,10 +152,11 @@ int lb_process_has_other_reference(const LbProcess *p,Eterm value,const Eterm *e
 {
     const Eterm *scan; size_t i;
     if(!lb_work_domain_charge(p->entry_module->space->domain,
-        MAX_REG+(size_t)(p->hend-p->stop)+(size_t)(p->htop-p->heap))) return 1;
+        MAX_REG+(size_t)(p->hend-p->stop)+(size_t)(p->htop-p->heap)+(p->dictionary?p->dictionary->usedSlots:0))) return 1;
     for(i=0;i<MAX_REG;++i) if(&p->reg[i]!=except && p->reg[i]==value) return 1;
+    if(p->dictionary) for(i=0;i<p->dictionary->usedSlots;++i) if(p->dictionary->data[i]==value) return 1;
     for(scan=p->stop;scan<p->hend;++scan) if(scan!=except && *scan==value) return 1;
-    if(p->fvalue==value || p->exception_value==value || p->construction_root==value) return 1;
+    if(p->fvalue==value || p->exception_value==value || p->construction_root==value || p->ftrace==value) return 1;
     /* Scan stored terms, not arbitrary payload words: a float/bignum/binary
      * containing the pointer's bits is not an alias. Keep the object-family
      * list explicit so adding a new GC representation cannot hide its roots. */
@@ -161,7 +168,7 @@ int lb_process_has_other_reference(const LbProcess *p,Eterm value,const Eterm *e
         case SUB_BITS_SUBTAG:
             if(((const LbSubBits *)scan)->orig==value) return 1;
             scan+=boxed_words(scan); break;
-        case MAP_SUBTAG:(void)lb_flatmap_words(scan); scan+=2; break;
+        case MAP_SUBTAG:(void)lb_map_object_words(scan); scan+=lb_map_object_child_offset(scan); break;
         case FUN_SUBTAG:(void)lb_fun(make_boxed(scan)); scan+=LB_FUN_WORDS; break;
         case POS_BIG_SUBTAG:case NEG_BIG_SUBTAG:case FLOAT_SUBTAG:
         case HEAP_BITS_SUBTAG:case BIN_REF_SUBTAG:case REF_SUBTAG:
@@ -188,7 +195,9 @@ int lb_flat_size(LbAllocDomain *domain,Eterm term,size_t *out)
         else if(is_boxed(value)) {
             Eterm *p=boxed_val(value); words=boxed_words(p);
             if(is_arity_value(*p)) { n=(size_t)(*p>>_HEADER_ARITY_OFFS); children=p+1; }
-            else if(*p==LB_FLATMAP_HEADER) { n=p[1]+1; children=p+2; }
+            else if((*p&_HEADER_SUBTAG_MASK)==MAP_SUBTAG) {
+                n=lb_map_object_child_count(p); children=p+lb_map_object_child_offset(p);
+            }
             else if((*p&_TAG_HEADER_MASK)==FUN_SUBTAG) { n=lb_fun_free(lb_fun(value)); children=p+LB_FUN_WORDS; }
             else if(*p==LB_HEADER_SUB_BITS) words=LB_REFC_BITS_WORDS;
             else if(*p==LB_HEADER_BIN_REF) goto done; /* not a user term */
@@ -232,7 +241,7 @@ Eterm lb_copy_flat(Eterm value,Eterm **top,LbOffHeap *offheap)
     while(scan<*top) {
         if(is_header(*scan)) {
             if(is_arity_value(*scan)) scan+=(*scan>>_HEADER_ARITY_OFFS)?1:2;
-            else if(*scan==LB_FLATMAP_HEADER) { (void)lb_flatmap_words(scan); scan+=2; }
+            else if((*scan&_HEADER_SUBTAG_MASK)==MAP_SUBTAG) { (void)lb_map_object_words(scan); scan+=lb_map_object_child_offset(scan); }
             else if((*scan&_TAG_HEADER_MASK)==FUN_SUBTAG) { (void)lb_fun(make_boxed(scan)); scan+=LB_FUN_WORDS; }
             else scan+=boxed_words(scan); /* SubBits and BinRef already paired */
         } else {

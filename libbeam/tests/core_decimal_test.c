@@ -200,6 +200,7 @@ static void wait_call(LbCall *call,LbWorldStatus expected)
 {
     size_t i; LbBytesView view; LbWorldStatus status=LB_WORLD_PENDING; const struct timespec pause={0,1000000};
     for(i=0;i<5000 && status==LB_WORLD_PENDING;++i) { status=lb_call_poll(call,&view); if(status==LB_WORLD_PENDING) nanosleep(&pause,NULL); }
+    if(status!=expected) fprintf(stderr,"decimal worker status=%d expected=%d polls=%zu\n",status,expected,i);
     CHECK(status==expected && lb_call_consume(call)==LB_WORLD_OK); lb_call_release(call);
 }
 static void worker_retirement(LbEngine *engine,Memory *m,LbBytesView image)
@@ -223,8 +224,15 @@ static void worker_retirement(LbEngine *engine,Memory *m,LbBytesView image)
     lb_engine_enter(engine); CHECK(m->worker_large_released && !a->space && b->space); lb_engine_leave(engine);
     lb_reclamation_release(reclamation); lb_world_release(a);
     CHECK(lb_world_call(b,name("decimal_slice"),name("small"),empty,&peer)==LB_WORLD_OK); wait_call(peer,LB_WORLD_OK);
-    CHECK(lb_world_call(b,name("decimal_slice"),name("too_large"),empty,&peer)==LB_WORLD_OK); wait_call(peer,LB_WORLD_LIMIT);
     lb_world_release(b);
+    /* This witness isolates the 64 KiB transport boundary. Export-directory
+     * work can legitimately exhaust the default invocation budget before a
+     * 78,914-byte decimal result is ready; do not conflate those two limits. */
+    LbWorld *transport; LbResourceOverrides output_only={.has_work=1,.invocation_work=UINT64_MAX};
+    CHECK(lb_world_create_with_overrides(engine,&output_only,&transport)==LB_WORLD_OK);
+    CHECK(lb_world_load(transport,image)==LB_WORLD_OK);
+    CHECK(lb_world_start(transport,name("decimal_slice"),name("too_large"),empty,&peer)==LB_WORLD_OK); wait_call(peer,LB_WORLD_LIMIT);
+    lb_world_release(transport);
     puts("CORE_DECIMAL_WORKER_OK real_continuation_allocation=true peer_progress=true cancelled_scratch_released=true physical_world_retirement=true oversized_result_refused=true");
 }
 static void execution(const char *path,Memory *m,LbSystemAllocator *allocator)

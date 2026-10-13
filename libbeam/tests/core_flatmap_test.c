@@ -58,17 +58,19 @@ static void components(void)
         CHECK(!is_non_value(result) && top-storage==128*LB_MAP3_WORDS && !offheap.first);
         CHECK(lb_term_equal(domain,av,result,&equal)==LB_ALLOC_OK && equal); free(storage);
     }
-    /* Native flatmap sizes 0..3, including equal/unequal key tuples and sizes. */
-    for(i=0;i<=3;++i) {
-        Eterm x[10]={LB_FLATMAP_HEADER},y[10]={LB_FLATMAP_HEADER},kx[4]={0},ky[4]={0}; size_t j;
+    /* Native flatmap sizes 0..32, including equal/unequal key tuples and sizes. */
+    for(i=0;i<=LB_FLATMAP_MAX_SIZE;++i) {
+        Eterm x[LB_FLATMAP_WORDS+2*LB_FLATMAP_MAX_SIZE+2]={LB_FLATMAP_HEADER};
+        Eterm y[LB_FLATMAP_WORDS+2*LB_FLATMAP_MAX_SIZE+2]={LB_FLATMAP_HEADER};
+        Eterm *kx=x+LB_FLATMAP_WORDS+i,*ky=y+LB_FLATMAP_WORDS+i; size_t j;
         x[1]=y[1]=i; kx[0]=ky[0]=i?make_arityval(i):make_arityval_zero();
-        kx[1]=ky[1]=THE_NON_VALUE;
+        if(!i) kx[1]=ky[1]=THE_NON_VALUE;
         for(j=0;j<i;++j) { kx[j+1]=ky[j+1]=make_small(j); x[j+3]=y[j+3]=make_small(j+10); }
         x[2]=make_tuple(kx); y[2]=make_tuple(ky);
         CHECK(lb_term_equal(domain,make_boxed(x),make_boxed(y),&equal)==LB_ALLOC_OK && equal);
-        CHECK(lb_flat_size(domain,make_boxed(x),&words) && words==3+i+(i?i+1:2));
+        CHECK(lb_flat_size(domain,make_boxed(x),&words) && words==LB_FLATMAP_WORDS+i+(i?i+1:2));
         if(i) { ky[i]=make_small(99); CHECK(lb_term_equal(domain,make_boxed(x),make_boxed(y),&equal)==LB_ALLOC_OK && !equal); }
-        y[1]=i==3?2:i+1; ky[0]=make_arityval(y[1]);
+        y[1]=i==LB_FLATMAP_MAX_SIZE?i-1:i+1; ky[0]=make_arityval(y[1]);
         for(j=0;j<y[1];++j) { ky[j+1]=make_small(j); y[j+3]=make_small(j+10); }
         CHECK(lb_term_equal(domain,make_boxed(x),make_boxed(y),&equal)==LB_ALLOC_OK && !equal);
         CHECK(lb_term_equal(domain,make_boxed(x),make_small(0),&equal)==LB_ALLOC_OK && !equal);

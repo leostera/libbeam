@@ -1,0 +1,15 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Native floor/1 and bounded binary64 double_to_integer construction, including compiled guard/body forms.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_bif_guard.c": "6a254bcedaf5f57a01a8cdd6cf94f8140693be99b4735a9283d8bffa4288cc67"
+  },
+  "adaptations": [
+    "Integer input is returned unchanged after one boundary work unit; other non-float input is badarg. Float conversion stages at most seventeen native words before any moving collection. Finite binary64 input uses native floor and the native divide/reconstruct-by-digit algorithm; nonfinite internal float values defensively fail rather than reach undefined casts.",
+    "Preserve the native strict small thresholds, not a normalized alternative. At float MIN_SMALL (-2^59), the pinned C helper produces a one-digit negative boxed integer; it prints the same decimal but is not exactly equal to the small literal. Installed OTP 28 independently reproduces the behavior, including the compiled fixtures. No correction of that native representation quirk is claimed.",
+    "Precharge a conservative fixed 64-unit bound for binary64 floor, the two at-most-sixteen-digit passes and publication, in addition to the boundary unit. Scratch is fixed C stack storage. Preserve primitive heap credit and rooted source terms; restore the host floating-point environment before heap allocation or publication. FE_DFL_ENV scopes conversion, with infrastructure environment failures bypassing guest guards.",
+    "Extend the complete native gc_bif1 and ordinary BIF dispatch groups to allow floor's staged numeric collection, recomputing destination locations afterward. Guest badarg happens before GC; work/quota/OOM/environment outcomes do not turn into guard false. Verifier admission is explicit, without trusting operand type hints.",
+    "An independent bit/integer oracle covers boundaries plus a binary64 exponent/mantissa/sign sweep. Tests exercise body/guard/Y forms, minimum-small and maximum-finite results, signed zero/subnormals, integer identity under denied allocation/quota, four host rounding modes and exception flags, forced GC, source/credit preservation, allocation/work prefixes, guard infrastructure failures and final balance. OTP reference and shared-worker tests complement direct component evidence."
+  ],
+  "other_inputs": ["abs-sources.json", "numeric-sources.json", "loader-sources.json", "execution-sources.json"]
+}

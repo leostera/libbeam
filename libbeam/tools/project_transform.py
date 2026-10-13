@@ -9,7 +9,8 @@ it must never be treated as TE_FAIL (which would silently skip an optimization).
 import re
 
 PURE = {'distinct', 'equal', 'independent_moves', 'is_offset', 'negation_is_small',
-        'never', 'succ', 'succ3', 'succ4', 'fixed_size_values', 'floats_or_bignums', 'mixed_types', 'use_jump_tab'}
+        'never', 'succ', 'succ3', 'succ4', 'fixed_size_values', 'floats_or_bignums', 'mixed_types', 'use_jump_tab',
+        'is_empty_map', 'is_small_map_literal_keys', 'literal_is_map', 'map_key_sort'}
 OWNED = {'needs_nif_padding', 'is_heavy_bif', 'smp_already_locked', 'smp_mark_target_label'}
 GENERATORS = {'allocate', 'allocate_heap', 'init_yregs', 'select_tuple_arity', 'increment', 'create_bin', 'call_fun2', 'make_fun3', 'is_function2', 'get', 'element', 'literal_timeout', 'literal_timeout_locked', 'select_val', 'bs_match', 'const_select_val', 'jump_tab', 'select_literals', 'split_values'}
 
@@ -67,6 +68,17 @@ def project(text):
             helper=helper.replace('is_float(', 'lb_transform_is_float(')
         if name=='use_jump_tab':
             helper=helper.replace('return max - min <= Size.val;', 'return (Uint)max - (Uint)min <= (Uint)Size.val;')
+        if name=='is_empty_map':
+            helper=helper.replace('beamfile_get_literal(&S->beam, Lit.val)', 'load_literal(S, Lit.val)')
+            helper=helper.replace('is_flatmap(term) && flatmap_get_size(flatmap_val(term)) == 0',
+                                  'lb_is_flatmap(term) && ((LbFlatMap *)boxed_val(term))->size == 0')
+        if name=='is_small_map_literal_keys':
+            helper=helper.replace('MAP_SMALL_MAP_LIMIT', 'LB_FLATMAP_MAX_SIZE')
+        if name=='literal_is_map':
+            helper=helper.replace('beamfile_get_literal(&S->beam, Lit.val)', 'load_literal(S, Lit.val)')
+            helper=helper.replace('is_map(term)', 'lb_is_flatmap(term)')
+        if name=='map_key_sort':
+            helper=helper.replace('beam_load_map_key_sort(S, Size, Rest)', 'lb_load_map_key_sort(S, Size, Rest)')
         helpers.append(helper)
     for name in sorted(GENERATORS & used):
         match = re.search(r'^static BeamOp\* '+name+r'\(.*?^\}', text, re.M|re.S)

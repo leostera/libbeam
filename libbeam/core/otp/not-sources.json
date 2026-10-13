@@ -1,0 +1,14 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Native strict boolean erlang:not/1; no truthiness conversion or admission of other boolean BIFs.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_bif_op.c": "74ca827e5188657cf2726a4c8a9da6f4503675714a656041722ce10a066eead3"
+  },
+  "adaptations": [
+    "Charge one bounded native step, reverse only the exact true/false atoms and preserve BADARG for all other valid owned terms. The BIF neither allocates nor collects.",
+    "Add only the exact not/1 ID to the positive plain-BIF whitelist and use existing complete native BIF groups, including infrastructure-failure precedence over guard branching.",
+    "Compile normal body calls and a standard-assembly Y-source/Y-destination guard BIF. The latter tests actual BIF guard execution rather than a compiler optimization to an atom comparison. Independent OTP reference covers both boolean results and nonboolean guest errors/guard failure.",
+    "Test each work prefix for valid and invalid operands in body and guard paths. Allocation-denial tests begin at the actual BIF after caller frame setup and retain the mandatory VM return reserve. Shared-worker tests cover exact bytes, exact/one-below budgets, reuse, peer survival and reclamation."
+  ],
+  "other_inputs": ["numeric-sources.json", "execution-sources.json", "opcodes/manifest.json"]
+}

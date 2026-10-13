@@ -15,7 +15,7 @@ def main():
     args = parser.parse_args()
     source = Path(__file__).resolve().parents[2] / 'beam/erts/preloaded/src/erlang.erl'
     data = source.read_bytes()
-    if hashlib.sha256(data).hexdigest() != '81dacbaae40928bb5fcda57024b66af4a059e68b536aede0c891a5dd868c5ecd':
+    if hashlib.sha256(data).hexdigest() != '96651f6f0663d626dfabae4b4a34abce65aefcbb06e99a6867e3ce7e53ab3a1b':
         raise RuntimeError('Preloaded source changed; review provenance')
     text = data.decode()
     functions = []

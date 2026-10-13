@@ -118,7 +118,10 @@ tailrecur_ne:
             ++aa; ++bb; goto term_array;
         case FUN_SUBTAG: {
             const LbFun *af=lb_fun(a),*bf=lb_fun(b);
-            if(!bf || af->thing_word!=bf->thing_word || af->entry.fun!=bf->entry.fun) goto not_equal;
+            if(!bf || af->thing_word!=bf->thing_word) goto not_equal;
+            if(lb_fun_is_external(af)) {
+                if(af->entry.exp!=bf->entry.exp) goto not_equal;
+            } else if(af->entry.fun!=bf->entry.fun) goto not_equal;
             sz=(Sint)lb_fun_free(af); if(!sz) goto pop_next;
             aa=(Eterm *)af->env; bb=(Eterm *)bf->env; goto term_array;
         }
@@ -127,14 +130,17 @@ tailrecur_ne:
             if(br && ar->num[0]==br->num[0] && ar->num[1]==br->num[1] && ar->num[2]==br->num[2]) goto pop_next;
             break;
         }
-        case MAP_SUBTAG:
-            aa=boxed_val(a); (void)lb_flatmap_words(aa);
+        case MAP_SUBTAG: {
+            aa=boxed_val(a); (void)lb_map_object_words(aa);
             if(!is_boxed(b) || *boxed_val(b)!=*aa) goto not_equal;
-            bb=boxed_val(b); (void)lb_flatmap_words(bb);
-            sz=(Sint)aa[1];
-            if(sz!=(Sint)bb[1]) goto not_equal;
-            if(!sz) goto pop_next;
-            aa+=2; bb+=2; ++sz; goto term_array; /* native keys tuple + values */
+            bb=boxed_val(b); (void)lb_map_object_words(bb);
+            size_t offset=lb_map_object_child_offset(aa);
+            size_t count=lb_map_object_child_count(aa);
+            if(offset==2 && aa[0]!=LB_FLATMAP_HEADER && aa[1]!=bb[1]) goto not_equal;
+            if(aa[0]==LB_FLATMAP_HEADER && aa[1]!=bb[1]) goto not_equal;
+            if(!count) goto pop_next;
+            aa+=offset; bb+=offset; sz=(Sint)count; goto term_array;
+        }
         case HEAP_BITS_SUBTAG:case SUB_BITS_SUBTAG: {
             LbBitstringView av,bv;
             if(!lb_bitstring_view(a,&av)) abort();

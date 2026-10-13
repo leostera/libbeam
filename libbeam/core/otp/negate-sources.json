@@ -1,0 +1,15 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "Native unary sminus_1/erts_unary_minus and complete generated unary-minus instruction group, not general arithmetic admission.",
+  "sources": {
+    "beam/erts/emulator/beam/erl_arith.c": "c4a4b1aa7c8a7c387d80df6c33b35ec50c943a309ad7e404cca0f4c53d499ef4",
+    "beam/erts/emulator/beam/big.c": "370b63b16cea64901d1974a72f049cac0954dbf52896adf737665fe2188ef7e4"
+  },
+  "adaptations": [
+    "Native integer negation uses big_minus(zero,value), reusing the accounted independent arithmetic scratch path. Preserve MIN_SMALL promotion and positive bignum normalization back to MIN_SMALL; never mutate the input.",
+    "Finite binary64 unary negation flips its sign bit, including both signed zeros. This exact operation requires no rounding or host floating-environment changes; nonfinite inputs fail with badarith.",
+    "Positively admit gc_bif1 for the unary-minus catalog entry, projected through the complete native constant/X/Y group. Restore process aliases and recompute destinations after collection. Quota, callback OOM and work failures bypass guest arithmetic guards.",
+    "Independent OTP and native execution cover small/bignum boundaries, both signs, signed zeros, subnormal/finite float extremes, badarith/body-or-guard behavior, source preservation, native maximum-size bignums, heap credit, forced Y-destination GC, allocation/work prefixes, real-worker exact/one-below budgets, private reuse, peers and reclamation."
+  ],
+  "other_inputs": ["numeric-sources.json", "execution-sources.json", "opcodes/manifest.json"]
+}

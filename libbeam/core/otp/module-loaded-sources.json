@@ -1,0 +1,12 @@
+{
+  "baseline": "59ab0dc16719a8bf97a9e242f3405b0785bb059f",
+  "scope": "module_loaded/1 over actual published per-Isolate modules, without autoload or atom creation.",
+  "sources": {
+    "beam/erts/emulator/beam/beam_bif_load.c": "2eb70c13c595806337a7f4dc115a612214f7b5d9e5e7e2ba56c1d76afcd91d6d"
+  },
+  "adaptations": [
+    "Native module_loaded_1 requires an atom and returns true only for current code with no pending on_load. The additive profile queries its owned published module list; native exports alone are not treated as loaded modules. The actual preloaded erlang module is visible. on_load remains refused at admission, with an explicit compiled rollback witness.",
+    "Charge the boundary and each module visited. Return immediate booleans or badarg without allocation, GC, pinning, new atoms or code leases. Work denial remains a resource outcome, not false or badarg. Namespace and code lifetimes rely on the existing serialized Engine ownership.",
+    "Tests cover actual compiled calls, native direct entry under allocator/quota denial and full heap, all work prefixes, unchanged namespace/source/heap, badarg classes, missing/empty/boolean atoms, separate live World scopes, unload/reload, refused on_load admission, balance and shared-worker exact-threshold/one-below/reuse/reclamation. Independent OTP checks loaded/preloaded/absent and unload/reload behavior."
+  ]
+}
