@@ -40,7 +40,7 @@ def main():
     header = header.replace('__ERL_ATOM_TABLE_H__', 'LIBBEAM_GENERATED_ATOMS_H')
     # Owned preloaded-wrapper boundary name absent from pinned naming inputs.
     # Append only: every existing native atom index stays unchanged.
-    extra_names = ('set_cookie',)
+    extra_names = ('set_cookie', 'load_module')
     names = re.findall(r'^  ".*",$', source, re.M)
     indices = [int(value) for value in re.findall(r'^#define am_\w+ make_atom\((\d+)\)$', header, re.M)]
     if not names or not indices or max(indices)+1 != len(names) or source.count('  0\n};') != 1:

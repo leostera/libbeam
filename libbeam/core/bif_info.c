@@ -51,6 +51,49 @@ Eterm lb_bif_module_loaded_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     }
     return am_false;
 }
+/* RFD 0005's sole loading compatibility exception: an existing published
+ * module is acknowledged without examining or installing the supplied bytes.
+ * This is deliberately not an adaptation of successful native code loading. */
+Eterm lb_bif_load_module_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    static const LbCapabilityFailure denied={LB_CAPABILITY_CODE_LOADING,"erlang","load_module",2,
+        "erlang:load_module/2 denied: CODE_LOADING"};
+    LbCodeSpace *space=p->entry_module->space; LbBitstringView code; (void)pc;
+    p->last_native_cost=0;
+    if(args!=p->reg) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(space->domain,1)) goto work_failure;
+    p->last_native_cost=1;
+    if(!is_atom(args[0]) || !lb_bitstring_view(args[1],&code) || (code.bit_size&7)) {
+        p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+    }
+    int published=0;
+    for(const LbCodeModule *module=space->modules;module;module=module->next) {
+        if(!lb_work_domain_charge(space->domain,1)) goto work_failure;
+        ++p->last_native_cost;
+        if(module->name==args[0] && module->published) { published=1; break; }
+    }
+    if(!published) {
+        /* Entry and lookup are already charged. Do not allocate, parse BEAM,
+         * or route this infrastructure outcome through guest exceptions. */
+        p->capability_failure=&denied; p->status=LB_PROCESS_CAPABILITY_DENIED;
+        return THE_NON_VALUE;
+    }
+    size_t need,collections=p->collections;
+    if(!lb_size_add(3,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(space->domain,3)) goto work_failure;
+    p->last_native_cost+=3;
+    if(!lb_heap_reserve(p,need,2)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(space->domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            (cause==LB_ALLOC_LIMIT || cause==LB_ALLOC_OK)?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    Eterm result=TUPLE2(p->htop,am_module,p->reg[0]); p->htop+=3;
+    return result;
+work_failure:
+    p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+}
 static LbCodeModule *find_module(LbProcess *p,Eterm name)
 {
     LbCodeModule *m;

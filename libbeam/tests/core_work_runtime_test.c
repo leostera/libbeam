@@ -170,7 +170,7 @@ int main(int argc,char **argv)
     CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && !usage.closed);
     /* This witness targets explicit cancellation after registration, not work
      * exhaustion. Give its own finite allowance enough startup headroom as the
-     * native export catalog grows; the 4096-unit exhaustion worlds stay intact. */
+     * native export catalog grows; private 4096-unit exhaustion worlds stay intact. */
     LbWorld *registered=make(engine,beam,1000000);
     call=invoke(registered,"registered_wait",1);
     int escaped=0;
@@ -181,9 +181,19 @@ int main(int argc,char **argv)
         fprintf(stderr,"registered cancellation witness escaped=%d task_status=%d remaining=%llu\n",escaped,(int)lb_task_observe(call->task).status,(unsigned long long)remaining(call));
     CHECK(escaped && lb_call_cancel(call)==LB_WORLD_OK && poll(call,&out)==LB_WORLD_CANCELLED); consume(call);
     CHECK(lb_world_resource_usage(registered,&usage)==LB_WORLD_OK && usage.closed); retire(registered);
-    LbWorld *unsafe=make(engine,beam,4096); call=invoke(unsafe,"escaped_wait",1);
-    CHECK(poll(call,&out)==LB_WORLD_WORK_LIMIT); consume(call);
-    CHECK(lb_world_resource_usage(unsafe,&usage)==LB_WORLD_OK && usage.closed);
+    /* This witness requires registration before the child's finite allowance
+     * expires. Catalog growth made 4096 expire while still private (escaped=0).
+     * Keep the exact measured boundary and private 4096 cases above unchanged. */
+    LbWorld *unsafe=make(engine,beam,1000000); call=invoke(unsafe,"escaped_wait",1);
+    CHECK(poll(call,&out)==LB_WORLD_WORK_LIMIT);
+    CHECK(lb_world_resource_usage(unsafe,&usage)==LB_WORLD_OK);
+    if(!usage.closed) {
+        lb_engine_enter(engine);
+        fprintf(stderr,"escaped exhaustion witness escaped=%d remaining=%llu\n",call->budget->escaped,(unsigned long long)call->budget->remaining);
+        lb_engine_leave(engine);
+    }
+    lb_engine_enter(engine); CHECK(call->budget->escaped && !call->budget->remaining); lb_engine_leave(engine);
+    CHECK(usage.closed); consume(call);
     call=invoke(peer,"pure",0); result(call,"value"); consume(call);
     LbWorld *causal=make(engine,beam,1000000);
     call=invoke(causal,"boot",1); result(call,"boot");

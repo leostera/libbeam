@@ -111,6 +111,7 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_process_info_2,{am_erlang,am_process_info,2,lb_bif_process_info_2,BIF_KIND_HEAVY}},
         {BIF_binary_to_term_1,{am_erlang,am_binary_to_term,1,lb_bif_binary_to_term_1,BIF_KIND_HEAVY}},
         {BIF_module_loaded_1,{am_erlang,am_module_loaded,1,lb_bif_module_loaded_1,BIF_KIND_HEAVY}},
+        {BIF_SIZE+18u,{am_erlang,am_load_module,2,lb_bif_load_module_2,BIF_KIND_HEAVY}},
         {BIF_get_1,{am_erlang,am_get,1,lb_bif_get_1,BIF_KIND_HEAVY}},
         {BIF_put_2,{am_erlang,am_put,2,lb_bif_put_2,BIF_KIND_HEAVY}},
         {BIF_erase_1,{am_erlang,am_erase,1,lb_bif_erase_1,BIF_KIND_HEAVY}},

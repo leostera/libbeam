@@ -9,7 +9,7 @@ Do not return to application-driven retries until the complete batch is validate
 
 ## First cluster: explicit capability outcomes
 
-The native catalog now contains **83 existing local implementations plus 27
+At checkpoint `f5956194`, the native catalog contained **83 existing local implementations plus 27
 explicit denial entries**, and the separate apply/3 instruction export. The
 27 exact names are in `libbeam/core/capability_denials.def` and checked against
 the independent per-MFA contracts. They are not 27 newly implemented host effects.
@@ -68,6 +68,36 @@ Earlier attempts found and fixed a provenance-hash transcription error and the
 new C source missing from the standalone UBSan linker list; neither was reported
 as a passing full gate.
 
+## Second cluster: load_module/2 compatibility exception
+
+The catalog adds one separately classified compatibility exception (111 entries
+in total), not a loader implementation. Entry work precedes type checks; atom plus
+byte-length binary is required even for existing modules, including unaligned
+views. Charged lookup of real published code permits `{module, Module}` only for
+an existing module. Supplied bytes are ignored, not parsed, installed or said to
+have been installed. Valid absent requests report
+`erlang:load_module/2 denied: CODE_LOADING` at the host boundary.
+
+`core_load_module_test.c` exercises direct/input-supplied dynamic calls at every
+execution work prefix, plus decode-supplied dynamic calls, for present, absent and malformed requests; actual preloaded and peer
+state; arbitrary, empty and unaligned code; moving GC and retained heap credit;
+quota versus allocator refusal; unchanged metadata/code/export bytes; unload and
+reload; host-worker denial/reuse and zero final accounting. The compiled witness
+also adds the **complete native move2_par_yxxx case**, with both sources read
+before writes, with an explicit observed-opcode witness in the decode-supplied dynamic path.
+No invented tuple-return proof was needed. Provenance:
+`libbeam/core/otp/load-module-sources.json`.
+
+Fresh `/tmp/libbeam-load-module-integrated-complete/summary.json` passes all
+**274 commands**, **111 Debug + 111 Release CTests**, **31 existing + 68 profile
+UBSan tests**, and prior lifecycle/two-Isolate acceptance. All **396 source inputs**
+matched. Earlier failed runs caught strict signed-pointer warnings in the test
+and an outdated escaped-work witness: measured `escaped=0 remaining=0` showed its
+4096 units expired before registration. Only that witness now uses a dedicated
+finite 1,000,000 units and explicitly asserts escaped state and zero remaining
+credit. Exact measured boundaries, private 4096-unit tests and production defaults
+are unchanged. This fixes the witness's premise, not the runtime containment rule.
+
 ## Still required
 
 - Correct catch/unwind and admitted try/catch/rescue witnesses. The new outcome
@@ -79,8 +109,9 @@ as a passing full gate.
 - New cross-family monitor/link/alias/tracing operations must preserve containment:
   observers/effects outside a private family cannot be ignored when deciding
   reuse. Only the already-supported private spawned-monitor path is witnessed here.
-- The remaining real BIFs, query adapters, load_module compatibility exception,
-  complete preserved BEAM wrappers and their native/internal prerequisites.
+- The remaining real BIFs, query adapters, complete preserved BEAM wrappers and
+  their native/internal prerequisites. Both clusters still need functioning
+  catch/rescue coverage as part of the final batch audit.
 - Final per-MFA coverage audit and fresh whole-batch gates, followed by actual
   application admission/execution, all route/resource/lifecycle tests and startup
   measurements. No BIF task or application acceptance is complete yet.
