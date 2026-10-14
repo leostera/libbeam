@@ -346,7 +346,14 @@ static unsigned char binary_view_byte(LbBitstringView view,size_t index)
     if(!shift) return view.data[byte];
     return (unsigned char)((view.data[byte]<<shift)|(view.data[byte+1]>>(8-shift)));
 }
-static Eterm integer_from_decimal_view(LbProcess *p,LbBitstringView view)
+static int radix_digit(unsigned char byte)
+{
+    if(byte>='0' && byte<='9') return byte-'0';
+    if(byte>='a' && byte<='z') return byte-'a'+10;
+    if(byte>='A' && byte<='Z') return byte-'A'+10;
+    return -1;
+}
+static Eterm integer_from_radix_view(LbProcess *p,LbBitstringView view,unsigned radix)
 {
     LbAllocDomain *domain=p->entry_module->space->domain;
     size_t bytes,start=0,digits=0,bit_count,word_count,allocation_bytes;
@@ -360,18 +367,26 @@ static Eterm integer_from_decimal_view(LbProcess *p,LbBitstringView view)
     if(start==bytes) return fail(p,LB_EXC_BADARG);
     size_t first_significant=bytes;
     for(size_t i=start;i<bytes;++i) {
-        unsigned char digit=binary_view_byte(view,i);
-        if(digit<'0' || digit>'9') return fail(p,LB_EXC_BADARG);
-        if(digit!='0' && first_significant==bytes) first_significant=i;
+        int digit=radix_digit(binary_view_byte(view,i));
+        if(digit<0 || (unsigned)digit>=radix) return fail(p,LB_EXC_BADARG);
+        if(digit && first_significant==bytes) first_significant=i;
     }
     /* A zero-valued string succeeds even if its sign is negative. */
     if(first_significant==bytes) return make_small(0);
     start=first_significant; digits=bytes-start;
-    /* 10^100000 < 2^332193, so this rational upper bound safely sizes the
-     * native magnitude without floating-point rounding. */
-    if(digits>(UINT64_MAX-99999u)/332193u) return fail(p,LB_EXC_SYSTEM_LIMIT);
-    bit_count=(digits*332193u+99999u)/100000u;
+    if(radix==10) {
+        /* 10^100000 < 2^332193: preserve the decimal bound and costs. */
+        if(digits>(UINT64_MAX-99999u)/332193u) return fail(p,LB_EXC_SYSTEM_LIMIT);
+        bit_count=(digits*332193u+99999u)/100000u;
+    } else {
+        unsigned bits_per_digit=0;
+        for(unsigned maximum=radix-1;maximum;maximum>>=1) ++bits_per_digit;
+        if(!lb_size_mul(digits,bits_per_digit,&bit_count) || bit_count>SIZE_MAX-63) return fail(p,LB_EXC_SYSTEM_LIMIT);
+    }
     word_count=(bit_count+63u)/64u;
+    /* The general radix estimate may be loose. Cap scratch capacity, not the
+     * value: only actual limb growth may reject a representable magnitude. */
+    if(radix!=10 && word_count>LB_BIG_ARITY_MAX+1) word_count=LB_BIG_ARITY_MAX+1;
     if(!word_count) word_count=1;
     /* Capacity is an upper bound, not the normalized result's arity. Keep
      * one spare limb so valid values near the native ceiling are not denied
@@ -388,9 +403,9 @@ static Eterm integer_from_decimal_view(LbProcess *p,LbBitstringView view)
             p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
         }
         p->last_native_cost+=used+1;
-        Uint carry=(Uint)(binary_view_byte(view,start+i)-'0');
+        Uint carry=(Uint)radix_digit(binary_view_byte(view,start+i));
         for(size_t j=0;j<used;++j) {
-            __uint128_t product=(__uint128_t)words[j+1]*10+carry;
+            __uint128_t product=(__uint128_t)words[j+1]*radix+carry;
             words[j+1]=(Uint)product; carry=(Uint)(product>>64);
         }
         if(carry) {
@@ -415,7 +430,17 @@ Eterm lb_bif_binary_to_integer_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     LbBitstringView view; (void)pc; p->last_native_cost=0;
     if(!lb_bitstring_view(args[0],&view)) return fail(p,LB_EXC_BADARG);
-    return integer_from_decimal_view(p,view);
+    return integer_from_radix_view(p,view,10);
+}
+Eterm lb_bif_binary_to_integer_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=0;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    p->last_native_cost=1;
+    if(!is_small(args[1]) || signed_val(args[1])<2 || signed_val(args[1])>36) return fail(p,LB_EXC_BADARG);
+    LbBitstringView view;
+    if(!lb_bitstring_view(args[0],&view)) return fail(p,LB_EXC_BADARG);
+    return integer_from_radix_view(p,view,(unsigned)signed_val(args[1]));
 }
 Eterm lb_bif_list_to_integer_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
@@ -458,7 +483,7 @@ Eterm lb_bif_list_to_integer_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
      * through its final possible collection; no fabricated binary term. */
     tail=args[0];
     for(size_t i=0;i<count;++i) { bytes[i]=(unsigned char)signed_val(list_val(tail)[0]); tail=list_val(tail)[1]; }
-    Eterm result=integer_from_decimal_view(p,(LbBitstringView){bytes,0,count*8});
+    Eterm result=integer_from_radix_view(p,(LbBitstringView){bytes,0,count*8},10);
     lb_release(domain,bytes); return result;
 }
 Eterm lb_bif_binary_to_float_1(LbProcess *p,Eterm *args,const BeamInstr *pc)

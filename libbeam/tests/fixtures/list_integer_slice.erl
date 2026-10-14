@@ -1,9 +1,10 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% Copyright 2026 Leandro Ostera <leandro@ostera.io>
 -module(list_integer_slice).
--export([parse/1, binary_parse/1, identity/1, copy/1]).
+-export([parse/1, binary_parse/1, radix_parse/1, identity/1, copy/1]).
 parse(List) -> list_to_integer(List).
 binary_parse(Binary) -> binary_to_integer(Binary).
+radix_parse(Binary) -> binary_to_integer(Binary,10).
 identity(Input) -> Input.
 copy(Input) ->
     case parse("-18446744073709551616") of

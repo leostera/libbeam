@@ -13,7 +13,7 @@
 static LbProcess *input(LbWorld *world,LbCodeModule *module,const char *text,size_t size,int binary)
 {
     Eterm function,arg=make_small(0); LbCodeEntry *entry; LbProcess *p;
-    const char *name=binary?"binary_parse":"parse";
+    const char *name=binary==2?"radix_parse":binary?"binary_parse":"parse";
     CHECK(lb_atoms_find(world->space->atoms,name,strlen(name),&function)==LB_ATOM_OK);
     CHECK(lb_code_entry_acquire(world->space,module->name,function,1,&entry)==LB_CODE_OK);
     if(binary) CHECK(lb_process_create_binary(entry,text,size,256,&p)==LB_PROCESS_READY);
@@ -54,7 +54,7 @@ static void vectors(LbWorld *world,LbCodeModule *module)
         {"0",0},{"-0",0},{"+000",0},{"+123",123},{"-123",-123},
         {"576460752303423487",MAX_SMALL},{"-576460752303423488",MIN_SMALL}};
     const char *bad[]={"","+","-"," 1","1 ","1_2","--1","++1","1.0","1a","1\n"};
-    for(unsigned binary=0;binary<2;++binary) {
+    for(unsigned binary=0;binary<3;++binary) {
         for(size_t i=0;i<sizeof(small)/sizeof(*small);++i) {
             LbProcess *p=input(world,module,small[i].text,strlen(small[i].text),binary);
             CHECK(run(p)==LB_PROCESS_DONE && lb_process_result(p)==make_small(small[i].result));
@@ -116,7 +116,7 @@ static void boundaries(LbWorld *world,LbCodeModule *module)
 {
     LbAllocDomain *domain=world->space->domain; size_t baseline=domain->current;
     const char *text="18446744073709551616";
-    for(unsigned binary=0;binary<2;++binary) {
+    for(unsigned binary=0;binary<3;++binary) {
         int succeeded=0;
         for(size_t attempt=0;attempt<20 && !succeeded;++attempt) {
             LbProcess *p=input(world,module,text,strlen(text),binary);

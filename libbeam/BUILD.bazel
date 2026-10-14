@@ -5701,6 +5701,51 @@ cc_test(
 )
 
 genrule(
+  name = "radix_slice_fixture",
+  srcs = ["tests/fixtures/radix_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/radix_slice_fixture/radix_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/radix_slice.erl)",
+)
+
+genrule(
+  name = "radix_reference_fixture",
+  srcs = ["tests/fixtures/radix_reference.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/radix_reference_fixture/radix_reference.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/radix_reference.erl)",
+)
+
+cc_test(
+  name = "core_radix_test",
+  size = "medium",
+  srcs = ["tests/core_radix_test.c"],
+  args = ["$(rootpath :radix_slice_fixture)"],
+  data = ["radix_slice_fixture"],
+  deps = ["core"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "core_radix_work",
+  size = "medium",
+  args = ["$(rootpath :radix_slice_fixture)", "radix_slice", "bad_digit", "bad_base", "bad_type", "bad_bits"],
+  data = ["radix_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "radix_reference",
+  size = "medium",
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "radix"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "radix_slice_fixture", "radix_reference_fixture", "core_radix_test"],
+  deps = ["reference_comparison_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
   name = "iolist_size_slice_fixture",
   srcs = ["tests/fixtures/iolist_size_slice.erl"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],

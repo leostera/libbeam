@@ -173,6 +173,7 @@ Eterm lb_bif_bsr_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_band_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_bsl_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_binary_to_integer_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_binary_to_integer_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_list_to_integer_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_binary_to_float_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_binary_to_atom_2(LbProcess *,Eterm *,const BeamInstr *);
