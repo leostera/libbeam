@@ -1122,9 +1122,10 @@ static Eterm integer_from_integral_double(double x,Eterm words[17])
     words[0]=_make_header(digits,negative?NEG_BIG_SUBTAG:POS_BIG_SUBTAG);
     return make_boxed(words);
 }
-Eterm lb_bif_floor_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+typedef enum { LB_ROUND_FLOOR, LB_ROUND_CEIL, LB_ROUND_TRUNC, LB_ROUND_NEAREST } LbIntegerRounding;
+static Eterm rounded_integer(LbProcess *p,Eterm value,LbIntegerRounding operation)
 {
-    (void)pc; p->last_native_cost=1; Eterm value=args[0];
+    p->last_native_cost=1;
     LbAllocDomain *domain=p->entry_module->space->domain;
     if(!lb_work_domain_charge(domain,1)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
     if(lb_is_integer(value)) return value;
@@ -1137,11 +1138,55 @@ Eterm lb_bif_floor_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     memcpy(&number,boxed_val(value)+1,sizeof(number));
     if(fegetenv(&previous)) goto environment_failure;
     if(fesetenv(FE_DFL_ENV)) { (void)fesetenv(&previous); goto environment_failure; }
-    if(isfinite(number)) result=integer_from_integral_double(floor(number),words);
+    if(isfinite(number)) {
+        double integral;
+        switch(operation) {
+        case LB_ROUND_FLOOR: integral=floor(number); break;
+        case LB_ROUND_CEIL: integral=ceil(number); break;
+        case LB_ROUND_TRUNC: integral=number>=0.0?floor(number):ceil(number); break;
+        case LB_ROUND_NEAREST: integral=round(number); break; /* native ties away from zero */
+        default: abort();
+        }
+        result=integer_from_integral_double(integral,words);
+    }
     if(fesetenv(&previous)) goto environment_failure;
     if(is_non_value(result)) return fail(p,LB_EXC_BADARG);
     if(is_small(result)) return result;
     return publish_words(p,words,(size_t)(words[0]>>_HEADER_ARITY_OFFS)+1);
+environment_failure:
+    p->status=LB_PROCESS_ENVIRONMENT; return THE_NON_VALUE;
+}
+Eterm lb_bif_floor_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return rounded_integer(p,args[0],LB_ROUND_FLOOR); }
+Eterm lb_bif_ceil_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return rounded_integer(p,args[0],LB_ROUND_CEIL); }
+Eterm lb_bif_trunc_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return rounded_integer(p,args[0],LB_ROUND_TRUNC); }
+Eterm lb_bif_round_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return rounded_integer(p,args[0],LB_ROUND_NEAREST); }
+
+/* erl_bif_guard.c:float_1, using the owned native big_to_double and a fixed
+ * two-word result before moving GC. An existing float is returned unchanged. */
+Eterm lb_bif_float_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; Eterm value=args[0]; p->last_native_cost=1;
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    if(is_float_term(value)) return value;
+    if(!lb_is_integer(value)) return fail(p,LB_EXC_BADARG);
+    /* At most 64 leading-bit steps, sixteen limbs, rounding, and publication.
+     * The converter rejects larger magnitudes before scanning their digits. */
+    if(!lb_work_domain_charge(domain,128)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    p->last_native_cost+=128;
+    fenv_t previous; double number=0; int converted=1;
+    if(fegetenv(&previous)) goto environment_failure;
+    if(fesetenv(FE_DFL_ENV)) { (void)fesetenv(&previous); goto environment_failure; }
+    if(is_small(value)) number=(double)signed_val(value);
+    else converted=lb_big_to_double(value,&number)==0;
+    if(fesetenv(&previous)) goto environment_failure;
+    if(!converted) return fail(p,LB_EXC_BADARG);
+    Eterm words[2]={_make_header(1,FLOAT_SUBTAG),0}; memcpy(words+1,&number,sizeof(number));
+    return publish_words(p,words,2);
 environment_failure:
     p->status=LB_PROCESS_ENVIRONMENT; return THE_NON_VALUE;
 }

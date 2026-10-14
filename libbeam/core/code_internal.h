@@ -127,6 +127,10 @@ LbCodeStatus lb_code_space_create_in_domain(LbEngine *,LbAllocDomain *,LbCodeSpa
 LbCodeStatus lb_verify_program(LoaderState *);
 int lb_instruction_supported(unsigned);
 Eterm lb_bif_floor_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_ceil_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_trunc_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_round_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_float_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_list_to_tuple_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_tuple_to_list_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_make_tuple_2(LbProcess *,Eterm *,const BeamInstr *);

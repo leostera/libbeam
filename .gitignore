@@ -4,6 +4,10 @@
 __pycache__/
 *.py[cod]
 /build/
+/bazel-bin
+/bazel-out
+/bazel-testlogs
+/bazel-otp
 /libbeam/build/
 /libbeam/cmake-build-*/
 /libbeam/CMakeUserPresets.json

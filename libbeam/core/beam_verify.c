@@ -371,6 +371,10 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             const BifEntry *native=st->bif_imports[a[2].val];
             if(arity==1) {
                 if(native!=&st->space->engine->bifs[BIF_floor_1] &&
+                   native!=&st->space->engine->bifs[BIF_ceil_1] &&
+                   native!=&st->space->engine->bifs[BIF_trunc_1] &&
+                   native!=&st->space->engine->bifs[BIF_round_1] &&
+                   native!=&st->space->engine->bifs[BIF_float_1] &&
                    native!=&st->space->engine->bifs[BIF_abs_1] &&
                    native!=&st->space->engine->bifs[BIF_map_size_1] &&
                    native!=&st->space->engine->bifs[BIF_sminus_1]) return LB_CODE_UNSUPPORTED;

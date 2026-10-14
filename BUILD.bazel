@@ -1,0 +1,28 @@
+load("//bazel:provenance_inputs.bzl", "PROVENANCE_INPUTS")
+
+exports_files([
+    "beam/erts/preloaded/src/erlang.erl",
+    "beam/erts/emulator/beam/erl_term.h",
+    "beam/erts/emulator/beam/erl_binary.h",
+    "beam/erts/emulator/beam/erl_bits.h",
+    "beam/erts/emulator/beam/erl_map.h",
+    "beam/erts/emulator/beam/error.h",
+])
+
+filegroup(
+    name = "validation_policy_sources",
+    srcs = [".bazelrc", ".bazelversion", "MODULE.bazel", "MODULE.bazel.lock", "BUILD.bazel", "//bazel:rule_sources"],
+    visibility = ["//libbeam:__pkg__"],
+)
+
+filegroup(
+    name = "otp_provenance_sources",
+    srcs = PROVENANCE_INPUTS,
+    visibility = ["//libbeam:__pkg__"],
+)
+
+filegroup(
+    name = "otp_bif_sources",
+    srcs = glob(["beam/erts/emulator/**/*.c"]) + ["beam/erts/emulator/beam/bif.tab", "beam/erts/preloaded/src/erlang.erl"],
+    visibility = ["//libbeam:__pkg__"],
+)

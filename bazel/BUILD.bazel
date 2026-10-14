@@ -1,0 +1,182 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Leandro Ostera <leandro@ostera.io>
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_test")
+exports_files(["host_tools.bzl"])
+
+cc_binary(
+  name = "atom_generator",
+  visibility = ["//libbeam:__pkg__"],
+  srcs = ["atom_generator.cpp", "atom_generator.hpp"],
+  copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+  deps = [],
+)
+
+cc_test(
+  name = "atom_generator_test",
+  size = "small",
+  srcs = ["atom_generator_test.cpp", "atom_generator.hpp"],
+  copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+  deps = ["@googletest//:gtest_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "atom_inputs_test",
+  size = "small",
+  args = ["$(rootpath //libbeam:tools/otp/make_tables)", "$(rootpath //libbeam:core/otp/atom.names)", "$(rootpath //libbeam:core/otp/bif.tab)", "$(rootpath //libbeam:generated/atoms/lb_atoms_generated.h)", "$(rootpath //libbeam:generated/atoms/lb_atoms_generated.inc)", "$(rootpath //libbeam:generated/atoms/lb_bif_ids_generated.h)", "$(rootpath //libbeam:generated/repeat/atoms/lb_atoms_generated.h)", "$(rootpath //libbeam:generated/repeat/atoms/lb_atoms_generated.inc)", "$(rootpath //libbeam:generated/repeat/atoms/lb_bif_ids_generated.h)"],
+  srcs = ["atom_inputs_test.cpp", "//libbeam:atom_definitions", "//libbeam:tests/test_process.hpp"],
+  data = ["//libbeam:tools/otp/make_tables", "//libbeam:core/otp/atom.names", "//libbeam:core/otp/bif.tab", "//libbeam:generated/atoms/lb_atoms_generated.h", "//libbeam:generated/atoms/lb_atoms_generated.inc", "//libbeam:generated/atoms/lb_bif_ids_generated.h", "//libbeam:generated/repeat/atoms/lb_atoms_generated.h", "//libbeam:generated/repeat/atoms/lb_atoms_generated.inc", "//libbeam:generated/repeat/atoms/lb_bif_ids_generated.h"],
+  copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+  deps = ["@googletest//:gtest", "@boringssl//:crypto"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
+  name = "atom_upstream",
+  visibility = ["//libbeam:__pkg__"],
+  srcs = ["//libbeam:core/otp/atom.names", "//libbeam:core/otp/bif.tab"],
+  tools = ["@libbeam_host//:perl", "//libbeam:tools/otp/make_tables"],
+  outs = ["atom_upstream/erl_atom_table.c", "atom_upstream/erl_atom_table.h", "atom_upstream/erl_bif_table.h"],
+  cmd = "$(location @libbeam_host//:perl) $(location //libbeam:tools/otp/make_tables) -src $(RULEDIR)/atom_upstream -include $(RULEDIR)/atom_upstream $(location //libbeam:core/otp/atom.names) $(location //libbeam:core/otp/bif.tab)",
+)
+
+genrule(
+  name = "atom_upstream_repeat",
+  visibility = ["//libbeam:__pkg__"],
+  srcs = ["//libbeam:core/otp/atom.names", "//libbeam:core/otp/bif.tab"],
+  tools = ["@libbeam_host//:perl", "//libbeam:tools/otp/make_tables"],
+  outs = ["atom_upstream_repeat/erl_atom_table.c", "atom_upstream_repeat/erl_atom_table.h", "atom_upstream_repeat/erl_bif_table.h"],
+  cmd = "$(location @libbeam_host//:perl) $(location //libbeam:tools/otp/make_tables) -src $(RULEDIR)/atom_upstream_repeat -include $(RULEDIR)/atom_upstream_repeat $(location //libbeam:core/otp/atom.names) $(location //libbeam:core/otp/bif.tab)",
+)
+
+cc_test(
+  name = "dispatch_source_test",
+  size = "small",
+  args = ["$(rootpath :opcode_upstream/beam_hot.h)", "$(rootpath :opcode_upstream/beam_warm.h)", "$(rootpath :opcode_upstream/beam_cold.h)"],
+  srcs = ["dispatch_source_test.cpp", "dispatch_source.hpp", "dispatch_calls.hpp", "generator_text.hpp", "//libbeam:tests/test_process.hpp"],
+  data = ["opcode_upstream/beam_hot.h", "opcode_upstream/beam_warm.h", "opcode_upstream/beam_cold.h"],
+  copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+  deps = ["@googletest//:gtest"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
+  name = "opcode_upstream",
+  visibility = ["//libbeam:__pkg__"],
+  srcs = ["//libbeam:core/otp/opcodes/genop.tab", "//libbeam:core/otp/opcodes/predicates.tab", "//libbeam:core/otp/opcodes/generators.tab", "//libbeam:core/otp/opcodes/emu/ops.tab", "//libbeam:core/otp/opcodes/emu/predicates.tab", "//libbeam:core/otp/opcodes/emu/generators.tab", "//libbeam:core/otp/opcodes/emu/macros.tab", "//libbeam:core/otp/opcodes/emu/instrs.tab", "//libbeam:core/otp/opcodes/emu/arith_instrs.tab", "//libbeam:core/otp/opcodes/emu/bif_instrs.tab", "//libbeam:core/otp/opcodes/emu/bs_instrs.tab", "//libbeam:core/otp/opcodes/emu/float_instrs.tab", "//libbeam:core/otp/opcodes/emu/map_instrs.tab", "//libbeam:core/otp/opcodes/emu/msg_instrs.tab", "//libbeam:core/otp/opcodes/emu/select_instrs.tab", "//libbeam:core/otp/opcodes/emu/trace_instrs.tab"],
+  tools = ["@libbeam_host//:perl", "//libbeam:tools/otp/beam_makeops"],
+  outs = ["opcode_upstream/beam_opcodes.c", "opcode_upstream/beam_opcodes.h", "opcode_upstream/beam_hot.h", "opcode_upstream/beam_warm.h", "opcode_upstream/beam_cold.h"],
+  cmd = "root=$$PWD; out=\"$$root/$(RULEDIR)/opcode_upstream\"; cd libbeam/core/otp/opcodes; LANG=C \"$$root/$(location @libbeam_host//:perl)\" \"$$root/$(location //libbeam:tools/otp/beam_makeops)\" -wordsize 64 -jit no -DUSE_VM_PROBES=0 -outdir \"$$out\" -emulator genop.tab predicates.tab generators.tab emu/ops.tab emu/predicates.tab emu/generators.tab emu/macros.tab emu/instrs.tab emu/arith_instrs.tab emu/bif_instrs.tab emu/bs_instrs.tab emu/float_instrs.tab emu/map_instrs.tab emu/msg_instrs.tab emu/select_instrs.tab emu/trace_instrs.tab",
+)
+
+genrule(
+  name = "opcode_upstream_repeat",
+  visibility = ["//libbeam:__pkg__"],
+  srcs = ["//libbeam:core/otp/opcodes/genop.tab", "//libbeam:core/otp/opcodes/predicates.tab", "//libbeam:core/otp/opcodes/generators.tab", "//libbeam:core/otp/opcodes/emu/ops.tab", "//libbeam:core/otp/opcodes/emu/predicates.tab", "//libbeam:core/otp/opcodes/emu/generators.tab", "//libbeam:core/otp/opcodes/emu/macros.tab", "//libbeam:core/otp/opcodes/emu/instrs.tab", "//libbeam:core/otp/opcodes/emu/arith_instrs.tab", "//libbeam:core/otp/opcodes/emu/bif_instrs.tab", "//libbeam:core/otp/opcodes/emu/bs_instrs.tab", "//libbeam:core/otp/opcodes/emu/float_instrs.tab", "//libbeam:core/otp/opcodes/emu/map_instrs.tab", "//libbeam:core/otp/opcodes/emu/msg_instrs.tab", "//libbeam:core/otp/opcodes/emu/select_instrs.tab", "//libbeam:core/otp/opcodes/emu/trace_instrs.tab"],
+  tools = ["@libbeam_host//:perl", "//libbeam:tools/otp/beam_makeops"],
+  outs = ["opcode_upstream_repeat/beam_opcodes.c", "opcode_upstream_repeat/beam_opcodes.h", "opcode_upstream_repeat/beam_hot.h", "opcode_upstream_repeat/beam_warm.h", "opcode_upstream_repeat/beam_cold.h"],
+  cmd = "root=$$PWD; out=\"$$root/$(RULEDIR)/opcode_upstream_repeat\"; cd libbeam/core/otp/opcodes; LANG=C \"$$root/$(location @libbeam_host//:perl)\" \"$$root/$(location //libbeam:tools/otp/beam_makeops)\" -wordsize 64 -jit no -DUSE_VM_PROBES=0 -outdir \"$$out\" -emulator genop.tab predicates.tab generators.tab emu/ops.tab emu/predicates.tab emu/generators.tab emu/macros.tab emu/instrs.tab emu/arith_instrs.tab emu/bif_instrs.tab emu/bs_instrs.tab emu/float_instrs.tab emu/map_instrs.tab emu/msg_instrs.tab emu/select_instrs.tab emu/trace_instrs.tab",
+)
+
+genrule(
+  name = "preloaded_beam",
+  srcs = ["preloaded_source"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/preloaded_beam/erlang.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic  -o $(@D) $(location :preloaded_source)",
+)
+
+genrule(
+  name = "preloaded_embedding",
+  srcs = ["preloaded_beam"],
+  tools = ["preloaded_generator"],
+  outs = ["preloaded_fixture.inc"],
+  cmd = "$(location :preloaded_generator) embed $(location :preloaded_beam) $@",
+)
+
+cc_binary(
+  name = "preloaded_generator",
+  visibility = ["//libbeam:__pkg__"],
+  srcs = ["preloaded_generator.cpp", "preloaded_generator.hpp"],
+  copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+  deps = [],
+)
+
+cc_test(
+  name = "preloaded_generator_test",
+  size = "small",
+  args = ["$(rootpath :preloaded_beam)"],
+  srcs = ["preloaded_generator_test.cpp", "preloaded_generator.hpp", "preloaded_embedding", "//libbeam:tests/test_process.hpp"],
+  data = ["preloaded_beam"],
+  copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+  deps = ["@googletest//:gtest"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+alias(
+  name = "preloaded_input",
+  visibility = ["//libbeam:__pkg__"],
+  actual = "preloaded_beam",
+)
+
+genrule(
+  name = "preloaded_repeat_beam",
+  srcs = ["preloaded_source"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/preloaded_repeat_beam/erlang.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic  -o $(@D) $(location :preloaded_source)",
+)
+
+alias(
+  name = "preloaded_repeat_input",
+  visibility = ["//libbeam:__pkg__"],
+  actual = "preloaded_repeat_beam",
+)
+
+genrule(
+  name = "preloaded_source",
+  srcs = ["//:beam/erts/preloaded/src/erlang.erl"],
+  tools = ["preloaded_generator"],
+  outs = ["preloaded/erlang.erl"],
+  cmd = "$(location :preloaded_generator) extract $(location //:beam/erts/preloaded/src/erlang.erl) $@",
+)
+
+filegroup(
+  name = "rule_sources",
+  srcs = ["BUILD.bazel"] + glob(["*.bzl", "*.cpp", "*.hpp"]),
+  visibility = ["//:__pkg__"],
+)
+
+cc_binary(
+  name = "transform_generator",
+  srcs = ["transform_generator.cpp", "transform_projection.hpp", "generator_text.hpp"],
+  copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+  deps = [],
+)
+
+genrule(
+  name = "transform_projection",
+  visibility = ["//libbeam:__pkg__"],
+  srcs = ["opcode_upstream/beam_opcodes.c"],
+  tools = ["transform_generator"],
+  outs = ["opcode_projection/lb_transform_generated.inc"],
+  cmd = "$(location :transform_generator) $(location :opcode_upstream/beam_opcodes.c) $@",
+)
+
+genrule(
+  name = "transform_projection_repeat",
+  visibility = ["//libbeam:__pkg__"],
+  srcs = ["opcode_upstream_repeat/beam_opcodes.c"],
+  tools = ["transform_generator"],
+  outs = ["opcode_projection_repeat/lb_transform_generated.inc"],
+  cmd = "$(location :transform_generator) $(location :opcode_upstream_repeat/beam_opcodes.c) $@",
+)
+
+cc_test(
+  name = "transform_projection_test",
+  size = "small",
+  srcs = ["transform_projection_test.cpp", "transform_projection.hpp", "generator_text.hpp"],
+  copts = ["-std=c++17", "-Wall", "-Wextra", "-Werror"],
+  deps = ["@googletest//:gtest_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)

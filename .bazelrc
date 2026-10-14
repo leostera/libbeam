@@ -1,0 +1,12 @@
+# Incremental local development. Bazel keeps separate caches for each config.
+build --compilation_mode=dbg
+# Enforce project warnings without imposing them on third-party internals.
+build --per_file_copt=libbeam/.*@-Wall,-Wextra,-Werror
+build --verbose_failures
+test --test_output=errors
+build:release --compilation_mode=opt
+# UBSan otherwise shares dbg's output directory and overwrites its local outputs.
+build:ubsan --platform_suffix=ubsan
+build:ubsan --copt=-fsanitize=undefined
+build:ubsan --copt=-fno-sanitize-recover=all
+build:ubsan --linkopt=-fsanitize=undefined

@@ -36,16 +36,16 @@ runtime behavior or supported language semantics.
 additive C execution substrate; [lifecycle evidence](docs/rfds/0003-engine-lifecycle.md).
 [Public Isolates, copied calls and physical reclamation](docs/rfds/0003-public-isolates.md)
 now execute a limited BEAM profile on the Engine worker, with copying GC and owned
-code/binary retirement. The stateful proof still requires missing Erlang machinery.
-The older native startup experiment still cannot shut down safely. This is not a
-security boundary for untrusted workloads.**
+code/binary retirement. The unchanged bounded-profile stateful two-Isolate proof
+passes native tests. Whole Midgard application execution remains unfinished.
+This is not a security boundary for untrusted workloads.**
 
 ## Layout
 
 - [`beam/`](beam/): tracked OTP source/reference plus the prior subtractive experiment.
   This is modified source, not a pristine upstream checkout or a submodule.
 - [`libbeam/`](libbeam/): the new additive C core under `core/`, C++ embedding
-  interface, unchanged acceptance examples, tests and historical build/link probes.
+  interface, unchanged acceptance examples and native Bazel tests.
 - [`docs/rfds/`](docs/rfds/): design proposals, contracts and historical evidence.
 
 Start with [RFD 0003: additive runtime construction](docs/rfds/0003-additive-runtime-construction.md).
@@ -60,19 +60,16 @@ single-digit milliseconds to **first execution**, not application completion.
 Concurrent density, execution budgets/eviction and suspend/resume have separate
 tracked gates; 1,000 sequential proof cycles do not prove 1,000 resident isolates.
 The [two-isolate C++ example](libbeam/examples/two_isolates.md) now specifies the
-API we want, with same-module Erlang fixtures. It links and runs against the real
-C runtime, now failing at admission of the unsupported stateful module profile.
+experimental API, with same-module Erlang fixtures. It executes against the real
+C runtime with independent state, peer survival and explicit reclamation.
 RFD 0003 supersedes the construction strategy in the earlier
 [implementation plan](docs/rfds/0002-example-implementation-plan.md), keeping the
 example—not broad runtime cleanup—as the development driver.
-The [build/link probes](libbeam/README.md#build-and-link-probes) and
-[real-runtime startup-return experiment](docs/rfds/0002-engine-start-evidence.md)
-are implemented starting points; they do not initialize independent isolates.
-There is now one runtime contract, with no embedding-mode switch. Native spawn/forker
-and signal-administration implementations, Darwin driver takeover, and node/network
-bootstrap services have been deleted; see
-[the runtime reduction and evidence](docs/rfds/0002-single-runtime.md). Other native
-effects remain, so this is not yet an enforced bytecode-only profile.
+The old full-ERTS build/package/probe interfaces are retired by user decision;
+[historical startup evidence](docs/rfds/0002-engine-start-evidence.md) and the
+modified reference source remain. They are not an alternate runtime backend.
+[RFD 0006](docs/rfds/0006-bazel-test-cutover.md) records the Bazel-only cutover and
+preserved safety contracts.
 
 [RFD 0001](docs/rfds/0001-beam-realms.md) documents the earlier Realm experiment.
 Its implementation has been removed from the active emulator. The complete previous
@@ -81,13 +78,24 @@ Historical source links and commands refer to that snapshot, not today's `beam/`
 No Realm APIs, quotas, resource guards or process boundaries are carried forward.
 The old evidence is not acceptance for the clean-upstream implementation.
 
-An ordinary clone includes the source. Build in a fresh detached repository worktree
-as described in [`libbeam/README.md`](libbeam/README.md); do not reuse the old Realm
-build outputs. The source-check workflow now includes standalone additive C
-component tests and unchanged Engine lifecycle acceptance in debug/release builds,
-alongside Python tooling and snapshot layout checks. These do not establish
-stateful Isolate acceptance.
-Historical Realm and copied upstream workflows have been removed, not counted as passing.
+## Build and test
+
+Use global Bazel **9.3.0** and the prerequisites in the
+[build guide](libbeam/README.md#build-and-test). Reuse incremental outputs:
+
+```sh
+bazel build //libbeam:libbeam
+bazel test //...
+bazel test --config=release //...
+bazel test --config=ubsan //...
+```
+
+The normal loop is change → focused native regression → fix → continue. Broader
+runs retain the shared validation lock and a final read-only freshness check.
+Python/Perl remain only for production code generation; there is no Python test
+runner or libbeam CMake/CTest path. CI uses native Bazel tests in all three
+configurations. Historical full-ERTS/Realm results are preserved, not counted as
+current-runtime acceptance. See the [coverage ledger](docs/bazel-test-migration.md).
 
 ## Source provenance and licenses
 

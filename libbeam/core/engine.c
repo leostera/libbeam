@@ -120,6 +120,10 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_tuple_to_list_1,{am_erlang,am_tuple_to_list,1,lb_bif_tuple_to_list_1,BIF_KIND_HEAVY}},
         {BIF_list_to_tuple_1,{am_erlang,am_list_to_tuple,1,lb_bif_list_to_tuple_1,BIF_KIND_HEAVY}},
         {BIF_floor_1,{am_erlang,am_floor,1,lb_bif_floor_1,BIF_KIND_HEAVY}},
+        {BIF_ceil_1,{am_erlang,am_ceil,1,lb_bif_ceil_1,BIF_KIND_HEAVY}},
+        {BIF_trunc_1,{am_erlang,am_trunc,1,lb_bif_trunc_1,BIF_KIND_HEAVY}},
+        {BIF_round_1,{am_erlang,am_round,1,lb_bif_round_1,BIF_KIND_HEAVY}},
+        {BIF_float_1,{am_erlang,am_float,1,lb_bif_float_1,BIF_KIND_HEAVY}},
 #define LB_TYPE_PREDICATE(name, predicate) {BIF_##name##_1,{am_erlang,am_##name,1,lb_bif_##name##_1,BIF_KIND_GUARD}},
 #include "type_predicates.def"
 #undef LB_TYPE_PREDICATE

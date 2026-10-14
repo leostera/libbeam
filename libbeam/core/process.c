@@ -343,6 +343,7 @@ dispatch:
         Eterm denied=lb_bif_deny_load_nif_2(c_p,reg,I);
         SWAPIN; FCALLS-=(Sint)c_p->last_native_cost;
         assert(is_non_value(denied));
+        (void)denied;
         if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
         goto capability_denied;
     }
