@@ -48,6 +48,8 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_error_1,{am_erlang,am_error,1,lb_bif_error_1,BIF_KIND_HEAVY}},
         {BIF_exit_1,{am_erlang,am_exit,1,lb_bif_exit_1,BIF_KIND_HEAVY}},
         {BIF_register_2,{am_erlang,am_register,2,lb_bif_register_2,BIF_KIND_HEAVY}},
+        {BIF_whereis_1,{am_erlang,am_whereis,1,lb_bif_whereis_1,BIF_KIND_HEAVY}},
+        {BIF_unregister_1,{am_erlang,am_unregister,1,lb_bif_unregister_1,BIF_KIND_HEAVY}},
         {BIF_error_3,{am_erlang,am_error,3,lb_bif_error_3,BIF_KIND_HEAVY}},
         {BIF_spawn_opt_4,{am_erlang,am_spawn_opt,4,lb_bif_spawn_opt_4,BIF_KIND_HEAVY}},
         {BIF_demonitor_2,{am_erlang,am_demonitor,2,lb_bif_demonitor_2,BIF_KIND_HEAVY}},

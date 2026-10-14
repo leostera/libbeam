@@ -156,6 +156,30 @@ Eterm lb_bif_register_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     else p->status=status;
     return THE_NON_VALUE;
 }
+/* bif.c:whereis_1/unregister_1 and register.c, over the owning namespace. Ports
+ * cannot be registered in this profile. Lookup charges each visited bucket
+ * entry; distinguish exhaustion from a genuinely absent registration. */
+static Eterm registered_name(LbProcess *p,Eterm name,int remove)
+{
+    LbCodeSpace *space=p->entry_module->space;
+    p->last_native_cost=1;
+    if(!lb_work_domain_charge(space->domain,1)) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    if(!is_atom(name)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    LbProcess *target=lb_registry_lookup(space,name,&p->last_native_cost);
+    if(lb_alloc_domain_failure(space->domain)==LB_ALLOC_WORK_LIMIT) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    if(!remove) return target?target->identity.id:am_undefined;
+    if(!target) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    lb_registry_remove(target);
+    return am_true;
+}
+Eterm lb_bif_whereis_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return registered_name(p,args[0],0); }
+Eterm lb_bif_unregister_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return registered_name(p,args[0],1); }
 /* Native bif.c error_1: retain the supplied reason, with error class and
  * logging/trace flags. This does not admit stacktrace construction or unwind. */
 Eterm lb_bif_error_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)

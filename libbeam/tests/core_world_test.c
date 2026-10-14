@@ -176,6 +176,63 @@ static void execution(LbBytesView code)
     for(i=0;i<sizeof(host_reply);++i) CHECK(host_reply[i]==0x6b);
     puts("CORE_WORLD_EXECUTION_OK worker=true copied_results=true peer_progress=true capacity=true stopped_reclaimed=true replacement=true owner_drop=true public_api=false");
 }
+static void registry_queries(LbBytesView code)
+{
+    Memory memory={0}; LbEngine *engine=create(&memory);
+    LbWorld *world[2]; LbProcess *processes[2]; Eterm pids[2];
+    for(unsigned i=0;i<2;++i) {
+        CHECK(lb_world_create(engine,&world[i])==LB_WORLD_OK && lb_world_load(world[i],code)==LB_WORLD_OK);
+        lb_engine_enter(engine);
+        Eterm module,function,input=NIL; LbCodeEntry *entry;
+        CHECK(lb_atoms_find(world[i]->space->atoms,"async_slice",11,&module)==LB_ATOM_OK);
+        CHECK(lb_atoms_find(world[i]->space->atoms,"identity",8,&function)==LB_ATOM_OK);
+        CHECK(lb_code_entry_acquire(world[i]->space,module,function,1,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,&input,1,64,&processes[i])==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        CHECK(lb_process_identity(processes[i],&pids[i])==LB_PROCESS_READY);
+        CHECK(lb_registry_register(processes[i],am_true,pids[i])==LB_PROCESS_READY);
+        lb_engine_leave(engine);
+    }
+    lb_engine_enter(engine);
+    LbProcess *p=processes[0]; LbAllocDomain *domain=&world[0]->domain;
+    for(unsigned removing=0;removing<2;++removing) for(unsigned credit=0;credit<4;++credit) {
+        LbWorkBudget *budget=lb_work_budget_create(world[0]); CHECK(budget);
+        budget->limit=budget->remaining=credit;
+        p->reg[0]=am_true; p->status=LB_PROCESS_READY; p->freason=LB_EXC_NULL; p->fvalue=make_small(99);
+        size_t calls=memory.host_calls;
+        lb_work_domain_borrow(domain,budget);
+        Eterm result=removing?lb_bif_unregister_1(p,p->reg,NULL):lb_bif_whereis_1(p,p->reg,NULL);
+        if(credit<2) CHECK(is_non_value(result) && p->status==LB_PROCESS_WORK_LIMIT && p->freason==LB_EXC_NULL && p->fvalue==make_small(99));
+        else CHECK(result==(removing?am_true:pids[0]) && budget->remaining==credit-2);
+        CHECK(memory.host_calls==calls);
+        lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+        lb_work_budget_release(budget); p->status=LB_PROCESS_READY;
+        Uint cost=0;
+        if(removing && credit>=2) {
+            CHECK(!lb_registry_lookup(world[0]->space,am_true,&cost));
+            CHECK(lb_registry_register(p,am_true,pids[0])==LB_PROCESS_READY);
+        } else CHECK(lb_registry_lookup(world[0]->space,am_true,&cost)==p);
+    }
+    p->reg[0]=make_small(7); p->freason=LB_EXC_NULL;
+    CHECK(is_non_value(lb_bif_whereis_1(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
+    p->freason=LB_EXC_NULL;
+    CHECK(is_non_value(lb_bif_unregister_1(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
+    p->reg[0]=am_undefined;
+    CHECK(lb_bif_whereis_1(p,p->reg,NULL)==am_undefined);
+    p->reg[0]=am_true;
+    CHECK(lb_bif_unregister_1(p,p->reg,NULL)==am_true);
+    CHECK(lb_bif_whereis_1(p,p->reg,NULL)==am_undefined);
+    p->freason=LB_EXC_NULL;
+    CHECK(is_non_value(lb_bif_unregister_1(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
+    processes[1]->reg[0]=am_true;
+    CHECK(lb_bif_whereis_1(processes[1],processes[1]->reg,NULL)==pids[1]);
+    for(unsigned i=0;i<2;++i) lb_process_destroy(processes[i]);
+    lb_engine_leave(engine);
+    for(unsigned i=0;i<2;++i) lb_world_release(world[i]);
+    CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
+    CHECK(!memory.live && !memory.bytes);
+    puts("CORE_REGISTRY_QUERY_OK local_names=true absent=true invalid=true exact_work=true denial_before_removal=true allocation_free=true peer_isolation=true");
+}
 typedef enum { QUEUED, EXECUTING, WAITING } CancelState;
 static void await_cancel_state(LbCall *call,CancelState wanted,uint64_t initial_credit)
 {
@@ -546,7 +603,7 @@ static void stateful_probes(LbBytesView a_code,LbBytesView b_code)
 int main(int argc,char **argv)
 {
     construction();
-    if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); cancellation_states(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
+    if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); registry_queries(code); cancellation_states(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
     if(argc>=3) { LbBytesView code=image(argv[2]); spawned_children(code); free((void *)code.data); }
     if(argc==5) {
         LbBytesView a=image(argv[3]),b=image(argv[4]); stateful_probes(a,b);

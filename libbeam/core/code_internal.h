@@ -219,6 +219,8 @@ LbCodeStatus lb_code_preload(LbCodeSpace *);
 Eterm lb_bif_error_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_error_3(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_register_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_whereis_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_unregister_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_spawn_opt_4(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_demonitor_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_exit_2(LbProcess *,Eterm *,const BeamInstr *);
