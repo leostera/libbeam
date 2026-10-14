@@ -835,14 +835,15 @@ Eterm lb_bif_float_to_binary_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 float_infrastructure_error:
     p->status=LB_PROCESS_EXCEPTION; return fail(p,LB_EXC_NOTSUP);
 }
-Eterm lb_bif_integer_to_binary_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+typedef enum { INTEGER_TEXT_BINARY, INTEGER_TEXT_LIST } IntegerTextKind;
+static Eterm integer_text(LbProcess *p,Eterm value,Eterm radix,IntegerTextKind kind)
 {
     LbAllocDomain *domain=p->entry_module->space->domain;
-    Eterm value=args[0],small[2],*digits; Uint base; size_t count,digit_bytes,output_capacity,total_bytes;
+    Eterm small[2],*digits; Uint base; size_t count,digit_bytes,output_capacity,total_bytes;
     unsigned char *output; void *memory=NULL; LbAllocStatus status; int negative; size_t output_digits=0;
-    (void)pc; p->last_native_cost=0;
-    if(!(is_small(value)||lb_is_big(value)) || !is_small(args[1])) return fail(p,LB_EXC_BADARG);
-    Sint signed_base=signed_val(args[1]);
+    p->last_native_cost=0;
+    if(!(is_small(value)||lb_is_big(value)) || !is_small(radix)) return fail(p,LB_EXC_BADARG);
+    Sint signed_base=signed_val(radix);
     if(signed_base<2 || signed_base>36) return fail(p,LB_EXC_BADARG);
     base=(Uint)signed_base; negative=is_small(value)?signed_val(value)<0:big_is_negative(value);
     if(is_small(value)) value=lb_small_to_big(signed_val(value),small);
@@ -879,13 +880,30 @@ Eterm lb_bif_integer_to_binary_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
     }
     size_t result_size=output_digits;
     if(negative) { memmove(output+1,output,output_digits); output[0]='-'; ++result_size; }
-    size_t bits,heap_words,need,collections=p->collections;
-    if(!lb_size_mul(result_size,8,&bits) || !(heap_words=lb_bitstring_heap_words(bits)) ||
-       !lb_size_add(heap_words,p->heap_reserved,&need)) { status=LB_ALLOC_LIMIT; goto allocation_failed; }
+    size_t bits=0,heap_words,need,collections=p->collections;
+    switch(kind) {
+    case INTEGER_TEXT_BINARY:
+        if(!lb_size_mul(result_size,8,&bits) || !(heap_words=lb_bitstring_heap_words(bits))) { status=LB_ALLOC_LIMIT; goto allocation_failed; }
+        break;
+    case INTEGER_TEXT_LIST:
+        if(!lb_size_mul(result_size,2,&heap_words)) { status=LB_ALLOC_LIMIT; goto allocation_failed; }
+        if(!lb_work_domain_charge(domain,result_size)) { status=LB_ALLOC_WORK_LIMIT; goto work_failed; }
+        p->last_native_cost+=result_size;
+        break;
+    default: abort();
+    }
+    if(!lb_size_add(heap_words,p->heap_reserved,&need)) { status=LB_ALLOC_LIMIT; goto allocation_failed; }
+    /* Only independent scratch bytes survive this collection; no borrowed
+     * integer limbs or caller argument aliases are read afterward. */
     if(!lb_heap_reserve(p,need,MAX_REG)) { status=lb_alloc_domain_failure(domain); goto allocation_failed; }
     if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
-    Eterm result; status=lb_bitstring_build(domain,&p->off_heap,&p->htop,output,bits,0,&result);
-    if(status!=LB_ALLOC_OK) goto allocation_failed;
+    Eterm result=NIL;
+    if(kind==INTEGER_TEXT_LIST) {
+        for(size_t i=result_size;i>0;--i) { result=CONS(p->htop,make_small(output[i-1]),result); p->htop+=2; }
+    } else {
+        status=lb_bitstring_build(domain,&p->off_heap,&p->htop,output,bits,0,&result);
+        if(status!=LB_ALLOC_OK) goto allocation_failed;
+    }
     if(lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
     return result;
 work_failed:
@@ -895,6 +913,12 @@ allocation_failed:
     if(lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
     return allocation_failure(p,status);
 }
+Eterm lb_bif_integer_to_binary_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return integer_text(p,args[0],args[1],INTEGER_TEXT_BINARY); }
+Eterm lb_bif_integer_to_list_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return integer_text(p,args[0],make_small(10),INTEGER_TEXT_LIST); }
+Eterm lb_bif_integer_to_list_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return integer_text(p,args[0],args[1],INTEGER_TEXT_LIST); }
 Eterm lb_bif_binary_to_atom_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 { Eterm encoded[2]={args[0],am_utf8}; (void)pc; p->last_native_cost=0; return binary_to_atom(p,encoded,0); }
 Eterm lb_bif_binary_to_existing_atom_1(LbProcess *p,Eterm *args,const BeamInstr *pc)

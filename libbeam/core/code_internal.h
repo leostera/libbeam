@@ -187,6 +187,8 @@ Eterm lb_bif_list_to_existing_atom_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_atom_to_list_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_atom_to_binary_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_integer_to_binary_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_integer_to_list_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_integer_to_list_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_bor_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_bxor_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_bnot_1(LbProcess *,Eterm *,const BeamInstr *);

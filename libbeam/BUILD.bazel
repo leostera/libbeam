@@ -5727,6 +5727,15 @@ cc_test(
 )
 
 cc_test(
+  name = "core_integer_list_work",
+  size = "medium",
+  args = ["$(rootpath :radix_slice_fixture)", "radix_slice", "--entry", "list_copy", "bad_integer", "bad_integer_two", "bad_integer_base"],
+  data = ["radix_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
   name = "core_radix_work",
   size = "medium",
   args = ["$(rootpath :radix_slice_fixture)", "radix_slice", "bad_digit", "bad_base", "bad_type", "bad_bits"],

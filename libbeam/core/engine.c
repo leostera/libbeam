@@ -94,6 +94,8 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_atom_to_binary_2,{am_erlang,am_atom_to_binary,2,lb_bif_atom_to_binary_2,BIF_KIND_HEAVY}},
         {BIF_SIZE+3u,{am_erlang,am_atom_to_binary,1,lb_bif_atom_to_binary_1,BIF_KIND_HEAVY}},
         {BIF_integer_to_binary_2,{am_erlang,am_integer_to_binary,2,lb_bif_integer_to_binary_2,BIF_KIND_HEAVY}},
+        {BIF_integer_to_list_1,{am_erlang,am_integer_to_list,1,lb_bif_integer_to_list_1,BIF_KIND_HEAVY}},
+        {BIF_integer_to_list_2,{am_erlang,am_integer_to_list,2,lb_bif_integer_to_list_2,BIF_KIND_HEAVY}},
         {BIF_bor_2,{am_erlang,am_bor,2,lb_bif_bor_2,BIF_KIND_HEAVY}},
         {BIF_bxor_2,{am_erlang,am_bxor,2,lb_bif_bxor_2,BIF_KIND_HEAVY}},
         {BIF_bnot_1,{am_erlang,am_bnot,1,lb_bif_bnot_1,BIF_KIND_HEAVY}},

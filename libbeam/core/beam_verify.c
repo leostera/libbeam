@@ -236,6 +236,8 @@ static uint32_t native_return_shape(LoaderState *st,size_t import)
 {
     if(import>=st->beam.imports.count || !st->bif_imports) return 0;
     const BifEntry *native=st->bif_imports[import];
+    if(native==&st->space->engine->bifs[BIF_integer_to_list_1] ||
+       native==&st->space->engine->bifs[BIF_integer_to_list_2]) return LIST_SHAPE;
     if(native==&st->space->engine->bifs[BIF_list_to_tuple_1] ||
        native==&st->space->engine->bifs[BIF_make_tuple_2]) return TUPLE_SHAPE;
     if(native==&st->space->engine->bifs[BIF_spawn_opt_4] ||
