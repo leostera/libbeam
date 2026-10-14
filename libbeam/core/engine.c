@@ -120,6 +120,7 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_intdiv_2,{am_erlang,am_div,2,lb_bif_intdiv_2,BIF_KIND_HEAVY}},
         {BIF_abs_1,{am_erlang,am_abs,1,lb_bif_abs_1,BIF_KIND_HEAVY}},
         {BIF_sminus_1,{am_erlang,am_Minus,1,lb_bif_minus_1,BIF_KIND_HEAVY}},
+        {BIF_splus_1,{am_erlang,am_Plus,1,lb_bif_plus_1,BIF_KIND_GUARD}},
         {BIF_rem_2,{am_erlang,am_rem,2,lb_bif_rem_2,BIF_KIND_HEAVY}},
         {BIF_SIZE+4u,{am_erlang,am_list_to_integer,1,lb_bif_list_to_integer_1,BIF_KIND_HEAVY}},
         {BIF_min_2,{am_erlang,am_min,2,lb_bif_min_2,BIF_KIND_GUARD}},

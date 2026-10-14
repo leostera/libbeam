@@ -267,6 +267,16 @@ static int lb_transform_is_float(Eterm value)
 #endif
 int lb_transform(LoaderState *st)
 {
+    BeamOp *unary=st->genop;
+    if(unary->op==genop_gc_bif1_5 && unary->arity==5 && unary->a[2].type==TAG_u &&
+       (Uint)unary->a[2].val<st->beam.imports.count &&
+       st->bif_imports[unary->a[2].val]==&st->space->engine->bifs[BIF_splus_1]) {
+        /* Unary plus is numeric identity, not IEEE addition of zero (which
+         * changes -0.0). Its owned native is allocation-free, so retain the
+         * verified source/failure/destination and use the ordinary BIF path. */
+        unary->op=genop_bif1_4; unary->arity=4;
+        unary->a[1]=unary->a[2]; unary->a[2]=unary->a[3]; unary->a[3]=unary->a[4];
+    }
     if(st->genop->op==genop_bs_create_bin_6 && !binary_descriptors_valid(st,st->genop)) {
         st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
     }

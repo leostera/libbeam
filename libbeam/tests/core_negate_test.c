@@ -6,18 +6,21 @@
 #include "work_budget_internal.h"
 #include "alloc_internal.h"
 #include "big.h"
+#include "code_internal.h"
 #include "opcodes.h"
 #include <fenv.h>
 #include <stdio.h>
 #include <stdlib.h>
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while(0)
-static LbProcess *create(LbWorld *world,LbCodeModule *module,const char *name)
+static LbProcess *create_arity(LbWorld *world,LbCodeModule *module,const char *name,size_t arity)
 {
-    Eterm function,arg=make_small(0); LbCodeEntry *entry; LbProcess *p;
+    Eterm function,args[2]={make_small(0),make_small(0)}; LbCodeEntry *entry; LbProcess *p; CHECK(arity && arity<=2);
     CHECK(lb_atoms_find(world->space->atoms,name,strlen(name),&function)==LB_ATOM_OK);
-    CHECK(lb_code_entry_acquire(world->space,module->name,function,1,&entry)==LB_CODE_OK);
-    CHECK(lb_process_create(entry,&arg,1,256,&p)==LB_PROCESS_READY); lb_code_entry_release(entry); return p;
+    CHECK(lb_code_entry_acquire(world->space,module->name,function,arity,&entry)==LB_CODE_OK);
+    CHECK(lb_process_create(entry,args,arity,256,&p)==LB_PROCESS_READY); lb_code_entry_release(entry); return p;
 }
+static LbProcess *create(LbWorld *world,LbCodeModule *module,const char *name)
+{ return create_arity(world,module,name,1); }
 static LbProcessStatus run(LbProcess *p)
 {
     LbProcessStatus status=LB_PROCESS_READY;
@@ -125,9 +128,77 @@ static void work_boundaries(LbWorld *world,LbCodeModule *module)
         }
     }
 }
+static void positive(LbWorld *world,LbCodeModule *body,LbCodeModule *guard)
+{
+    const Sint smalls[]={MIN_SMALL,MAX_SMALL,-42,0,42};
+    const Uint floats[]={0,UINT64_C(0x8000000000000000),UINT64_C(0x3ff8000000000000),UINT64_C(0xbff8000000000000),1,UINT64_C(0x8000000000000001),UINT64_C(0x7fefffffffffffff),UINT64_C(0xffefffffffffffff)};
+    LbAllocDomain *domain=world->space->domain; size_t baseline=domain->current;
+    /* 5 smalls, 2 signed bignums, 8 float bit patterns, 4 invalid kinds. */
+    for(unsigned form=0;form<4;++form) for(unsigned kind=0;kind<19;++kind) {
+        int guarded=form==1 || form==3; uint64_t cost=0;
+        for(unsigned mode=0;mode<6;++mode) {
+            if(mode>=4 && (form==2 || (form==0 && kind>=15))) continue;
+            LbProcess *p=create_arity(world,form==1?guard:body,form==2?"positive_dynamic":form==3?"positive_guarded":"positive",form==2?2:1);
+            Eterm value; Eterm *hp=p->htop;
+            if(kind<5) value=make_small(smalls[kind]);
+            else if(kind<7) { hp[0]=_make_header(2,kind==5?POS_BIG_SUBTAG:NEG_BIG_SUBTAG); hp[1]=1; hp[2]=UINT64_MAX-1; value=make_boxed(hp); p->htop+=3; }
+            else if(kind<15) { hp[0]=_make_header(1,FLOAT_SUBTAG); hp[1]=floats[kind-7]; value=make_boxed(hp); p->htop+=2; }
+            else if(kind==15) value=am_true;
+            else if(kind==16) value=NIL;
+            else if(kind==17) { value=TUPLE1(hp,make_small(1)); p->htop+=2; }
+            else { value=CONS(hp,make_small(1),NIL); p->htop+=2; }
+            p->reg[form==2?1:0]=value; if(form==2) p->reg[0]=am_Plus;
+            LbProcessStatus expected=kind<15 || guarded?LB_PROCESS_DONE:LB_PROCESS_EXCEPTION;
+            LbWorkBudget *budget=NULL; size_t limit=domain->limit,used=domain->current; LbSystemAllocator system=domain->system;
+            Prefix prefix={system,0}; Eterm *top=NULL;
+            if(mode<4) {
+                budget=lb_work_budget_create(world); CHECK(budget);
+                uint64_t credit=mode==0?1000000:mode==1?cost:mode==2?cost-1:0;
+                budget->limit=budget->remaining=credit; lb_work_domain_borrow(domain,budget);
+            } else {
+                BeamInstr op=guarded?op_i_bif1_sfbd:op_i_bif1_body_sbd;
+                for(unsigned step=0;step<100 && *p->i!=op;++step) CHECK(lb_process_run(p,1,100)==LB_PROCESS_YIELDED);
+                CHECK(*p->i==op); while(p->htop<p->stop-S_RESERVED) *p->htop++=NIL;
+                top=p->htop; used=domain->current;
+                if(mode==4) domain->limit=used; else domain->system=(LbSystemAllocator){&prefix,allocate,release};
+            }
+            int rounding=fegetround(); CHECK(rounding!=-1 && !fesetround(FE_DOWNWARD));
+            LbProcessStatus status=run(p); CHECK(fegetround()==FE_DOWNWARD && !fesetround(rounding));
+            domain->limit=limit; domain->system=system;
+            if(mode==0) { CHECK(status==expected); cost=1000000-budget->remaining; CHECK(cost>1 && cost<10000); }
+            else if(mode==1) CHECK(status==expected && !budget->remaining);
+            else if(mode<4) CHECK(status==LB_PROCESS_WORK_LIMIT);
+            else CHECK(status==LB_PROCESS_DONE && p->htop==top && domain->current==used);
+            if(status==expected) {
+                if(status==LB_PROCESS_EXCEPTION) CHECK(p->exception_value==am_badarith);
+                else CHECK(lb_process_result(p)==(kind<15?value:am_no));
+            }
+            CHECK(!p->collections);
+            if(kind>=7 && kind<15) CHECK(boxed_val(value)[1]==floats[kind-7]);
+            lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+            lb_process_destroy(p); if(budget) lb_work_budget_release(budget); CHECK(domain->current==baseline);
+        }
+    }
+    for(unsigned kind=0;kind<9;++kind) {
+        LbProcess *p=create(world,body,"positive_kept"); Eterm *heap=p->heap;
+        p->reg[0]=make_boxed(p->htop); p->construction_root=p->reg[0];
+        if(!kind) { *p->htop++=_make_header(2,NEG_BIG_SUBTAG); *p->htop++=1; *p->htop++=UINT64_MAX-1; }
+        else { *p->htop++=_make_header(1,FLOAT_SUBTAG); *p->htop++=floats[kind-1]; }
+        CHECK(run(p)==LB_PROCESS_DONE && p->collections && p->heap!=heap && lb_process_result(p)==p->construction_root);
+        if(!kind) wide(lb_process_result(p)); else CHECK(boxed_val(lb_process_result(p))[1]==floats[kind-1]);
+        lb_process_destroy(p); CHECK(domain->current==baseline);
+    }
+    LbProcess *p=create(world,guard,"positive"); p->reg[0]=am_true;
+    LbWorkBudget *budget=lb_work_budget_create(world); CHECK(budget); budget->limit=budget->remaining=0;
+    lb_work_domain_borrow(domain,budget);
+    CHECK(is_non_value(lb_bif_plus_1(p,p->reg,NULL)) && p->status==LB_PROCESS_WORK_LIMIT && p->freason==LB_EXC_NULL && !p->last_native_cost);
+    lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+    lb_process_destroy(p); lb_work_budget_release(budget); CHECK(domain->current==baseline);
+    puts("CORE_POSITIVE_OK identity=true signed_zero=true float_bits=true badarith=true body=true dynamic=true y_guard=true native_allocation_free=true exact_credit=true one_below=true zero=true fenv_preserved=true balanced=true");
+}
 int main(int argc,char **argv)
 {
-    FILE *file; long length; CHECK(argc==2 && (file=fopen(argv[1],"rb")) && !fseek(file,0,SEEK_END));
+    FILE *file; long length; CHECK(argc==3 && (file=fopen(argv[1],"rb")) && !fseek(file,0,SEEK_END));
     length=ftell(file); CHECK(length>0 && !fseek(file,0,SEEK_SET)); unsigned char *bytes=malloc((size_t)length);
     CHECK(bytes && fread(bytes,1,(size_t)length,file)==(size_t)length && !fclose(file));
     LbEngine *engine; LbWorld *world; LbCodeModule *module; LbBeamError error;
@@ -150,7 +221,17 @@ int main(int argc,char **argv)
     CHECK(lb_is_big(result) && *boxed_val(result)==_make_header(LB_BIG_ARITY_MAX,NEG_BIG_SUBTAG));
     CHECK(boxed_val(result)[1]==UINT64_MAX && boxed_val(result)[LB_BIG_ARITY_MAX]==UINT64_MAX);
     CHECK(p->collections>collections && p->heap_reserved==reserved && result!=p->reg[0]);
-    CHECK(*boxed_val(p->reg[0])==_make_header(LB_BIG_ARITY_MAX,POS_BIG_SUBTAG)); lb_process_destroy(p);
+    CHECK(*boxed_val(p->reg[0])==_make_header(LB_BIG_ARITY_MAX,POS_BIG_SUBTAG));
+    size_t limit=world->domain.limit,used=world->domain.current; Prefix prefix={world->domain.system,0};
+    world->domain.limit=used; world->domain.system=(LbSystemAllocator){&prefix,allocate,release};
+    CHECK(lb_bif_plus_1(p,p->reg,NULL)==p->reg[0] && p->last_native_cost==1 && world->domain.current==used);
+    world->domain.limit=limit; world->domain.system=prefix.backing; lb_process_destroy(p);
+    CHECK((file=fopen(argv[2],"rb")) && !fseek(file,0,SEEK_END)); length=ftell(file);
+    CHECK(length>0 && !fseek(file,0,SEEK_SET)); bytes=malloc((size_t)length);
+    CHECK(bytes && fread(bytes,1,(size_t)length,file)==(size_t)length && !fclose(file));
+    LbCodeModule *guard; loaded=lb_code_load(world->space,bytes,(size_t)length,&guard,&error);
+    if(loaded!=LB_CODE_OK) fprintf(stderr,"guard load=%d stage=%s\n",loaded,error.stage);
+    CHECK(loaded==LB_CODE_OK); free(bytes); positive(world,module,guard);
     lb_engine_leave(engine); LbReclamation *reclamation;
     CHECK(lb_world_stop(world,&reclamation)==LB_WORLD_OK && lb_reclamation_poll(reclamation)==LB_WORLD_OK);
     CHECK(lb_reclamation_consume(reclamation)==LB_WORLD_OK); lb_reclamation_release(reclamation); lb_world_release(world);

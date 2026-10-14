@@ -254,6 +254,14 @@ Eterm lb_unary_minus(LbProcess *p,Eterm value)
     }
     return fail(p,LB_EXC_BADARITH);
 }
+Eterm lb_bif_plus_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=0;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    p->last_native_cost=1;
+    if(is_small(args[0]) || lb_is_big(args[0]) || is_float_term(args[0])) return args[0];
+    return fail(p,LB_EXC_BADARITH);
+}
 Eterm lb_bif_minus_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 { (void)pc; return lb_unary_minus(p,args[0]); }
 static Eterm mixed_minus(LbProcess *p,Eterm a,Eterm b)

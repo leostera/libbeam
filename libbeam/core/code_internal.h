@@ -167,6 +167,7 @@ Eterm lb_bif_rem_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_abs_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_unary_minus(LbProcess *,Eterm);
 Eterm lb_bif_minus_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_plus_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_plus_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_minus_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_bsr_2(LbProcess *,Eterm *,const BeamInstr *);
