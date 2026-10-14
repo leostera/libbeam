@@ -5829,7 +5829,9 @@ cc_test(
   name = "core_monitor_work",
   size = "medium",
   timeout = "moderate",
-  args = ["$(rootpath :monitor_slice_fixture)", "monitor_slice"],
+  # Exact credit must not depend on when a second process runs. Concurrent
+  # monitor/DOWN behavior remains covered by world_execution and API fixtures.
+  args = ["$(rootpath :monitor_slice_fixture)", "monitor_slice", "--entry", "self_monitor"],
   data = ["monitor_slice_fixture"],
   deps = ["core_bif_work_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),

@@ -13,10 +13,11 @@ inline std::string extract_preloaded(std::string_view source) {
         "%% Copyright Ericsson AB 1996-2026. All Rights Reserved.\n"
         "%% Complete functions extracted without body changes.\n"
         "-module(erlang).\n-compile(no_auto_import).\n"
-        "-export([spawn/1,spawn_monitor/1]).\n";
+        "-export([spawn/1,spawn_monitor/1,spawn_link/1]).\n";
     const std::string_view starts[] = {
         "spawn(F) when erlang:is_function(F) ->",
         "spawn_monitor(F) when erlang:is_function(F, 0) ->",
+        "spawn_link(F) when erlang:is_function(F, 0) ->",
         "badarg_with_info(Args) ->",
     };
     bool first = true;

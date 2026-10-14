@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <time.h>
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while(0)
-/* Fixtures export copy/1 (the operation under test) and identity/1. Both must
+/* Fixtures export copy/1 (or --entry NAME) and identity/1. Both must
  * return the exact input binary; no guest execution is substituted here. */
 static unsigned char payload[32768];
 static LbBytesView text(const char *s) { return (LbBytesView){(const unsigned char *)s,strlen(s)}; }
@@ -49,26 +49,28 @@ static void retire(LbWorld *world)
 }
 int main(int argc,char **argv)
 {
+    const char *operation="copy"; int first_error=3;
+    if(argc>3 && !strcmp(argv[3],"--entry")) { CHECK(argc>4 && argv[4][0]); operation=argv[4]; first_error=5; }
     FILE *file; long size; CHECK(argc>=3 && (file=fopen(argv[1],"rb")) && !fseek(file,0,SEEK_END));
     size=ftell(file); CHECK(size>0 && !fseek(file,0,SEEK_SET)); unsigned char *bytes=malloc((size_t)size);
     CHECK(bytes && fread(bytes,1,(size_t)size,file)==(size_t)size && !fclose(file));
     for(size_t i=0;i<sizeof(payload);++i) payload[i]=(unsigned char)(i*37);
     LbBytesView beam={bytes,(size_t)size}; LbEngine *engine; CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK);
     LbWorld *peer=make(engine,beam,1000000); LbCall *peer_call=invoke(peer,argv[2],"identity",1);
-    LbWorld *world=make(engine,beam,1000000); LbCall *call=invoke(world,argv[2],"copy",1);
+    LbWorld *world=make(engine,beam,1000000); LbCall *call=invoke(world,argv[2],operation,1);
     result(call,LB_WORLD_OK); result(peer_call,LB_WORLD_OK); consume(peer_call);
     uint64_t cost=1000000-remaining(call); CHECK(cost>1 && cost<1000000);
     fprintf(stderr,"native %s units=%llu\n",argv[2],(unsigned long long)cost);
     consume(call); retire(world);
     for(unsigned below=0;below<2;++below) {
-        world=make(engine,beam,cost-below); call=invoke(world,argv[2],"copy",1);
+        world=make(engine,beam,cost-below); call=invoke(world,argv[2],operation,1);
         result(call,below?LB_WORLD_WORK_LIMIT:LB_WORLD_OK); CHECK(remaining(call)==0); consume(call);
         call=invoke(world,argv[2],"identity",0); result(call,LB_WORLD_OK); consume(call); retire(world);
-        peer_call=invoke(peer,argv[2],"copy",0); result(peer_call,LB_WORLD_OK); consume(peer_call);
+        peer_call=invoke(peer,argv[2],operation,0); result(peer_call,LB_WORLD_OK); consume(peer_call);
     }
-    for(int i=3;i<argc;++i) {
+    for(int i=first_error;i<argc;++i) {
         peer_call=invoke(peer,argv[2],argv[i],0); result(peer_call,LB_WORLD_EXCEPTION); consume(peer_call);
-        peer_call=invoke(peer,argv[2],"copy",0); result(peer_call,LB_WORLD_OK); consume(peer_call);
+        peer_call=invoke(peer,argv[2],operation,0); result(peer_call,LB_WORLD_OK); consume(peer_call);
     }
     retire(peer); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); free(bytes);
     printf("CORE_BIF_WORK_OK module=%s units=%llu real_worker=true exact_threshold=true one_below=true private_reuse=true peer_survival=true reclaimed=true\n",argv[2],(unsigned long long)cost);

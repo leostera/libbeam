@@ -900,6 +900,84 @@ static void exit_signal_ownership(LbBytesView code)
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!m.live && !m.bytes);
     puts("CORE_EXIT_SIGNAL_OK transaction=true allocation_prefixes=true memory_limit=true exact_work=true sender_causal=true interrupted_receive=true sender_heap_released=true moving_reason=true reclaimed=true");
 }
+static void link_resources(LbBytesView code)
+{
+    Memory m={0}; LbEngine *engine=create(&m); LbWorld *world;
+    CHECK(lb_world_create(engine,&world)==LB_WORLD_OK && lb_world_load(world,code)==LB_WORLD_OK);
+    lb_engine_enter(engine);
+    Eterm module,function,input=NIL,pid,other_pid; LbCodeEntry *entry; LbProcess *p,*other;
+    CHECK(lb_atoms_find(world->space->atoms,"async_slice",11,&module)==LB_ATOM_OK);
+    CHECK(lb_atoms_find(world->space->atoms,"identity",8,&function)==LB_ATOM_OK);
+    CHECK(lb_code_entry_acquire(world->space,module,function,1,&entry)==LB_CODE_OK);
+    CHECK(lb_process_create(entry,&input,1,128,&p)==LB_PROCESS_READY && lb_process_create(entry,&input,1,64,&other)==LB_PROCESS_READY);
+    lb_code_entry_release(entry); CHECK(lb_process_identity(p,&pid)==LB_PROCESS_READY && lb_process_identity(other,&other_pid)==LB_PROCESS_READY);
+    LbAllocDomain *domain=&world->domain; size_t live=m.live,bytes=m.bytes; uint64_t cost=0;
+    for(unsigned mode=0;mode<4;++mode) {
+        LbWorkBudget *budget=lb_work_budget_create(world); CHECK(budget);
+        uint64_t credit=mode==0?1000000:mode==1?cost:mode==2?cost-1:0;
+        budget->limit=budget->remaining=credit; p->status=LB_PROCESS_READY; p->freason=LB_EXC_NULL; p->reg[0]=other_pid;
+        lb_work_domain_borrow(domain,budget); Eterm result=lb_bif_link_1(p,p->reg,NULL);
+        if(mode<2) {
+            CHECK(result==am_true && p->links && other->links);
+            if(!mode) { cost=credit-budget->remaining; CHECK(cost>1); } else CHECK(!budget->remaining);
+        } else CHECK(is_non_value(result) && p->status==LB_PROCESS_WORK_LIMIT && !p->links && !other->links && p->freason==LB_EXC_NULL);
+        lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+        p->status=LB_PROCESS_READY; CHECK(lb_bif_unlink_1(p,p->reg,NULL)==am_true);
+        lb_work_budget_release(budget); CHECK(!p->links && !other->links && m.live==live && m.bytes==bytes);
+    }
+    /* Live monitor halves have a deterministic preparation boundary too;
+     * scheduling/receive retries must not contaminate exact-credit witnesses. */
+    Eterm ref=lb_reference_write(p->htop,123); p->htop+=LB_REF_WORDS; uint64_t monitor_cost=0;
+    for(unsigned mode=0;mode<4;++mode) {
+        LbWorkBudget *budget=lb_work_budget_create(world); CHECK(budget);
+        uint64_t credit=mode==0?1000000:mode==1?monitor_cost:mode==2?monitor_cost-1:0;
+        budget->limit=budget->remaining=credit; lb_work_domain_borrow(domain,budget);
+        LbMonitor *monitor=NULL; LbProcessStatus status=lb_monitor_prepare(p,ref,&monitor);
+        if(mode<2) {
+            CHECK(status==LB_PROCESS_READY && monitor && !p->monitors_origin && !other->monitors_target);
+            if(!mode) { monitor_cost=credit-budget->remaining; CHECK(monitor_cost>1); } else CHECK(!budget->remaining);
+            lb_monitor_publish(monitor,other); CHECK(p->monitors_origin && other->monitors_target);
+        } else CHECK(status==LB_PROCESS_WORK_LIMIT && !p->monitors_origin && !other->monitors_target);
+        lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+        lb_monitor_demonitor(p,ref,0); lb_work_budget_release(budget);
+        CHECK(!p->monitors_origin && !other->monitors_target && m.live==live && m.bytes==bytes);
+    }
+    m.fail_host=m.host_calls+1;
+    CHECK(is_non_value(lb_bif_link_1(p,p->reg,NULL)) && p->status==LB_PROCESS_NO_MEMORY && !p->links && !other->links);
+    m.fail_host=0; lb_alloc_domain_begin_operation(domain); p->status=LB_PROCESS_READY;
+    size_t limit=domain->limit; domain->limit=domain->current;
+    CHECK(is_non_value(lb_bif_link_1(p,p->reg,NULL)) && p->status==LB_PROCESS_LIMIT && !p->links && !other->links);
+    domain->limit=limit; lb_alloc_domain_begin_operation(domain); p->status=LB_PROCESS_READY;
+    LbWorkBudget *a=lb_work_budget_create(world),*b=lb_work_budget_create(world); CHECK(a && b);
+    LbWorkProcessLease lease; CHECK(lb_work_process_prepare(a,&lease)==LB_ALLOC_OK); lb_work_process_publish(p,&lease);
+    CHECK(lb_work_process_prepare(b,&lease)==LB_ALLOC_OK); lb_work_process_publish(other,&lease);
+    lb_work_domain_borrow(domain,a); CHECK(lb_bif_link_1(p,p->reg,NULL)==am_true && a->escaped && b->escaped);
+    size_t calls=m.host_calls; m.fail_host=calls+1;
+    CHECK(lb_bif_link_1(p,p->reg,NULL)==am_true);
+    other->reg[0]=pid; CHECK(lb_bif_link_1(other,other->reg,NULL)==am_true && m.host_calls==calls); m.fail_host=0;
+    size_t count; CHECK(lb_link_count(p,p,&count)==LB_PROCESS_READY && count==1);
+    CHECK(lb_link_count(p,other,&count)==LB_PROCESS_READY && count==1);
+    Eterm selectors=CONS(p->htop,am_error_handler,NIL); p->htop+=2;
+    selectors=CONS(p->htop,am_links,selectors); p->htop+=2;
+    selectors=CONS(p->htop,am_links,selectors); p->htop+=2;
+    p->reg[0]=pid; p->reg[1]=selectors;
+    while(p->htop<p->stop-S_RESERVED) *p->htop++=NIL;
+    Eterm info=lb_bif_process_info_2(p,p->reg,NULL); CHECK(is_list(info) && p->collections); p->reg[2]=info;
+    p->reg[0]=other_pid; CHECK(lb_bif_unlink_1(p,p->reg,NULL)==am_true && !p->links && !other->links);
+    lb_work_domain_borrow(domain,NULL); lb_process_destroy(other);
+    CHECK(lb_process_collect_live(p,0,3)); info=p->reg[2];
+    for(unsigned i=0;i<2;++i) {
+        CHECK(is_list(info)); Eterm tuple=CAR(list_val(info)); CHECK(is_tuple(tuple) && tuple_val(tuple)[1]==am_links);
+        Eterm list=tuple_val(tuple)[2]; CHECK(is_list(list) && CAR(list_val(list))==other_pid && is_nil(CDR(list_val(list))));
+        info=CDR(list_val(info));
+    }
+    p->reg[0]=other_pid; p->freason=LB_EXC_NULL;
+    CHECK(is_non_value(lb_bif_link_1(p,p->reg,NULL)) && p->freason==LB_EXC_NOPROC && !p->links);
+    p->reg[0]=NIL; CHECK(is_non_value(lb_bif_unlink_1(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
+    lb_process_destroy(p); lb_work_budget_release(a); lb_work_budget_release(b); lb_engine_leave(engine);
+    lb_world_release(world); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!m.live && !m.bytes);
+    puts("CORE_LINK_RESOURCES_OK atomic_halves=true exact_work=true no_effect_on_denial=true memory_refusal=true symmetric_duplicates=true cross_family_escape=true moving_snapshots=true dead_identity=true reclaimed=true");
+}
 static void monitor_allocations(LbBytesView code)
 {
     Memory m={0}; LbEngine *engine=create(&m); LbWorld *peer; LbCall *call;
@@ -908,7 +986,7 @@ static void monitor_allocations(LbBytesView code)
     CHECK(lb_world_start(peer,text("monitor_slice"),text("copy"),text("peer"),&call)==LB_WORLD_OK);
     expect(call,LB_WORLD_OK);
     lb_engine_enter(engine); size_t live=m.live,bytes=m.bytes; lb_engine_leave(engine);
-    const char *functions[]={"copy","named","missing","dead","cancel","mfa","exit_payload"};
+    const char *functions[]={"copy","named","missing","dead","cancel","mfa","exit_payload","links","unlink_live","link_chain","link_outcomes"};
     size_t tested=0;
     for(size_t f=0;f<sizeof(functions)/sizeof(*functions);++f) for(size_t prefix=1;;++prefix) {
         CHECK(prefix<500); LbWorld *world; LbBytesView result;
@@ -937,7 +1015,7 @@ static void monitor_allocations(LbBytesView code)
 int main(int argc,char **argv)
 {
     construction();
-    if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); exit_signal_ownership(code); registry_queries(code); cancellation_states(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
+    if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); exit_signal_ownership(code); link_resources(code); registry_queries(code); cancellation_states(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
     if(argc>=3) { LbBytesView code=image(argv[2]); spawned_children(code); free((void *)code.data); }
     if(argc==4) { LbBytesView code=image(argv[3]); monitor_allocations(code); free((void *)code.data); }
     if(argc==5) {

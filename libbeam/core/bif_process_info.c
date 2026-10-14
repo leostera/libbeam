@@ -1,14 +1,14 @@
 /* SPDX-License-Identifier: Apache-2.0
  * Copyright Ericsson AB 1996-2026. All Rights Reserved.
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
- * Owned process_info_bif atom-valued settings. All other information selectors
+ * Owned process_info_bif settings and local links. All other information selectors
  * remain explicit profile refusals, not invented process statistics.
  */
 #include "process_internal.h"
 #include "pid_table.h"
 
 typedef enum { INFO_SINGLE, INFO_LIST } InfoShape;
-typedef struct { InfoShape shape; size_t count; } InfoRequest;
+typedef struct { InfoShape shape; size_t count,links; } InfoRequest;
 static int charge(LbProcess *p,Uint units)
 {
     if(!lb_work_domain_charge(p->entry_module->space->domain,units)) { p->status=LB_PROCESS_WORK_LIMIT; return 0; }
@@ -16,7 +16,7 @@ static int charge(LbProcess *p,Uint units)
 }
 static int item(LbProcess *p,Eterm selector)
 {
-    if(selector==am_error_handler || selector==am_trap_exit) return 1;
+    if(selector==am_error_handler || selector==am_trap_exit || selector==am_links) return 1;
     /* Other atom/tuple selector families are not admitted, including unknown
      * names. Do not mislabel an unimplemented valid selector as badarg. */
     if(is_atom(selector) || is_tuple(selector)) p->status=LB_PROCESS_REFUSED;
@@ -27,16 +27,16 @@ static int parse(LbProcess *p,Eterm selector,InfoRequest *out)
 {
     if(is_atom(selector) || is_tuple(selector)) {
         if(!item(p,selector)) return 0;
-        *out=(InfoRequest){INFO_SINGLE,1}; return 1;
+        *out=(InfoRequest){INFO_SINGLE,1,selector==am_links}; return 1;
     }
-    size_t count=0;
+    size_t count=0,links=0;
     while(is_list(selector)) {
         if(!charge(p,1) || !item(p,list_val(selector)[0])) return 0;
         if(count==SIZE_MAX) { p->status=LB_PROCESS_LIMIT; return 0; }
-        ++count; selector=list_val(selector)[1];
+        ++count; if(CAR(list_val(selector))==am_links) ++links; selector=list_val(selector)[1];
     }
     if(!is_nil(selector)) { p->freason=LB_EXC_BADARG; return 0; }
-    *out=(InfoRequest){INFO_LIST,count}; return 1;
+    *out=(InfoRequest){INFO_LIST,count,links}; return 1;
 }
 static Eterm allocation_failure(LbProcess *p)
 {
@@ -60,22 +60,29 @@ Eterm lb_bif_process_info_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
     Eterm handler=target->error_handler,trap_exit=(target->flags&F_TRAP_EXIT)?am_true:am_false;
     if(!is_atom(handler)) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
     if(!request.count) return NIL;
-    size_t words,need,collections=p->collections;
-    if(!lb_size_mul(request.count,request.shape==INFO_SINGLE?3:5,&words) ||
+    size_t words,need,link_count=0,link_items=0,link_words,collections=p->collections;
+    if(request.links) {
+        LbProcessStatus status=lb_link_count(p,target,&link_count);
+        if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    }
+    if(!lb_size_mul(request.links,link_count,&link_items) || !lb_size_mul(link_items,2,&link_words) ||
+       !lb_size_mul(request.count,request.shape==INFO_SINGLE?3:5,&words) || !lb_size_add(words,link_words,&words) ||
        !lb_size_add(words,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
-    if(!charge(p,request.count+lb_work_bulk_units(words))) return THE_NON_VALUE;
+    if(!charge(p,request.count+link_items+lb_work_bulk_units(words))) return THE_NON_VALUE;
     if(!lb_heap_reserve(p,need,MAX_REG)) return allocation_failure(p);
     if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
     if(request.shape==INFO_SINGLE) {
         Eterm selector=args[1];
-        Eterm result=TUPLE2(p->htop,selector,selector==am_error_handler?handler:trap_exit); p->htop+=3; return result;
+        Eterm value=selector==am_links?lb_link_list(target,&p->htop):selector==am_error_handler?handler:trap_exit;
+        Eterm result=TUPLE2(p->htop,selector,value); p->htop+=3; return result;
     }
     /* Reacquire the selector list after reserve/GC, preserving requested order
      * and duplicates. Every tail is initialized before the list is published. */
     Eterm selectors=args[1],result=NIL; Eterm *hp=p->htop,*tail=&result;
     for(size_t i=0;i<request.count;++i) {
         Eterm selector=CAR(list_val(selectors)); selectors=CDR(list_val(selectors));
-        Eterm tuple=TUPLE2(hp,selector,selector==am_error_handler?handler:trap_exit); hp+=3;
+        Eterm value=selector==am_links?lb_link_list(target,&hp):selector==am_error_handler?handler:trap_exit;
+        Eterm tuple=TUPLE2(hp,selector,value); hp+=3;
         *tail=CONS(hp,tuple,NIL); tail=&hp[1]; hp+=2;
     }
     p->htop=hp; return result;

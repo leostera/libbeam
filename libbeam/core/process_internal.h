@@ -15,6 +15,7 @@
 #include "registry.h"
 #include "receive_marker.h"
 #include "monitor.h"
+#include "link.h"
 #include "work_budget.h"
 #include "process_dict.h"
 #include "capability.h"
@@ -29,6 +30,7 @@ struct LbProcess {
     LbMessage *work_candidate; /* borrowed queue node, never a moving term */
     LbPidEntry identity; /* stable allocation, never a moving-heap pointer */
     LbMonitorNode *monitors_origin,*monitors_target;
+    LbLinkHalf *links; /* symmetric metadata, detached before either process dies */
     Uint bitdata; /* native matching accumulator survives host-budget safepoints */
     LbMessage *exit_signal; /* owned first terminal signal, including sender-causal credit */
     LbRegisteredProcess *registered; /* borrowed association owned by code space */

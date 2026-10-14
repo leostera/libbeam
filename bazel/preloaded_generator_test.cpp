@@ -23,6 +23,7 @@ const std::string source =
     "-module(erlang).\n"
     "spawn(F) when erlang:is_function(F) ->\n    retained(F);\nspawn(F) -> badarg_with_info([F]).\n"
     "unselected() -> forbidden.\n"
+    "spawn_link(F) when erlang:is_function(F, 0) ->\n    linked_body(F);\nspawn_link(F) -> badarg_with_info([F]).\n"
     "spawn_monitor(F) when erlang:is_function(F, 0) ->\n    monitor_body(F);\nspawn_monitor(F) -> badarg_with_info([F]).\n"
     "badarg_with_info(Args) ->\n    erlang:error(badarg, Args, [{error_info, #{module => erl_erts_errors}}]).\n";
 TEST(PreloadedGenerator, RetainsAllClausesAndHelperBodyWithoutUnselectedCode) {
@@ -30,6 +31,7 @@ TEST(PreloadedGenerator, RetainsAllClausesAndHelperBodyWithoutUnselectedCode) {
     EXPECT_NE(result.find("spawn(F) when erlang:is_function(F) ->\n    retained(F);\nspawn(F) -> badarg_with_info([F]).\n"), std::string::npos);
     EXPECT_NE(result.find("spawn_monitor(F) when erlang:is_function(F, 0) ->\n    monitor_body(F);\nspawn_monitor(F) -> badarg_with_info([F]).\n"), std::string::npos);
     EXPECT_NE(result.find("erlang:error(badarg, Args, [{error_info, #{module => erl_erts_errors}}]).\n"), std::string::npos);
+    EXPECT_NE(result.find("spawn_link(F) when erlang:is_function(F, 0) ->\n    linked_body(F);\nspawn_link(F) -> badarg_with_info([F]).\n"), std::string::npos);
     EXPECT_EQ(result.find("unselected"), std::string::npos);
     EXPECT_NE(result.find("-compile(no_auto_import)."), std::string::npos);
 }

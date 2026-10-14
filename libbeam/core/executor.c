@@ -82,6 +82,7 @@ static TaskFailure finish_task(LbTask *task,LbTaskStatus status)
         status==LB_TASK_WORK_LIMIT?WORK_FAILURE:status==LB_TASK_NO_MEMORY?ALLOCATION_FAILURE:NO_FAILURE;
     if(status!=LB_TASK_CANCELLED && status!=LB_TASK_MEMORY_LIMIT &&
        status!=LB_TASK_WORK_LIMIT && status!=LB_TASK_CAPABILITY_DENIED) {
+        lb_link_exit(task->process,1);
         lb_monitor_exit(task->process,1);
         if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_LIMIT) { status=LB_TASK_MEMORY_LIMIT; limited=MEMORY_FAILURE; }
         if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_WORK_LIMIT) { status=LB_TASK_WORK_LIMIT; limited=WORK_FAILURE; }
@@ -289,7 +290,7 @@ LbEngineStatus lb_task_create_call_locked(LbEngine *engine,const LbCodeEntry *en
 typedef enum { SPAWN_CHILD, SPAWN_FROM_RETAINED_FUN } SpawnOrigin;
 typedef enum { SPAWN_FUN_ENTRY, SPAWN_MFA_ENTRY } SpawnEntryKind;
 typedef struct { SpawnEntryKind kind; union { Eterm fun; LbSpawnMfa mfa; } value; } SpawnEntry;
-static LbProcessStatus spawn_locked(LbWorld *world,LbProcess *parent,const SpawnEntry *entry,LbMonitor *monitor,SpawnOrigin origin,Eterm *out)
+static LbProcessStatus spawn_locked(LbWorld *world,LbProcess *parent,const SpawnEntry *entry,LbMonitor *monitor,LbLink *link,SpawnOrigin origin,Eterm *out)
 {
     if(!out) return LB_PROCESS_INVALID; *out=THE_NON_VALUE;
     if(!world || !parent || world->phase!=LB_WORLD_RUNNING ||
@@ -317,6 +318,7 @@ static LbProcessStatus spawn_locked(LbWorld *world,LbProcess *parent,const Spawn
     lb_work_process_publish(task->process,&lease);
     *out=task->process->identity.id;
     task->process->world=world; task->process->group_leader=leader;
+    if(link) lb_link_publish(link,task->process);
     if(monitor) lb_monitor_publish(monitor,task->process);
     task->next=engine->tasks; engine->tasks=task;
     checked(pthread_cond_signal(&engine->wake)); return LB_PROCESS_READY;
@@ -324,12 +326,22 @@ static LbProcessStatus spawn_locked(LbWorld *world,LbProcess *parent,const Spawn
 LbProcessStatus lb_task_spawn_fun_monitored_locked(LbWorld *world,LbProcess *parent,Eterm fun,LbMonitor *monitor,Eterm *out)
 {
     SpawnEntry entry={.kind=SPAWN_FUN_ENTRY,.value.fun=fun};
-    return spawn_locked(world,parent,&entry,monitor,SPAWN_CHILD,out);
+    return spawn_locked(world,parent,&entry,monitor,NULL,SPAWN_CHILD,out);
 }
 LbProcessStatus lb_task_spawn_mfa_monitored_locked(LbWorld *world,LbProcess *parent,const LbSpawnMfa *mfa,LbMonitor *monitor,Eterm *out)
 {
     SpawnEntry entry={.kind=SPAWN_MFA_ENTRY,.value.mfa=*mfa};
-    return spawn_locked(world,parent,&entry,monitor,SPAWN_CHILD,out);
+    return spawn_locked(world,parent,&entry,monitor,NULL,SPAWN_CHILD,out);
+}
+LbProcessStatus lb_task_spawn_fun_linked_locked(LbWorld *world,LbProcess *parent,Eterm fun,LbLink *link,Eterm *out)
+{
+    SpawnEntry entry={.kind=SPAWN_FUN_ENTRY,.value.fun=fun};
+    return spawn_locked(world,parent,&entry,NULL,link,SPAWN_CHILD,out);
+}
+LbProcessStatus lb_task_spawn_mfa_linked_locked(LbWorld *world,LbProcess *parent,const LbSpawnMfa *mfa,LbLink *link,Eterm *out)
+{
+    SpawnEntry entry={.kind=SPAWN_MFA_ENTRY,.value.mfa=*mfa};
+    return spawn_locked(world,parent,&entry,NULL,link,SPAWN_CHILD,out);
 }
 LbProcessStatus lb_task_spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm fun,Eterm *out)
 { return lb_task_spawn_fun_monitored_locked(world,parent,fun,NULL,out); }
@@ -341,7 +353,7 @@ LbProcessStatus lb_task_spawn_result_locked(LbWorld *world,LbTask *source,Eterm 
     /* This private component seam launches a fresh root from retained closure
      * storage, not an Erlang child of an already terminated process. */
     SpawnEntry entry={.kind=SPAWN_FUN_ENTRY,.value.fun=lb_process_result(source->process)};
-    return spawn_locked(world,source->process,&entry,NULL,SPAWN_FROM_RETAINED_FUN,out);
+    return spawn_locked(world,source->process,&entry,NULL,NULL,SPAWN_FROM_RETAINED_FUN,out);
 }
 void lb_task_cancel_world_children_locked(LbWorld *world)
 {

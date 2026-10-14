@@ -240,6 +240,7 @@ void lb_process_destroy(LbProcess *p)
     if(!p) return;
     if(p->running) abort(); /* internal serialized API misuse, not a guest path */
     module=p->entry_module; d=module->space->domain;
+    lb_link_exit(p,0);
     lb_monitor_exit(p,0);
     lb_registry_remove(p);
     if(p->identity.owner && lb_pid_remove(p->identity.owner,&p->identity)!=LB_PID_OK) abort();
@@ -521,6 +522,9 @@ stop:
     LbAllocStatus failure=lb_alloc_domain_failure(c_p->entry_module->space->domain);
     if(failure==LB_ALLOC_WORK_LIMIT) c_p->status=LB_PROCESS_WORK_LIMIT;
     if(c_p->status!=LB_PROCESS_YIELDED) {
+        lb_link_exit(c_p,c_p->status!=LB_PROCESS_WORK_LIMIT &&
+                     c_p->status!=LB_PROCESS_CAPABILITY_DENIED && failure!=LB_ALLOC_LIMIT);
+        failure=lb_alloc_domain_failure(c_p->entry_module->space->domain);
         lb_monitor_exit(c_p,c_p->status!=LB_PROCESS_WORK_LIMIT &&
                         c_p->status!=LB_PROCESS_CAPABILITY_DENIED && failure!=LB_ALLOC_LIMIT);
         lb_registry_remove(c_p);

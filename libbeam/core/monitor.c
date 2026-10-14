@@ -44,8 +44,11 @@ LbProcessStatus lb_monitor_prepare(LbProcess *origin,Eterm ref,LbMonitor **out)
     *out=NULL;
     if(!lb_reference(ref)) return LB_PROCESS_INVALID;
     void *memory;
-    if(lb_alloc_domain_allocate(origin->entry_module->space->domain,sizeof(LbMonitor),&memory)!=LB_ALLOC_OK)
-        return LB_PROCESS_NO_MEMORY;
+    LbAllocDomain *domain=origin->entry_module->space->domain;
+    if(lb_alloc_domain_allocate(domain,sizeof(LbMonitor),&memory)!=LB_ALLOC_OK) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        return cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:cause==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+    }
     LbMonitor *m=memory; memset(m,0,sizeof(*m));
     m->origin.offset=offsetof(LbMonitor,origin); m->u.target.offset=offsetof(LbMonitor,u.target);
     m->origin.key_offset=offsetof(LbMonitor,ref)-offsetof(LbMonitor,origin);

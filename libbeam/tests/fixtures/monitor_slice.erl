@@ -4,7 +4,8 @@
 -export([identity/1, copy/1, named/1, local_name/1, missing/1, dead/1, cancel/1,
          arm/1, drain/1, self_monitor/1, bad_kind/1, bad_target/1,
          bad_name/1, bad_node/1, bad_reference/1,
-         mfa/1, mfa_peer/1, mfa_child/3, mfa_zero/0, exit_payload/1, bad_module/1, bad_function/1, bad_args/1]).
+         mfa/1, mfa_peer/1, mfa_child/3, mfa_zero/0, exit_payload/1,
+         links/1, unlink_live/1, link_chain/1, link_outcomes/1, linked_arm/1, linked_drain/1, dead_link/1, bad_link/1, bad_unlink/1, bad_module/1, bad_function/1, bad_args/1]).
 identity(B) -> B.
 self_monitor(B) ->
     Ref = monitor(process,self()),
@@ -29,6 +30,97 @@ mfa(B) ->
     receive {'DOWN',Ref,process,Pid,normal} -> ok end,
     {Empty,EmptyRef} = spawn_monitor(?MODULE,mfa_zero,[]),
     receive {'DOWN',EmptyRef,process,Empty,normal} -> B end.
+links(B) ->
+    false = process_flag(trap_exit,true), Parent = self(),
+    true = link(Parent), {links,[]} = process_info(Parent,links),
+    Pid = spawn(fun() ->
+        receive inspect -> ok end,
+        true = link(Parent), {links,[Parent]} = process_info(self(),links),
+        Parent ! inspected,
+        receive {finish,Reason} -> exit(Reason) end
+    end),
+    true = link(Pid), true = link(Pid),
+    Snapshot = process_info(self(),links), {links,[Pid]} = Snapshot,
+    [{links,[Pid]},{trap_exit,true},{links,[Pid]}] = process_info(self(),[links,trap_exit,links]),
+    true = erlang:garbage_collect(),
+    Pid ! inspect, receive inspected -> ok end,
+    Ref = monitor(process,Pid), Reason = {linked,B,make_ref()}, Pid ! {finish,Reason},
+    receive {'EXIT',Pid,Reason} -> ok end,
+    receive {'DOWN',Ref,process,Pid,Reason} -> ok end,
+    {links,[]} = process_info(self(),links), {links,[Pid]} = Snapshot,
+    true = link(Pid), receive {'EXIT',Pid,noproc} -> ok end,
+    true = unlink(Pid), true = process_flag(trap_exit,false), B.
+unlink_live(B) ->
+    false = process_flag(trap_exit,true),
+    Pid = spawn_link(fun() -> receive stop -> exit({unlinked,B}) end end),
+    Ref = monitor(process,Pid), true = unlink(Pid), true = unlink(Pid),
+    {links,[]} = process_info(self(),links), {links,[]} = process_info(Pid,links),
+    Pid ! stop, receive {'DOWN',Ref,process,Pid,{unlinked,B}} -> ok end,
+    true = process_flag(trap_exit,false),
+    receive {'EXIT',Pid,_} -> <<"unexpected unlinked EXIT">> after 0 -> B end.
+link_chain(B) ->
+    Parent = self(),
+    {Top,TopRef} = spawn_monitor(fun() ->
+        Ancestor = self(),
+        Middle = spawn_link(fun() ->
+            Leaf = spawn_link(fun() ->
+                true = link(Ancestor),
+                Parent ! {leaf,self()},
+                receive go -> exit({cascade,B}) end
+            end),
+            Parent ! {middle,self(),Leaf},
+            receive never -> ok end
+        end),
+        Parent ! {top,self(),Middle},
+        receive never -> ok end
+    end),
+    receive {top,Top,Middle} -> ok end,
+    receive {middle,Middle,Leaf} -> ok end,
+    receive {leaf,Leaf} -> ok end,
+    MidRef = monitor(process,Middle), LeafRef = monitor(process,Leaf), Leaf ! go,
+    receive {'DOWN',TopRef,process,Top,{cascade,B}} -> ok end,
+    receive {'DOWN',MidRef,process,Middle,{cascade,B}} -> ok end,
+    receive {'DOWN',LeafRef,process,Leaf,{cascade,B}} -> B end.
+link_outcomes(B) ->
+    {Normal,NRef} = spawn_monitor(fun() -> receive stop -> ok end end),
+    true = link(Normal), Normal ! stop,
+    receive {'DOWN',NRef,process,Normal,normal} -> ok end,
+    false = process_flag(trap_exit,true), Parent = self(),
+    Killed = spawn_link(fun() ->
+        false = process_flag(trap_exit,true), Parent ! armed,
+        receive never -> ok end
+    end),
+    receive armed -> ok end,
+    KRef = monitor(process,Killed), true = exit(Killed,kill),
+    receive {'EXIT',Killed,killed} -> ok end,
+    receive {'DOWN',KRef,process,Killed,killed} -> ok end,
+    {Failed,ERef} = spawn_monitor(fun() -> receive stop -> error({linked_error,B}) end end),
+    true = link(Failed), Failed ! stop,
+    receive {'EXIT',Failed,{{linked_error,B},Trace}} when is_list(Trace) -> ok end,
+    true = Trace =/= [],
+    receive {'DOWN',ERef,process,Failed,{{linked_error,B},Trace}} -> ok end,
+    {links,[]} = process_info(self(),links), true = process_flag(trap_exit,false), B.
+linked_arm(B) ->
+    Parent = self(),
+    spawn(fun() ->
+        true = register(link_target,self()), Parent ! linked_ready,
+        receive {probe,From} -> From ! {saved,B} end,
+        receive stop -> exit({linked_saved,B}) end
+    end),
+    receive linked_ready -> B end.
+linked_drain(B) ->
+    false = process_flag(trap_exit,true), Pid = whereis(link_target),
+    true = link(Pid), Ref = monitor(process,Pid), Pid ! {probe,self()},
+    receive {saved,B} -> ok end,
+    Pid ! stop, receive {'EXIT',Pid,{linked_saved,B}} -> ok end,
+    receive {'DOWN',Ref,process,Pid,{linked_saved,B}} -> ok end,
+    {links,[]} = process_info(self(),links),
+    true = process_flag(trap_exit,false), B.
+dead_link(_) ->
+    {Pid,Ref} = spawn_monitor(fun() -> ok end),
+    receive {'DOWN',Ref,process,Pid,normal} -> link(Pid) end.
+bad_link(B) -> link(B).
+bad_unlink(B) -> unlink(B).
 exit_payload(B) ->
     Reason = {payload,repeat(20,{B,fun() -> B end},[]),make_ref()},
     {Pid,Ref} = spawn_monitor(fun() -> receive never -> ok end end),
