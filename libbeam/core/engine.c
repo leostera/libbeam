@@ -47,6 +47,7 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_SIZE+19u,{am_erlang,am_garbage_collect,0,lb_bif_garbage_collect_0,BIF_KIND_HEAVY}},
         {BIF_SIZE+20u,{am_erlang,am_garbage_collect,1,lb_bif_garbage_collect_1,BIF_KIND_HEAVY}},
         {BIF_node_0,{am_erlang,am_node,0,lb_bif_node_0,BIF_KIND_HEAVY}},
+        {BIF_node_1,{am_erlang,am_node,1,lb_bif_node_1,BIF_KIND_GUARD}},
         {BIF_nodes_0,{am_erlang,am_nodes,0,lb_bif_nodes_0,BIF_KIND_HEAVY}},
         {BIF_make_ref_0,{am_erlang,am_make_ref,0,lb_bif_make_ref_0,BIF_KIND_HEAVY}},
         {BIF_is_function_1,{am_erlang,am_is_function,1,lb_bif_is_function_1,BIF_KIND_GUARD}},

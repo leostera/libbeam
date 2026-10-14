@@ -5,6 +5,7 @@
  * fallible preallocation and explicit process context replace ERTS factories.
  */
 #include "process_internal.h"
+#include "reference.h"
 
 /* dist.c:node_0 and instrs.tab:node read the current local node's name.
  * Each owned namespace starts unnamed and cannot enable distribution. */
@@ -15,6 +16,22 @@ Eterm lb_bif_node_0(LbProcess *p,Eterm *args,const BeamInstr *pc)
         p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
     }
     return p->entry_module->space->node_name;
+}
+/* dist.c:node_1 queries identity, not liveness. No PID lookup or identity
+ * allocation is needed, including for retired local processes. External node
+ * containers remain refused until their owned representation is supported. */
+Eterm lb_bif_node_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    Eterm name=lb_bif_node_0(p,NULL,pc),term=args[0];
+    if(is_non_value(name)) return name;
+    if(is_internal_pid(term) || (term&_TAG_IMMED1_MASK)==_TAG_IMMED1_PORT || lb_reference(term)) return name;
+    if(is_boxed(term)) {
+        Eterm tag=*boxed_val(term)&_TAG_HEADER_MASK;
+        if(tag==EXTERNAL_PID_SUBTAG || tag==EXTERNAL_PORT_SUBTAG || tag==EXTERNAL_REF_SUBTAG) {
+            p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
+        }
+    }
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
 }
 /* dist.c:nodes_0 selects visible connected peers. Owned namespaces have no
  * distribution connections, and cannot create them through a guest binding. */

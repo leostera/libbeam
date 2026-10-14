@@ -5905,7 +5905,7 @@ cc_test(
   name = "core_node_work",
   size = "medium",
   timeout = "moderate",
-  args = ["$(rootpath :node_slice_fixture)", "node_slice"],
+  args = ["$(rootpath :node_slice_fixture)", "node_slice", "bad_container"],
   data = ["node_slice_fixture"],
   deps = ["core_bif_work_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),

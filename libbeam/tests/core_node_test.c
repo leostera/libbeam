@@ -5,6 +5,7 @@
 #include "world_internal.h"
 #include "work_budget_internal.h"
 #include "alloc_internal.h"
+#include "reference.h"
 #include <stdio.h>
 #include <stdlib.h>
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while(0)
@@ -51,16 +52,30 @@ static void check(LbWorld *w,LbCodeModule *m,const char *name,Eterm expected)
 }
 static void primitive(LbWorld *w,LbCodeModule *m)
 {
+    /* Constructing the first real PID lazily owns a namespace table. That
+     * retained table is input setup, not an allocation by node/1. */
+    LbProcess *seed=create(w,m,"query",am_node); Eterm id;
+    CHECK(lb_process_identity(seed,&id)==LB_PROCESS_READY); lb_process_destroy(seed);
     LbAllocDomain *d=w->space->domain; size_t baseline=d->current,blocks=d->block_count;
-    for(unsigned credit=0;credit<3;++credit) for(unsigned mode=0;mode<2;++mode) for(unsigned peers=0;peers<2;++peers) {
+    for(unsigned credit=0;credit<3;++credit) for(unsigned mode=0;mode<2;++mode) for(unsigned peers=0;peers<7;++peers) {
         LbProcess *p=create(w,m,"query",am_node); LbWorkBudget *budget=lb_work_budget_create(w); CHECK(budget);
+        if(peers==2) CHECK(lb_process_identity(p,&p->reg[0])==LB_PROCESS_READY);
+        if(peers==3) { p->reg[0]=lb_reference_write(p->htop,123); p->htop+=LB_REF_WORDS; }
+        if(peers==4) p->reg[0]=am_true;
+        /* A representation-only internal port: no host port is opened. */
+        if(peers==5) p->reg[0]=(123u<<_TAG_IMMED1_SIZE)|_TAG_IMMED1_PORT;
+        if(peers==6) {
+            LbProcess *dead=create(w,m,"query",am_node);
+            CHECK(lb_process_identity(dead,&p->reg[0])==LB_PROCESS_READY); lb_process_destroy(dead);
+        }
         p->heap_reserved=7; while(p->htop<p->stop-S_RESERVED-p->heap_reserved) *p->htop++=NIL;
         Eterm *top=p->htop; Eterm input=p->reg[0]; size_t live=d->current,atoms=lb_atoms_count(w->space->atoms),limit=d->limit;
         LbSystemAllocator system=d->system; if(mode) d->system.allocate=deny; else d->limit=live;
         budget->limit=budget->remaining=credit; lb_work_domain_borrow(d,budget);
-        Eterm result=peers?lb_bif_nodes_0(p,NULL,NULL):lb_bif_node_0(p,NULL,NULL);
-        if(!credit) CHECK(is_non_value(result) && p->status==LB_PROCESS_WORK_LIMIT);
-        else CHECK(result==(peers?NIL:am_Noname) && budget->remaining==credit-1);
+        Eterm result=peers>1?lb_bif_node_1(p,p->reg,NULL):peers?lb_bif_nodes_0(p,NULL,NULL):lb_bif_node_0(p,NULL,NULL);
+        if(!credit) CHECK(is_non_value(result) && p->status==LB_PROCESS_WORK_LIMIT && p->freason==LB_EXC_NULL);
+        else if(peers==4) CHECK(is_non_value(result) && p->freason==LB_EXC_BADARG && budget->remaining==credit-1);
+        else CHECK(result==(peers==1?NIL:am_Noname) && budget->remaining==credit-1);
         CHECK(p->htop==top && p->reg[0]==input && p->heap_reserved==7 && !p->collections && !p->fun_leases);
         CHECK(d->current==live && lb_atoms_count(w->space->atoms)==atoms);
         d->system=system; d->limit=limit; lb_work_domain_borrow(d,NULL); lb_work_domain_clear_failure(d); lb_alloc_domain_begin_operation(d);
@@ -74,7 +89,7 @@ int main(int argc,char **argv)
     CHECK(argc==3); LbEngine *engine; LbWorld *w,*peer;
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_world_create(engine,&w)==LB_WORLD_OK && lb_world_create(engine,&peer)==LB_WORLD_OK);
     lb_engine_enter(engine); LbCodeModule *host=load(w,argv[1]),*locations=load(w,argv[2]),*other=load(peer,argv[1]);
-    primitive(w,host); check(w,host,"query",am_Noname); check(w,host,"kept",am_Noname); check(w,host,"dynamic",am_Noname);
+    primitive(w,host); check(w,host,"guard_node",am_false); check(w,host,"container",am_Noname); check(w,host,"query",am_Noname); check(w,host,"kept",am_Noname); check(w,host,"dynamic",am_Noname);
     check(w,locations,"query",am_Noname); check(w,locations,"query_y",am_Noname);
     check(w,host,"peers",NIL); check(w,host,"kept_peers",NIL); check(w,host,"dynamic",NIL);
     lb_engine_leave(engine); close_world(w);
