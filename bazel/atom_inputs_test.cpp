@@ -55,8 +55,10 @@ TEST(AtomInputs, RealGeneratedDataCompilesWithAppendOnlyOwnedIdentities) {
     constexpr auto count = sizeof(lb_predefined_names) / sizeof(lb_predefined_names[0]);
     ASSERT_GT(count, 3u);
     EXPECT_EQ(lb_predefined_names[count - 1], nullptr);
-    EXPECT_EQ(am_set_cookie, count - 3);
-    EXPECT_EQ(am_load_module, count - 2);
+    EXPECT_EQ(am_set_cookie, count - 4);
+    EXPECT_EQ(am_load_module, count - 3);
+    EXPECT_EQ(am_spawn_monitor, count - 2);
+    EXPECT_STREQ(lb_predefined_names[am_spawn_monitor], "spawn_monitor");
     EXPECT_STREQ(lb_predefined_names[am_set_cookie], "set_cookie");
     EXPECT_STREQ(lb_predefined_names[am_load_module], "load_module");
     EXPECT_STREQ(lb_predefined_names[am_true], "true");

@@ -3,7 +3,8 @@
 -module(monitor_slice).
 -export([identity/1, copy/1, named/1, local_name/1, missing/1, dead/1, cancel/1,
          arm/1, drain/1, self_monitor/1, bad_kind/1, bad_target/1,
-         bad_name/1, bad_node/1, bad_reference/1]).
+         bad_name/1, bad_node/1, bad_reference/1,
+         mfa/1, mfa_peer/1, mfa_child/3, mfa_zero/0, bad_module/1, bad_function/1, bad_args/1]).
 identity(B) -> B.
 self_monitor(B) ->
     Ref = monitor(process,self()),
@@ -20,6 +21,28 @@ copy(B) ->
     Ref = monitor(process,Pid),
     Pid ! stop,
     receive {'DOWN',Ref,process,Pid,normal} -> B end.
+mfa(B) ->
+    Leader = group_leader(),
+    Token = make_ref(),
+    {Pid,Ref} = spawn_monitor(?MODULE,mfa_child,[self(),{B,Token,fun() -> B end,fun erlang:abs/1},Leader]),
+    receive {Pid,Token,B} -> ok end,
+    receive {'DOWN',Ref,process,Pid,normal} -> ok end,
+    {Empty,EmptyRef} = spawn_monitor(?MODULE,mfa_zero,[]),
+    receive {'DOWN',EmptyRef,process,Empty,normal} -> B end.
+mfa_peer(B) ->
+    {Pid,Ref} = spawn_monitor(group_leader_slice,identity,[B]),
+    receive {'DOWN',Ref,process,Pid,normal} -> B end.
+mfa_zero() -> ok.
+mfa_child(Parent,{B,Token,Closure,External},Leader) ->
+    Leader = group_leader(),
+    false = process_flag(trap_exit,true),
+    true = erlang:garbage_collect(),
+    B = Closure(),
+    1 = External(-1),
+    Parent ! {self(),Token,B}.
+bad_module(B) -> spawn_monitor(B,mfa_child,[]).
+bad_function(B) -> spawn_monitor(?MODULE,B,[]).
+bad_args(B) -> spawn_monitor(?MODULE,mfa_child,[self()|B]).
 arm(B) ->
     Parent = self(),
     spawn(fun() ->

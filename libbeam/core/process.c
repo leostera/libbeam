@@ -142,6 +142,66 @@ LbProcessStatus lb_process_create_fun(LbProcess *parent,Eterm value,size_t words
 failure:
     lb_process_destroy(child); return status;
 }
+static LbProcessStatus spawn_allocation_failure(LbAllocDomain *domain)
+{
+    switch(lb_alloc_domain_failure(domain)) {
+    case LB_ALLOC_WORK_LIMIT:return LB_PROCESS_WORK_LIMIT;
+    case LB_ALLOC_LIMIT:return LB_PROCESS_LIMIT;
+    default:return LB_PROCESS_NO_MEMORY;
+    }
+}
+LbProcessStatus lb_process_create_mfa(LbProcess *parent,const LbSpawnMfa *start,size_t words,LbProcess **out)
+{
+    if(!out) return LB_PROCESS_INVALID; *out=NULL;
+    if(!parent || !start || !is_atom(start->module) || !is_atom(start->function) || start->arity>MAX_ARG)
+        return LB_PROCESS_INVALID;
+    LbCodeSpace *space=parent->entry_module->space; Export *entry;
+    for(entry=space->exports;entry;entry=entry->next) {
+        if(!lb_work_domain_charge(space->domain,1)) return LB_PROCESS_WORK_LIMIT;
+        ++parent->last_native_cost;
+        if(entry->info.mfa.module==start->module && entry->info.mfa.function==start->function && entry->info.mfa.arity==start->arity) break;
+    }
+    /* Do not publish a pretend child for absent code or a native-only export.
+     * Those startup paths need their own real exception/dispatch consumers. */
+    if(!entry || !entry->owner || !entry->owner->published) return LB_PROCESS_REFUSED;
+    size_t needed=0; Eterm cursor=start->arguments;
+    for(unsigned i=0;i<start->arity;++i) {
+        size_t size;
+        if(!is_list(cursor)) return LB_PROCESS_INVALID;
+        if(!lb_flat_size(space->domain,CAR(list_val(cursor)),&size)) return spawn_allocation_failure(space->domain);
+        if(!lb_size_add(needed,size,&needed)) return LB_PROCESS_LIMIT;
+        cursor=CDR(list_val(cursor));
+    }
+    if(!is_nil(cursor)) return LB_PROCESS_INVALID;
+    if(!lb_size_add(needed,S_RESERVED+1,&needed) || needed>64u*1024u*1024u/sizeof(Eterm) ||
+       words>64u*1024u*1024u/sizeof(Eterm)) return LB_PROCESS_LIMIT;
+    if(words<needed) words=needed;
+    LbProcess *child; LbProcessStatus status=create_owned(entry->owner,entry->dispatch.addresses[0],&entry->info.mfa,words,&child);
+    if(status!=LB_PROCESS_READY) return status==LB_PROCESS_NO_MEMORY?spawn_allocation_failure(space->domain):status;
+    cursor=start->arguments;
+    for(unsigned i=0;i<start->arity;++i) {
+        LbAllocStatus held=lb_fun_retain_term(child,CAR(list_val(cursor)),&parent->last_native_cost);
+        if(held!=LB_ALLOC_OK) {
+            status=held==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:held==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:
+                held==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:LB_PROCESS_REFUSED;
+            goto failure;
+        }
+        cursor=CDR(list_val(cursor));
+    }
+    if(!lb_work_domain_charge(space->domain,needed+lb_work_bulk_units(needed))) { status=LB_PROCESS_WORK_LIMIT; goto failure; }
+    cursor=start->arguments;
+    for(unsigned i=0;i<start->arity;++i) {
+        child->reg[i]=lb_copy_flat(CAR(list_val(cursor)),&child->htop,&child->off_heap);
+        if(is_non_value(child->reg[i])) { status=LB_PROCESS_NO_MEMORY; goto failure; }
+        cursor=CDR(list_val(cursor));
+    }
+    Eterm pid; status=lb_process_identity(child,&pid);
+    if(status!=LB_PROCESS_READY) goto failure;
+    *out=child; return LB_PROCESS_READY;
+failure:
+    lb_process_destroy(child);
+    return status==LB_PROCESS_NO_MEMORY?spawn_allocation_failure(space->domain):status;
+}
 LbProcessStatus lb_process_create(const LbCodeEntry *entry,const Eterm *args,size_t arity,size_t words,LbProcess **out)
 {
     if(!out) return LB_PROCESS_INVALID; *out=NULL;

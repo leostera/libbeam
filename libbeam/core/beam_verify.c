@@ -175,6 +175,24 @@ static int same_register(BeamOpArg a,BeamOpArg b)
     return (a.type==TAG_x || a.type==TAG_y) && a.type==b.type &&
         ((Uint)a.val&REG_MASK)==((Uint)b.val&REG_MASK);
 }
+/* Retain a runtime tuple test's proof for copies made immediately before it.
+ * This bounded straight-line suffix admits only copies of the same source,
+ * line markers and tests of that source. Labels, clobbers, calls and all other
+ * operations stop the proof, so no alternate predecessor can bypass a copy. */
+static void refine_tuple_copies(Flow *f,const Node *nodes,size_t index,BeamOpArg source,uint32_t fact)
+{
+    refine(f,source,fact);
+    for(unsigned scanned=0;index && scanned<32;++scanned) {
+        const BeamOp *prior=nodes[--index].op;
+        if(prior->op==genop_line_1) continue;
+        if(prior->op==genop_move_2 && same_register(prior->a[0],source)) {
+            refine(f,prior->a[1],fact); continue;
+        }
+        if((prior->op==genop_is_tuple_2 || prior->op==genop_test_arity_3 || prior->op==genop_is_tagged_tuple_4) &&
+           same_register(prior->a[1],source)) continue;
+        break;
+    }
+}
 static LbCodeStatus binary_flow(LoaderState *st,Flow *f,Flow *failed,BeamOp *op)
 {
     BeamOpArg *a=op->a; uint32_t result_shape=BITSTRING_SHAPE; int consuming;
@@ -220,7 +238,8 @@ static uint32_t native_return_shape(LoaderState *st,size_t import)
     const BifEntry *native=st->bif_imports[import];
     if(native==&st->space->engine->bifs[BIF_list_to_tuple_1] ||
        native==&st->space->engine->bifs[BIF_make_tuple_2]) return TUPLE_SHAPE;
-    if(native==&st->space->engine->bifs[BIF_spawn_opt_4]) return TUPLE_SHAPE|2;
+    if(native==&st->space->engine->bifs[BIF_spawn_opt_4] ||
+       native==&st->space->engine->bifs[BIF_SIZE+22u]) return TUPLE_SHAPE|2;
     return 0;
 }
 /* A bounded structural proof, not a compiler annotation or speculative recursive
@@ -662,12 +681,12 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             else if(op->op==genop_is_nonempty_list_2) refine(&f,a[1],LIST_SHAPE);
             else if(op->op==genop_is_map_2) refine(&f,a[1],MAP_SHAPE);
             else if(op->op==genop_is_tuple_2) {
-                s=shape(st,&f,a[1]); refine(&f,a[1],(s&TUPLE_SHAPE)?s:TUPLE_SHAPE);
+                s=shape(st,&f,a[1]); refine_tuple_copies(&f,nodes,index,a[1],(s&TUPLE_SHAPE)?s:TUPLE_SHAPE);
             } else if(op->op==genop_test_arity_3 || op->op==genop_is_tagged_tuple_4) {
                 REQUIRE(a[2].type==TAG_u && (Uint)a[2].val<=MAX_ARITYVAL);
                 if(op->op==genop_test_arity_3) REQUIRE(shape(st,&f,a[1])&TUPLE_SHAPE);
                 else REQUIRE(a[2].val>0 && a[3].type==TAG_a && is_atom((Eterm)a[3].val));
-                refine(&f,a[1],TUPLE_SHAPE|(uint32_t)a[2].val);
+                refine_tuple_copies(&f,nodes,index,a[1],TUPLE_SHAPE|(uint32_t)a[2].val);
             }
             break;
         case genop_wait_1:case genop_wait_timeout_2:

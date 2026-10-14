@@ -56,7 +56,7 @@ int main(int argc,char** argv) {
         std::fill(leaders.begin(),leaders.end(),0xa5); std::fill(flags.begin(),flags.end(),0xa5);
         for(std::size_t size:{0u,65u,8192u}) {
             for(const char* function:{"copy","named","dead"}) round_trip(isolate,peer,"send_slice",function,size);
-            for(const char* function:{"copy","named","local_name","missing","dead","cancel","self_monitor"})
+            for(const char* function:{"copy","named","local_name","missing","dead","cancel","self_monitor","mfa","mfa_peer"})
                 round_trip(isolate,peer,"monitor_slice",function,size);
             round_trip(isolate,peer,"group_leader_slice","lifecycle",size);
             round_trip(isolate,peer,"process_flag_slice","copy",size);
@@ -75,7 +75,7 @@ int main(int argc,char** argv) {
             auto reused=take(isolate.call("send_slice","copy",view(invalid)));
             CHECK(take(reused.wait_until(deadline()))==invalid);
         }
-        for(const char* function:{"bad_kind","bad_target","bad_name","bad_node","bad_reference"}) {
+        for(const char* function:{"bad_kind","bad_target","bad_name","bad_node","bad_reference","bad_module","bad_function","bad_args"}) {
             auto call=take(isolate.call("monitor_slice",function,view(invalid)));
             auto result=call.wait_until(deadline()); CHECK(std::holds_alternative<Error>(result));
             CHECK(std::get<Error>(result).code==ErrorCode::exception && std::get<Error>(result).message=="guest exception");

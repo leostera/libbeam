@@ -47,6 +47,8 @@ void lb_call_discard_completed(LbCall *);
 int lb_world_retire_step(LbEngine *);
 LbEngineStatus lb_task_create_call_locked(LbEngine *,const LbCodeEntry *,LbBytesView,LbCall *,LbTask **);
 typedef struct LbMonitor LbMonitor;
+typedef struct LbSpawnMfa LbSpawnMfa;
+LbProcessStatus lb_task_spawn_mfa_monitored_locked(LbWorld *,LbProcess *,const LbSpawnMfa *,LbMonitor *,Eterm *);
 LbProcessStatus lb_task_spawn_fun_monitored_locked(LbWorld *,LbProcess *,Eterm,LbMonitor *,Eterm *);
 LbProcessStatus lb_task_spawn_fun_locked(LbWorld *,LbProcess *,Eterm,Eterm *);
 /* Internal component seam: use a worker-produced retained closure, without

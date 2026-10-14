@@ -226,6 +226,20 @@ static void arithmetic_edges(LbCodeSpace *space)
     ret(&p); ADD(&p,label_1,U(3)); ADD(&p,get_hd_2,X(1),X(0)); ret(&p);
     verify(space,&p,LB_CODE_FORMAT);
 }
+static void tested_tuple_copy(LbCodeSpace *space)
+{
+    for(unsigned mode=0;mode<4;++mode) {
+        Program p; begin(&p);
+        ADD(&p,allocate_2,U(1),U(2)); ADD(&p,move_2,X(0),Y(0));
+        if(mode==1) ADD(&p,move_2,X(1),Y(0));
+        if(mode==2) ADD(&p,label_1,U(7));
+        if(mode==3) ADD(&p,move_2,X(1),X(0));
+        ADD(&p,is_tuple_2,F(3),X(0)); ADD(&p,test_arity_3,F(3),X(0),U(2));
+        ADD(&p,get_tuple_element_3,Y(0),U(1),X(0)); ADD(&p,deallocate_1,U(1)); ret(&p);
+        ADD(&p,label_1,U(3)); ADD(&p,move_2,N,X(0)); ADD(&p,deallocate_1,U(1)); ret(&p);
+        verify(space,&p,mode==0?LB_CODE_OK:LB_CODE_FORMAT);
+    }
+}
 static void proven_match_start(LbCodeSpace *space)
 {
     Eterm empty[2]={_make_header(1,HEAP_BITS_SUBTAG),0};
@@ -242,7 +256,7 @@ int main(void)
 {
     LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    proven_match_start(space); joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
+    tested_tuple_copy(space); proven_match_start(space); joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     puts("CORE_SHAPE_PROOF_OK failure_edges=true late_joins=true backedges=true bounds=true alias_moves=true call_clobbers=true y_facts=true hints_not_authority=true arithmetic_edges=true predicate_scratch=true list_not_cons=true trim_facts=true execution=false");
     return 0;

@@ -7129,8 +7129,8 @@ genrule(
 cc_test(
   name = "monitor_reference",
   size = "small",
-  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "monitor_reference", "run", "-", "$(rootpath :monitor_reference_fixture)", "$(rootpath :monitor_slice_fixture)"],
-  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "monitor_reference_fixture", "monitor_slice_fixture"],
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "monitor_reference", "run", "-", "$(rootpath :monitor_reference_fixture)", "$(rootpath :monitor_slice_fixture)", "$(rootpath :group_leader_slice_fixture)"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "monitor_reference_fixture", "monitor_slice_fixture", "group_leader_slice_fixture"],
   deps = ["otp_reference_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
   env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},

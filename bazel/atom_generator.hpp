@@ -44,7 +44,7 @@ inline AtomProjection project_atoms(std::string source, std::string header, cons
     for (std::size_t i = 0; i < indices.size(); ++i)
         if (indices[i] != i) throw std::runtime_error("Atom identities must be unique and contiguous");
     std::size_t index = names.size();
-    for (const std::string name : {"set_cookie", "load_module"}) {
+    for (const std::string name : {"set_cookie", "load_module", "spawn_monitor"}) {
         if (header.find("#define am_" + name + " ") != std::string::npos)
             throw std::runtime_error("Owned atom already appears upstream: " + name);
         replace_once(source, "  0\n};", "  \"" + name + "\",\n  0\n};");

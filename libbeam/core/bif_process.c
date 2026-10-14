@@ -235,6 +235,48 @@ badarg:
 refused:
     p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
 }
+/* erlang:spawn_monitor/3's local MFA startup, with the same prepublication
+ * monitor/task transaction as the fun wrapper. No child executes on this stack. */
+Eterm lb_bif_spawn_monitor_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=1;
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) goto work;
+    if(!is_atom(args[0]) || !is_atom(args[1])) goto badarg;
+    Eterm tail=args[2]; size_t arity=0;
+    while(is_list(tail)) {
+        if(!lb_work_domain_charge(domain,1)) goto work;
+        ++p->last_native_cost; ++arity; tail=CDR(list_val(tail));
+    }
+    if(!is_nil(tail)) goto badarg;
+    if(arity>MAX_ARG) { p->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE; }
+    if(!p->world || !p->running) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    LbEngine *engine=p->entry_module->space->engine;
+    if(engine->reference_counter==UINT64_MAX) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    size_t need,before=p->collections;
+    if(!lb_size_add(LB_REF_WORDS+3,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_heap_reserve(p,need,3)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    Eterm parent_pid; LbProcessStatus status=lb_process_identity(p,&parent_pid);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    Eterm ref=lb_reference_write(p->htop,engine->reference_counter); p->htop+=LB_REF_WORDS;
+    LbMonitor *monitor; status=lb_monitor_prepare(p,ref,&monitor);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    /* Reacquire after reserve/GC. Child copying borrows this list without
+     * collecting the parent; no fallible acquisition follows PID publication. */
+    LbSpawnMfa start={args[0],args[1],args[2],(unsigned)arity}; Eterm pid;
+    status=lb_task_spawn_mfa_monitored_locked(p->world,p,&start,monitor,&pid);
+    if(status!=LB_PROCESS_READY) { lb_monitor_discard(monitor); p->status=status; return THE_NON_VALUE; }
+    ++engine->reference_counter;
+    Eterm result=TUPLE2(p->htop,pid,ref); p->htop+=3; return result;
+badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+work: p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+}
 Eterm lb_bif_spawn_opt_4(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)instruction; p->last_native_cost=1;

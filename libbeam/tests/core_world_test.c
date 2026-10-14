@@ -774,14 +774,77 @@ static void stateful_probes(LbBytesView a_code,LbBytesView b_code)
     CHECK(!m.live && !m.bytes);
     printf("CORE_WORLD_STATEFUL_OK boot_failure_prefixes=%zu churn=32 correlated_calls=4096 duplicate_boot_errors=32 queued_stop=true detached_reply=true peer_survives=true exact_final_balance=true\n",prefix);
 }
+static void mfa_preparation(LbWorld *world,Memory *memory)
+{
+    lb_engine_enter(world->engine);
+    Eterm module,identity,function; LbCodeEntry *entry; LbProcess *parent;
+    CHECK(lb_atoms_find(world->space->atoms,"monitor_slice",13,&module)==LB_ATOM_OK);
+    CHECK(lb_atoms_find(world->space->atoms,"identity",8,&identity)==LB_ATOM_OK);
+    CHECK(lb_atoms_find(world->space->atoms,"mfa_child",9,&function)==LB_ATOM_OK);
+    CHECK(lb_code_entry_acquire(world->space,module,identity,1,&entry)==LB_CODE_OK);
+    unsigned char bytes[256]; memset(bytes,0x73,sizeof(bytes));
+    CHECK(lb_process_create_binary(entry,bytes,sizeof(bytes),128,&parent)==LB_PROCESS_READY); lb_code_entry_release(entry);
+    Eterm pid; CHECK(lb_process_identity(parent,&pid)==LB_PROCESS_READY);
+    Eterm binary=parent->reg[0],tuple=TUPLE2(parent->htop,binary,pid); parent->htop+=3;
+    Eterm args=CONS(parent->htop,binary,NIL); parent->htop+=2;
+    args=CONS(parent->htop,tuple,args); parent->htop+=2;
+    args=CONS(parent->htop,binary,args); parent->htop+=2; parent->reg[0]=args;
+    LbSpawnMfa start={module,function,args,3}; LbAllocDomain *domain=&world->domain;
+    size_t live=memory->live,used=memory->bytes,users=parent->entry_module->users;
+    Eterm *heap=parent->heap; uint64_t cost=0;
+    for(unsigned mode=0;mode<4;++mode) {
+        LbWorkBudget *budget=lb_work_budget_create(world); CHECK(budget);
+        uint64_t credit=mode==0?1000000:mode==1?cost:mode==2?cost-1:0;
+        budget->limit=budget->remaining=credit; lb_work_domain_borrow(domain,budget);
+        LbProcess *child; LbProcessStatus status=lb_process_create_mfa(parent,&start,64,&child);
+        if(mode<2) {
+            CHECK(status==LB_PROCESS_READY && child);
+            if(!mode) { cost=credit-budget->remaining; CHECK(cost>1); }
+            else CHECK(!budget->remaining);
+        } else CHECK(status==LB_PROCESS_WORK_LIMIT && !child);
+        lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+        if(child) {
+            CHECK(lb_process_collect_live(child,0,3));
+            LbBitstringView view; CHECK(lb_bitstring_view(child->reg[0],&view));
+            CHECK(view.bit_size==sizeof(bytes)*8 && !memcmp(view.data+view.bit_offset/8,bytes,sizeof(bytes)));
+            CHECK(is_tuple(child->reg[1]) && tuple_val(child->reg[1])[2]==pid);
+            lb_process_destroy(child);
+        }
+        lb_work_budget_release(budget);
+        CHECK(memory->live==live && memory->bytes==used && parent->entry_module->users==users);
+        CHECK(parent->heap==heap && parent->reg[0]==args && !parent->collections);
+    }
+    for(size_t prefix=1;;++prefix) {
+        CHECK(prefix<100); size_t before=memory->host_calls; memory->fail_host=before+prefix;
+        LbProcess *child; LbProcessStatus status=lb_process_create_mfa(parent,&start,64,&child); memory->fail_host=0;
+        CHECK(status==LB_PROCESS_READY || (status==LB_PROCESS_NO_MEMORY && !child));
+        if(child) lb_process_destroy(child);
+        CHECK(memory->live==live && memory->bytes==used && parent->entry_module->users==users);
+        lb_alloc_domain_begin_operation(domain);
+        if(status==LB_PROCESS_READY && prefix>memory->host_calls-before) break;
+    }
+    size_t limit=domain->limit; domain->limit=domain->current;
+    LbProcess *child; CHECK(lb_process_create_mfa(parent,&start,64,&child)==LB_PROCESS_LIMIT && !child);
+    domain->limit=limit; lb_alloc_domain_begin_operation(domain);
+    CHECK(memory->live==live && memory->bytes==used && parent->entry_module->users==users);
+    CHECK(lb_process_create_mfa(parent,&start,64,&child)==LB_PROCESS_READY);
+    lb_process_destroy(parent); /* physical allocator poisons its released heap */
+    CHECK(lb_process_collect_live(child,0,3));
+    LbBitstringView surviving; CHECK(lb_bitstring_view(child->reg[0],&surviving));
+    CHECK(surviving.bit_size==sizeof(bytes)*8 && !memcmp(surviving.data+surviving.bit_offset/8,bytes,sizeof(bytes)));
+    CHECK(is_tuple(child->reg[1]) && tuple_val(child->reg[1])[2]==pid);
+    lb_process_destroy(child); lb_engine_leave(world->engine);
+    puts("CORE_MFA_PREPARATION_OK exact_credit=true one_below=true zero=true allocation_prefixes=true memory_limit=true moving_child_roots=true borrowed_parent_stable=true balanced_leases=true");
+}
 static void monitor_allocations(LbBytesView code)
 {
     Memory m={0}; LbEngine *engine=create(&m); LbWorld *peer; LbCall *call;
     CHECK(lb_world_create(engine,&peer)==LB_WORLD_OK && lb_world_load(peer,code)==LB_WORLD_OK);
+    mfa_preparation(peer,&m);
     CHECK(lb_world_start(peer,text("monitor_slice"),text("copy"),text("peer"),&call)==LB_WORLD_OK);
     expect(call,LB_WORLD_OK);
     lb_engine_enter(engine); size_t live=m.live,bytes=m.bytes; lb_engine_leave(engine);
-    const char *functions[]={"copy","named","missing","dead","cancel"};
+    const char *functions[]={"copy","named","missing","dead","cancel","mfa"};
     size_t tested=0;
     for(size_t f=0;f<sizeof(functions)/sizeof(*functions);++f) for(size_t prefix=1;;++prefix) {
         CHECK(prefix<500); LbWorld *world; LbBytesView result;

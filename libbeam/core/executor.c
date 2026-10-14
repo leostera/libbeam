@@ -287,7 +287,9 @@ LbEngineStatus lb_task_create_call_locked(LbEngine *engine,const LbCodeEntry *en
  * import admission. The real spawn effect must supply its parent/world and
  * prepare monitors/signals before making this runnable boundary available. */
 typedef enum { SPAWN_CHILD, SPAWN_FROM_RETAINED_FUN } SpawnOrigin;
-static LbProcessStatus spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm fun,LbMonitor *monitor,SpawnOrigin origin,Eterm *out)
+typedef enum { SPAWN_FUN_ENTRY, SPAWN_MFA_ENTRY } SpawnEntryKind;
+typedef struct { SpawnEntryKind kind; union { Eterm fun; LbSpawnMfa mfa; } value; } SpawnEntry;
+static LbProcessStatus spawn_locked(LbWorld *world,LbProcess *parent,const SpawnEntry *entry,LbMonitor *monitor,SpawnOrigin origin,Eterm *out)
 {
     if(!out) return LB_PROCESS_INVALID; *out=THE_NON_VALUE;
     if(!world || !parent || world->phase!=LB_WORLD_RUNNING ||
@@ -305,7 +307,12 @@ static LbProcessStatus spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm f
     if(lb_work_process_prepare(parent->work_active,&lease)!=LB_ALLOC_OK) {
         lb_release(task->domain,task); return LB_PROCESS_LIMIT;
     }
-    LbProcessStatus status=lb_process_create_fun(parent,fun,64,&task->process);
+    LbProcessStatus status;
+    switch(entry->kind) {
+    case SPAWN_FUN_ENTRY: status=lb_process_create_fun(parent,entry->value.fun,64,&task->process); break;
+    case SPAWN_MFA_ENTRY: status=lb_process_create_mfa(parent,&entry->value.mfa,64,&task->process); break;
+    default: abort();
+    }
     if(status!=LB_PROCESS_READY) { lb_work_process_abort(&lease); lb_release(task->domain,task); return status; }
     lb_work_process_publish(task->process,&lease);
     *out=task->process->identity.id;
@@ -315,7 +322,15 @@ static LbProcessStatus spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm f
     checked(pthread_cond_signal(&engine->wake)); return LB_PROCESS_READY;
 }
 LbProcessStatus lb_task_spawn_fun_monitored_locked(LbWorld *world,LbProcess *parent,Eterm fun,LbMonitor *monitor,Eterm *out)
-{ return spawn_fun_locked(world,parent,fun,monitor,SPAWN_CHILD,out); }
+{
+    SpawnEntry entry={.kind=SPAWN_FUN_ENTRY,.value.fun=fun};
+    return spawn_locked(world,parent,&entry,monitor,SPAWN_CHILD,out);
+}
+LbProcessStatus lb_task_spawn_mfa_monitored_locked(LbWorld *world,LbProcess *parent,const LbSpawnMfa *mfa,LbMonitor *monitor,Eterm *out)
+{
+    SpawnEntry entry={.kind=SPAWN_MFA_ENTRY,.value.mfa=*mfa};
+    return spawn_locked(world,parent,&entry,monitor,SPAWN_CHILD,out);
+}
 LbProcessStatus lb_task_spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm fun,Eterm *out)
 { return lb_task_spawn_fun_monitored_locked(world,parent,fun,NULL,out); }
 LbProcessStatus lb_task_spawn_result_locked(LbWorld *world,LbTask *source,Eterm *out)
@@ -325,7 +340,8 @@ LbProcessStatus lb_task_spawn_result_locked(LbWorld *world,LbTask *source,Eterm 
        !world || source->engine!=world->engine) return LB_PROCESS_REFUSED;
     /* This private component seam launches a fresh root from retained closure
      * storage, not an Erlang child of an already terminated process. */
-    return spawn_fun_locked(world,source->process,lb_process_result(source->process),NULL,SPAWN_FROM_RETAINED_FUN,out);
+    SpawnEntry entry={.kind=SPAWN_FUN_ENTRY,.value.fun=lb_process_result(source->process)};
+    return spawn_locked(world,source->process,&entry,NULL,SPAWN_FROM_RETAINED_FUN,out);
 }
 void lb_task_cancel_world_children_locked(LbWorld *world)
 {

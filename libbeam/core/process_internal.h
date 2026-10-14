@@ -72,6 +72,10 @@ Eterm lb_process_deny_capability(LbProcess *,const LbCapabilityFailure *);
 /* Prepare an unpublished local-fun/0 child with copied environment and PID.
  * Domain/namespace serialization is required; queue publication is separate. */
 LbProcessStatus lb_process_create_fun(LbProcess *,Eterm,size_t,LbProcess **);
+/* Parsed MFA start: namespace atoms and a proper list of exactly arity terms.
+ * The caller keeps arguments rooted; preparation never collects its heap. */
+typedef struct LbSpawnMfa { Eterm module,function,arguments; unsigned arity; } LbSpawnMfa;
+LbProcessStatus lb_process_create_mfa(LbProcess *,const LbSpawnMfa *,size_t,LbProcess **);
 int lb_process_collect_live(LbProcess *,size_t,size_t);
 int lb_heap_reserve(LbProcess *,size_t,size_t);
 int lb_heap_reserve_binary(LbProcess *,size_t need,size_t incoming_bytes,size_t live);
