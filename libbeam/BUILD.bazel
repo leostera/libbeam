@@ -121,6 +121,130 @@ cc_binary(
   linkshared = True,
 )
 
+genrule(
+  name = "process_contracts_fixture",
+  srcs = ["tests/fixtures/process_contracts.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/process_contracts_fixture/process_contracts.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/process_contracts.erl)",
+)
+
+cc_library(
+  name = "process_contract_test_main",
+  testonly = True,
+  srcs = ["tests/process_contract_test.cpp", "tests/test_process.hpp"],
+  copts = ["-std=c++17"],
+  deps = ["libbeam", "@googletest//:gtest"],
+)
+
+cc_test(
+  name = "process_selective_fifo_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "selective_fifo"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_name_registry_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "names"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_trapped_link_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "trapped_link"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_unlink_before_exit_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "unlink_before_exit"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_monitor_tag_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "monitor_tag"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_demonitor_flush_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "demonitor_flush"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_alias_explicit_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "alias_explicit"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_alias_reply_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "alias_reply"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_timer_delivery_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "timer_delivery"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_timer_cancel_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "timer_cancel"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_timer_cancel_race_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "timer_cancel_race"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_absolute_timer_test",
+  size = "medium",
+  args = ["$(rootpath :process_contracts_fixture)", "absolute_timer"],
+  data = ["process_contracts_fixture"],
+  deps = ["process_contract_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "process_contracts_reference_test",
+  size = "small",
+  srcs = ["tests/process_contracts_reference_test.cpp", "tests/test_process.hpp"],
+  args = ["$(rootpath @libbeam_host//:otp/bin/escript)", "$(rootpath :process_contracts_fixture)"],
+  data = ["process_contracts_fixture", "tests/fixtures/process_contracts_reference.escript", "@libbeam_host//:otp", "@libbeam_host//:otp/bin/escript"],
+  copts = ["-std=c++17"],
+  deps = ["@googletest//:gtest"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
 cc_test(
   name = "boundary_test",
   size = "medium",
