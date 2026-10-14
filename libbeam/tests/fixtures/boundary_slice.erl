@@ -4,7 +4,7 @@
 -export([setup/1, identity/1, ordinary/1, uncaught/1, nested_after/1, reraised/1,
          denied_catch/1, denied_try/1, denied_child/1, denied_output/1,
          denied_port/1, denied_library/1, denied_halt/1, work_catch/1, child_work/1,
-         memory_catch/1, after_count/1, allowed_after/1]).
+         memory_catch/1, timer_work/1, child_timer_work/1, after_count/1, allowed_after/1]).
 
 setup(_) ->
     Pid = spawn(fun() -> watch(0) end),
@@ -83,6 +83,15 @@ spin() -> spin().
 child_work(_) ->
     {Pid, Ref} = spawn_monitor(fun spin/0),
     receive {'DOWN', Ref, process, Pid, _} -> <<"masked child work failure">> end.
+timer_work(_) ->
+    try
+        erlang:send_after(0, self(), budget_tick),
+        receive budget_tick -> spin() end
+    catch _:_ -> <<"masked timer work failure">>
+    after boundary_watch ! after_ran end.
+child_timer_work(_) ->
+    {Pid, Ref} = spawn_monitor(fun() -> timer_work(<<>>) end),
+    receive {'DOWN', Ref, process, Pid, _} -> <<"masked child timer work failure">> end.
 memory_catch(Input) ->
     Count = binary_to_term(Input),
     try erlang:make_tuple(Count, ok) of _ -> <<"unexpected allocation">>

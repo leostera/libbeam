@@ -243,6 +243,12 @@ TEST_F(WorkBoundary, PrivateWorkExhaustionIsNotCatchableAndAfterDoesNotRun) {
 TEST_F(WorkBoundary, DescendantWorkIsChargedToWaitingCaller) {
     failure("child_work", ErrorCode::work_limit, "invocation work limit exceeded");
 }
+TEST_F(WorkBoundary, TimerDeliveryDoesNotRefreshInvocationCredit) {
+    failure("timer_work", ErrorCode::work_limit, "invocation work limit exceeded");
+}
+TEST_F(WorkBoundary, DescendantTimerWorkIsChargedToWaitingCaller) {
+    failure("child_timer_work", ErrorCode::work_limit, "invocation work limit exceeded");
+}
 class MemoryBoundary : public Boundary {
     ResourceOverrides limits() const override { return {8u * 1024u * 1024u, std::nullopt}; }
 };
