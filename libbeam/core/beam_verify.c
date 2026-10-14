@@ -396,6 +396,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                    native!=&st->space->engine->bifs[BIF_float_1] &&
                    native!=&st->space->engine->bifs[BIF_abs_1] &&
                    native!=&st->space->engine->bifs[BIF_map_size_1] &&
+                   native!=&st->space->engine->bifs[BIF_byte_size_1] &&
                    native!=&st->space->engine->bifs[BIF_sminus_1]) return LB_CODE_UNSUPPORTED;
             } else if(native!=&st->space->engine->bifs[BIF_splus_2] &&
                       native!=&st->space->engine->bifs[BIF_stimes_2] &&

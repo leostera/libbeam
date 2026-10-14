@@ -17,7 +17,9 @@ static LbWorld *make(LbEngine *engine,LbBytesView beam,uint64_t credit)
 {
     LbWorld *world; LbResourceOverrides limits={.has_work=1,.invocation_work=credit};
     CHECK(lb_world_create_with_overrides(engine,&limits,&world)==LB_WORLD_OK);
-    CHECK(lb_world_load(world,beam)==LB_WORLD_OK); return world;
+    LbWorldLoadReport report={0}; LbWorldStatus loaded=lb_world_load_report(world,beam,&report);
+    if(loaded!=LB_WORLD_OK) fprintf(stderr,"load status=%d stage=%s offset=%zu\n",loaded,report.stage?report.stage:"unknown",report.offset);
+    CHECK(loaded==LB_WORLD_OK); return world;
 }
 static LbCall *invoke(LbWorld *world,const char *module,const char *function,int start)
 {

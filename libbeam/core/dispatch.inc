@@ -3288,6 +3288,19 @@ OpCase(move_trim_yxt):
   GotoPF(next_pf);
 }
 
+OpCase(move3_xxxxxx):
+{
+  Eterm tmp_packed1 = I[1];
+  Eterm tmp_packed2 = I[2];
+  BeamInstr next_pf = BeamCodeAddr(I[3]);
+  xb((tmp_packed1>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK) = xb(tmp_packed1&BEAM_TIGHT_MASK);
+  xb(tmp_packed2&BEAM_TIGHT_MASK) = xb((tmp_packed1>>(2*BEAM_TIGHT_SHIFT)));
+  xb((tmp_packed2>>(2*BEAM_TIGHT_SHIFT))) = xb((tmp_packed2>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK);
+  I += 3;
+  ASSERT(VALID_INSTR(next_pf));
+  GotoPF(next_pf);
+}
+
 OpCase(move2_par_xxxy):
 {
   Eterm tmp_packed1 = I[1];

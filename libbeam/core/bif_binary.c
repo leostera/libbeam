@@ -23,6 +23,59 @@ static void allocation_failed(LbProcess *process,LbAllocStatus status)
     else process->status=LB_PROCESS_NO_MEMORY;
 }
 
+/* binary.c:binary_to_list_1/3. The range is one-based and inclusive;
+ * empty binaries are valid only for arity one. Parse before reserving, then
+ * reacquire the moving binary view before publishing any cons cells. */
+static Eterm binary_list(LbProcess *p,Eterm *args,size_t arity)
+{
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    LbBitstringView view; size_t start=0,count,words,need,work;
+    p->last_native_cost=1;
+    if(args!=p->reg) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!lb_bitstring_view(args[0],&view) || (view.bit_size&7)) goto badarg;
+    size_t source_bits=view.bit_size;
+    count=source_bits/8;
+    if(arity==3) {
+        /* Every valid index fits a small under the owned binary-size bound. */
+        _Static_assert(LB_MAX_BINARY_BYTES<=MAX_SMALL,"binary indices fit small integers");
+        if(!is_small(args[1]) || !is_small(args[2])) goto badarg;
+        Sint first=signed_val(args[1]),last=signed_val(args[2]);
+        if(first<1 || last<first || (Uint)last>count) goto badarg;
+        start=(size_t)first-1; count=(size_t)(last-first)+1;
+    }
+    if(!count) return NIL;
+    if(!lb_size_mul(count,2,&words) || !lb_size_add(words,p->heap_reserved,&need) || !lb_size_mul(count,3,&work)) {
+        p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE;
+    }
+    if(!lb_work_domain_charge(domain,work)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=work;
+    size_t before=p->collections;
+    if(!lb_heap_reserve(p,need,arity)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        allocation_failed(p,cause==LB_ALLOC_OK?LB_ALLOC_LIMIT:cause); return THE_NON_VALUE;
+    }
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    size_t end;
+    if(!lb_bitstring_view(p->reg[0],&view) || view.bit_size!=source_bits ||
+       !lb_size_add(view.bit_offset,view.bit_size,&end)) abort();
+    Eterm result=NIL;
+    for(size_t i=count;i>0;--i) {
+        size_t bit=view.bit_offset+(start+i-1)*8,index=bit/8,shift=bit%8;
+        if(bit>end || end-bit<8) abort();
+        unsigned byte=view.data[index];
+        if(shift) byte=((byte<<shift)|(view.data[index+1]>>(8-shift)))&255u;
+        result=CONS(p->htop,make_small(byte),result); p->htop+=2;
+    }
+    return result;
+badarg:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_binary_to_list_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return binary_list(p,args,1); }
+Eterm lb_bif_binary_to_list_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return binary_list(p,args,3); }
+
 static LbAllocStatus push_item(LbProcess *process,LbIoListItem **items,size_t *count,
                                size_t *capacity,LbIoListItem item)
 {

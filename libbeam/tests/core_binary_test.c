@@ -729,6 +729,78 @@ static void unaligned_results(Memory *memory,LbCodeSpace *space,LbCodeModule *mo
     lb_code_entry_release(identity);
     puts("CORE_BINARY_BIT_COPY_OK native_argument_views=true identity_execution=true moving_gc=true offsets=16 lengths=513 exact_retirement=true guest_slicing=false");
 }
+static void expect_bytes(Eterm list,const unsigned char *bytes,size_t size)
+{
+    for(size_t i=0;i<size;++i) {
+        CHECK(is_list(list) && CAR(list_val(list))==make_small(bytes[i])); list=CDR(list_val(list));
+    }
+    CHECK(is_nil(list));
+}
+static void binary_lists(Memory *memory,LbCodeSpace *space,LbCodeModule *module)
+{
+    LbCodeEntry *identity=entry(space,module,"identity",1);
+    unsigned char data[257],expected[64];
+    for(size_t i=0;i<sizeof(data);++i) data[i]=(unsigned char)(i*173+19);
+    const size_t sizes[]={0,1,63,64,65,257};
+    size_t live=memory->live,bytes=memory->bytes;
+    for(size_t i=0;i<sizeof(sizes)/sizeof(*sizes);++i) {
+        LbProcess *p; size_t n=sizes[i];
+        CHECK(lb_process_create_binary(identity,data,n,8,&p)==LB_PROCESS_READY);
+        p->heap_reserved=7;
+        while(p->htop<p->stop-S_RESERVED-7) *p->htop++=NIL;
+        size_t collections=p->collections,calls=memory->calls; Eterm *heap=p->heap,*top=p->htop;
+        memory->fail=calls+1;
+        Eterm list=lb_bif_binary_to_list_1(p,p->reg,NULL);
+        if(n) {
+            CHECK(is_non_value(list) && p->status==LB_PROCESS_NO_MEMORY && p->heap==heap && p->htop==top);
+            memory->fail=0; p->status=LB_PROCESS_READY; lb_alloc_domain_begin_operation(space->domain);
+            list=lb_bif_binary_to_list_1(p,p->reg,NULL); CHECK(p->collections>collections);
+        } else CHECK(list==NIL && memory->calls==calls && p->collections==collections);
+        memory->fail=0; CHECK(p->heap_reserved==7); expect_bytes(list,data,n);
+        if(!n) {
+            p->reg[1]=p->reg[2]=make_small(1);
+            CHECK(is_non_value(lb_bif_binary_to_list_3(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
+            p->freason=LB_EXC_NULL;
+        }
+        p->reg[0]=list; CHECK(lb_process_collect_live(p,0,1)); expect_bytes(p->reg[0],data,n);
+        CHECK(!p->off_heap.first); lb_process_destroy(p);
+        CHECK(memory->live==live && memory->bytes==bytes);
+    }
+    for(size_t offset=0;offset<8;++offset) {
+        LbProcess *p; CHECK(lb_process_create_binary(identity,data,sizeof(data),8,&p)==LB_PROCESS_READY);
+        LbSubBits *sub=(LbSubBits *)boxed_val(p->reg[0]); sub->start=offset; sub->end=offset+512;
+        for(size_t i=0;i<64;++i) {
+            unsigned byte=0;
+            for(size_t bit=0;bit<8;++bit) { size_t at=offset+i*8+bit; byte=(byte<<1)|((data[at/8]>>(7-at%8))&1); }
+            expected[i]=(unsigned char)byte;
+        }
+        Eterm list=lb_bif_binary_to_list_1(p,p->reg,NULL); expect_bytes(list,expected,64);
+        p->reg[1]=make_small(2); p->reg[2]=make_small(63);
+        list=lb_bif_binary_to_list_3(p,p->reg,NULL); expect_bytes(list,expected+1,62);
+        p->reg[1]=p->reg[2]=make_small(64);
+        list=lb_bif_binary_to_list_3(p,p->reg,NULL); expect_bytes(list,expected+63,1);
+        const Sint ranges[][2]={{0,1},{1,0},{-1,2},{2,1},{1,65}};
+        for(size_t i=0;i<sizeof(ranges)/sizeof(*ranges);++i) {
+            p->reg[1]=make_small(ranges[i][0]); p->reg[2]=make_small(ranges[i][1]);
+            p->freason=LB_EXC_NULL; Eterm *top=p->htop; size_t calls=memory->calls;
+            CHECK(is_non_value(lb_bif_binary_to_list_3(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
+            CHECK(p->htop==top && memory->calls==calls);
+        }
+        Eterm big[3]={_make_header(2,POS_BIG_SUBTAG),0,1};
+        Eterm invalid[]={am_false,NIL,make_boxed(big)};
+        for(size_t i=0;i<sizeof(invalid)/sizeof(*invalid);++i) {
+            p->reg[1]=make_small(1); p->reg[2]=invalid[i]; p->freason=LB_EXC_NULL;
+            CHECK(is_non_value(lb_bif_binary_to_list_3(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
+        }
+        sub=(LbSubBits *)boxed_val(p->reg[0]); --sub->end; p->freason=LB_EXC_NULL;
+        CHECK(is_non_value(lb_bif_binary_to_list_1(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
+        p->reg[0]=am_true; p->freason=LB_EXC_NULL;
+        CHECK(is_non_value(lb_bif_binary_to_list_1(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
+        lb_process_destroy(p); CHECK(memory->live==live && memory->bytes==bytes);
+    }
+    lb_code_entry_release(identity);
+    puts("CORE_BINARY_LIST_OK inclusive_ranges=true unaligned_views=8 invalid=true moving_gc=true oom_retry=true detached_list=true exact_retirement=true");
+}
 static void constructed_arguments(Memory *memory,LbCodeSpace *space,LbCodeModule *module)
 {
     const size_t widths[]={169,4099}; unsigned char data[600],copied[600];
@@ -816,6 +888,7 @@ static void executable_test(const char *path)
     }
     copied_inputs(engine->domain,&m,space,module);
     unaligned_results(&m,space,module);
+    binary_lists(&m,space,module);
     constructed_arguments(&m,space,module);
     writable_binaries(&m,space,module);
     metadata_copy_failure(&m,space,module);

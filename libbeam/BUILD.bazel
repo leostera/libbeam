@@ -5665,6 +5665,42 @@ cc_library(
   deps = ["core"],
 )
 
+genrule(
+  name = "binary_list_slice_fixture",
+  srcs = ["tests/fixtures/binary_list_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/binary_list_slice_fixture/binary_list_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/binary_list_slice.erl)",
+)
+
+cc_test(
+  name = "core_binary_list_work",
+  size = "medium",
+  timeout = "moderate",
+  args = ["$(rootpath :binary_list_slice_fixture)", "binary_list_slice"],
+  data = ["binary_list_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
+  name = "binary_list_range_slice_fixture",
+  srcs = ["tests/fixtures/binary_list_range_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/binary_list_range_slice_fixture/binary_list_range_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/binary_list_range_slice.erl)",
+)
+
+cc_test(
+  name = "core_binary_list_range_work",
+  size = "medium",
+  timeout = "moderate",
+  args = ["$(rootpath :binary_list_range_slice_fixture)", "binary_list_range_slice"],
+  data = ["binary_list_range_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
 cc_test(
   name = "core_node_work",
   size = "medium",
@@ -6888,6 +6924,24 @@ genrule(
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
   outs = ["fixtures/node_locations_fixture/node_locations.beam"],
   cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic  -o $(@D) $(location tests/fixtures/node_locations.S)",
+)
+
+cc_test(
+  name = "binary_list_reference",
+  size = "small",
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "binary_list_reference", "run", "-", "$(rootpath :binary_list_reference_fixture)"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "binary_list_reference_fixture"],
+  deps = ["otp_reference_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
+  name = "binary_list_reference_fixture",
+  srcs = ["tests/fixtures/binary_list_reference.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/binary_list_reference_fixture/binary_list_reference.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/binary_list_reference.erl)",
 )
 
 cc_test(
