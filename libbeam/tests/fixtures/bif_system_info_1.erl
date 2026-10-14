@@ -8,5 +8,10 @@ entry(Input) ->
 identity(Input) -> Input.
 invoke(_F,direct,[A0]) -> erlang:'system_info'(A0);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
-check(F,Mode,V) ->
-    invoke(F, Mode, [wordsize]) =:= 8.
+check(F,Mode,_V) ->
+    [invoke(F,Mode,[wordsize]),invoke(F,Mode,[{wordsize,internal}]),
+     invoke(F,Mode,[{wordsize,external}]),invoke(F,Mode,[threads]),
+     invoke(F,Mode,[schedulers]),invoke(F,Mode,[schedulers_online]),
+     invoke(F,Mode,[dirty_cpu_schedulers]),invoke(F,Mode,[dirty_cpu_schedulers_online]),
+     invoke(F,Mode,[dirty_io_schedulers]),invoke(F,Mode,[thread_pool_size])] =:=
+    [8,8,8,true,1,1,0,0,0,0].

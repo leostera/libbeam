@@ -7,6 +7,43 @@
 #include "process_internal.h"
 #include "reference.h"
 
+/* These are properties of the owned runtime, not of the OTP installation
+ * used to compile fixtures. There is one configured Engine worker, no dirty
+ * schedulers and no asynchronous driver pool. Unimplemented selectors remain
+ * infrastructure refusals; do not synthesize ERTS version/allocator metadata. */
+Eterm lb_bif_system_info_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    Eterm selector=args[0];
+    if(is_tuple(selector)) {
+        Eterm *tuple=tuple_val(selector); Uint arity=arityval(tuple[0]);
+        if(!arity || !is_atom(tuple[1])) goto badarg;
+        if(tuple[1]!=am_wordsize) goto refused;
+        if(arity!=2) goto badarg;
+        if(tuple[2]==am_internal) return make_small(sizeof(Eterm));
+        if(tuple[2]==am_external) return make_small(sizeof(uintptr_t));
+        goto badarg;
+    }
+    if(!is_atom(selector)) goto badarg;
+    if(selector==am_wordsize) return make_small(sizeof(Eterm));
+    if(selector==am_threads) return am_true;
+    static const struct { const char *name; size_t size; Sint count; } counts[]={
+        {"schedulers",10,1},{"schedulers_online",17,1},{"schedulers_active",17,1},
+        {"dirty_cpu_schedulers",20,0},{"dirty_cpu_schedulers_online",27,0},
+        {"dirty_io_schedulers",19,0},{"thread_pool_size",16,0}};
+    LbBeamBytes name;
+    if(lb_atoms_name(p->entry_module->space->atoms,selector,&name)!=LB_ATOM_OK) goto badarg;
+    for(size_t i=0;i<sizeof(counts)/sizeof(*counts);++i)
+        if(name.size==counts[i].size && !memcmp(name.data,counts[i].name,name.size)) return make_small(counts[i].count);
+refused:
+    p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
+badarg:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+
 /* dist.c:node_0 and instrs.tab:node read the current local node's name.
  * Each owned namespace starts unnamed and cannot enable distribution. */
 Eterm lb_bif_node_0(LbProcess *p,Eterm *args,const BeamInstr *pc)
