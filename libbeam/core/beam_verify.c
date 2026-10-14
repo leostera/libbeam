@@ -268,7 +268,7 @@ static int plain_bif_allowed(const LbEngine *engine,const BifEntry *native,size_
 #include "type_predicates.def"
 #undef LB_TYPE_PREDICATE
         BIF_tuple_size_1,BIF_node_1,BIF_splus_1,BIF_bit_size_1};
-    static const unsigned binary[]={BIF_is_function_2,BIF_max_2,BIF_min_2,BIF_is_map_key_2,BIF_seqeq_2,BIF_and_2,BIF_or_2,BIF_xor_2};
+    static const unsigned binary[]={BIF_is_function_2,BIF_max_2,BIF_min_2,BIF_is_map_key_2,BIF_seq_2,BIF_sneq_2,BIF_slt_2,BIF_and_2,BIF_or_2,BIF_xor_2};
     if(!native || native->kind!=BIF_KIND_GUARD) return 0;
     const unsigned *ids; size_t count;
     if(arity==1) { ids=unary; count=sizeof(unary)/sizeof(*unary); }
@@ -297,7 +297,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_call_ext_2:case genop_call_ext_only_2:case genop_call_ext_last_3:
         case genop_apply_1:case genop_apply_last_2:
         case genop_allocate_2:case genop_allocate_heap_3:case genop_init_yregs_1:case genop_deallocate_1:case genop_trim_2:
-        case genop_jump_1:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
+        case genop_jump_1:case genop_is_lt_3:case genop_is_ge_3:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_binary_2:case genop_is_list_2:case genop_is_integer_2:case genop_is_map_2:case genop_is_function_2:case genop_is_function2_3:
         case genop_is_float_2:case genop_is_number_2:case genop_is_port_2:case genop_is_boolean_2:case genop_is_bitstr_2:
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:case genop_select_val_3:
@@ -657,7 +657,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         }
         case genop_select_tuple_arity_3:
             status=select_arities(st,w,index,&f,op); if(status!=LB_CODE_OK) return status; terminal=1; break;
-        case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
+        case genop_is_lt_3:case genop_is_ge_3:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_binary_2:case genop_is_list_2:case genop_is_integer_2:case genop_is_map_2:case genop_is_function_2:case genop_is_function2_3:
         case genop_is_float_2:case genop_is_number_2:case genop_is_port_2:case genop_is_boolean_2:case genop_is_bitstr_2:
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_is_nonempty_list_2:
@@ -680,7 +680,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                     f.xs[MAX_REG-2]=f.xs[MAX_REG-1]=0; failed=f; failure=&failed;
                 }
             }
-            else if(op->op==genop_is_eq_exact_3 || op->op==genop_is_ne_exact_3) REQUIRE(source(st,&f,a[2]));
+            else if(op->op==genop_is_eq_exact_3 || op->op==genop_is_ne_exact_3 ||
+                    op->op==genop_is_lt_3 || op->op==genop_is_ge_3) REQUIRE(source(st,&f,a[2]));
             /* is_list also accepts NIL: only the nonempty test grants cons access. */
             else if(op->op==genop_is_nonempty_list_2) refine(&f,a[1],LIST_SHAPE);
             else if(op->op==genop_is_map_2) refine(&f,a[1],MAP_SHAPE);

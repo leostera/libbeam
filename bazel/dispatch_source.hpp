@@ -104,6 +104,21 @@ inline std::string fallible_equality(std::string body) {
         ", &lb_equal)!=LB_ALLOC_OK) goto memory_failure;\n";
     return body.substr(0, branch) + prefix + body.substr(branch, begin - branch) + "lb_equal" + body.substr(args_end);
 }
+inline std::string owned_ordered_compare(std::string body) {
+    return regex_adapt(body, R"(CMP_(GE|LT)(?:_LITERAL)?_ACTION\((.*?), (.*?), ([\s\S]*?Goto\(\*I\);)\);)",
+        [](const std::smatch& m) {
+            return std::string("Eterm operands[2]={")+m[2].str()+","+m[3].str()+"},comparison;\n"
+                "  SWAPOUT; comparison=lb_bif_"+(m[1]=="GE"?"sge":"slt")+"_2(c_p,operands,I); SWAPIN;\n"
+                "  FCALLS-=(Sint)c_p->last_native_cost;\n"
+                "  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;\n"
+                "  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;\n"
+                "  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n"
+                "  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;\n"
+                "  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;\n"
+                "  if(comparison!=am_true && comparison!=am_false) goto malformed_code;\n"
+                "  if(comparison==am_false) { "+m[4].str()+" }";
+        },1);
+}
 inline std::string fallible_arithmetic(std::string body) {
     const bool unary = contains(body, "erts_unary_minus");
     const std::string operation = contains(body, "erts_mixed_times") ? "times" : "plus";

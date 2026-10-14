@@ -2,6 +2,176 @@
  * Copyright Ericsson AB 1996-2026. All Rights Reserved.
  * Owned interpreter code adapted from OTP beam_makeops output.
  */
+OpCase(is_ge_fxx):
+{
+  Eterm tmp_packed1 = I[2];
+  Eterm operands[2]={xb(tmp_packed1&BEAM_LOOSE_MASK),xb((tmp_packed1>>BEAM_LOOSE_SHIFT))},comparison;
+  SWAPOUT; comparison=lb_bif_sge_2(c_p,operands,I); SWAPIN;
+  FCALLS-=(Sint)c_p->last_native_cost;
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
+  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+  if(comparison!=am_true && comparison!=am_false) goto malformed_code;
+  if(comparison==am_false) { ASSERT(VALID_INSTR(*(I + (I[1]) + 0)));
+  I += I[1] + 0;;
+  Goto(*I); }
+  I += 3;
+  ASSERT(VALID_INSTR(*I));
+  Goto(*I);
+}
+
+OpCase(is_ge_literal_fcx):
+{
+  Eterm tmp_packed1 = I[1];
+  Eterm operands[2]={I[2],xb((tmp_packed1>>BEAM_WIDE_SHIFT))},comparison;
+  SWAPOUT; comparison=lb_bif_sge_2(c_p,operands,I); SWAPIN;
+  FCALLS-=(Sint)c_p->last_native_cost;
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
+  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+  if(comparison!=am_true && comparison!=am_false) goto malformed_code;
+  if(comparison==am_false) { ASSERT(VALID_INSTR(*(I + (fb(tmp_packed1&BEAM_WIDE_MASK)) + 0)));
+  I += fb(tmp_packed1&BEAM_WIDE_MASK) + 0;;
+  Goto(*I); }
+  I += 3;
+  ASSERT(VALID_INSTR(*I));
+  Goto(*I);
+}
+
+OpCase(is_ge_literal_fxc):
+{
+  Eterm tmp_packed1 = I[1];
+  Eterm operands[2]={xb((tmp_packed1>>BEAM_WIDE_SHIFT)),I[2]},comparison;
+  SWAPOUT; comparison=lb_bif_sge_2(c_p,operands,I); SWAPIN;
+  FCALLS-=(Sint)c_p->last_native_cost;
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
+  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+  if(comparison!=am_true && comparison!=am_false) goto malformed_code;
+  if(comparison==am_false) { ASSERT(VALID_INSTR(*(I + (fb(tmp_packed1&BEAM_WIDE_MASK)) + 0)));
+  I += fb(tmp_packed1&BEAM_WIDE_MASK) + 0;;
+  Goto(*I); }
+  I += 3;
+  ASSERT(VALID_INSTR(*I));
+  Goto(*I);
+}
+
+OpCase(is_lt_fxx):
+{
+  Eterm tmp_packed1 = I[2];
+  Eterm operands[2]={xb(tmp_packed1&BEAM_LOOSE_MASK),xb((tmp_packed1>>BEAM_LOOSE_SHIFT))},comparison;
+  SWAPOUT; comparison=lb_bif_slt_2(c_p,operands,I); SWAPIN;
+  FCALLS-=(Sint)c_p->last_native_cost;
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
+  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+  if(comparison!=am_true && comparison!=am_false) goto malformed_code;
+  if(comparison==am_false) { ASSERT(VALID_INSTR(*(I + (I[1]) + 0)));
+  I += I[1] + 0;;
+  Goto(*I); }
+  I += 3;
+  ASSERT(VALID_INSTR(*I));
+  Goto(*I);
+}
+
+OpCase(is_lt_literal_fcx):
+{
+  Eterm tmp_packed1 = I[1];
+  Eterm operands[2]={I[2],xb((tmp_packed1>>BEAM_WIDE_SHIFT))},comparison;
+  SWAPOUT; comparison=lb_bif_slt_2(c_p,operands,I); SWAPIN;
+  FCALLS-=(Sint)c_p->last_native_cost;
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
+  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+  if(comparison!=am_true && comparison!=am_false) goto malformed_code;
+  if(comparison==am_false) { ASSERT(VALID_INSTR(*(I + (fb(tmp_packed1&BEAM_WIDE_MASK)) + 0)));
+  I += fb(tmp_packed1&BEAM_WIDE_MASK) + 0;;
+  Goto(*I); }
+  I += 3;
+  ASSERT(VALID_INSTR(*I));
+  Goto(*I);
+}
+
+OpCase(is_lt_literal_fxc):
+{
+  Eterm tmp_packed1 = I[1];
+  Eterm operands[2]={xb((tmp_packed1>>BEAM_WIDE_SHIFT)),I[2]},comparison;
+  SWAPOUT; comparison=lb_bif_slt_2(c_p,operands,I); SWAPIN;
+  FCALLS-=(Sint)c_p->last_native_cost;
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
+  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+  if(comparison!=am_true && comparison!=am_false) goto malformed_code;
+  if(comparison==am_false) { ASSERT(VALID_INSTR(*(I + (fb(tmp_packed1&BEAM_WIDE_MASK)) + 0)));
+  I += fb(tmp_packed1&BEAM_WIDE_MASK) + 0;;
+  Goto(*I); }
+  I += 3;
+  ASSERT(VALID_INSTR(*I));
+  Goto(*I);
+}
+
+OpCase(is_ge_fss):
+{
+  Eterm targ1;
+  Eterm targ2;
+  GetSource(I[2], targ1);
+  GetSource(I[3], targ2);
+  {
+    Eterm operands[2]={targ1,targ2},comparison;
+  SWAPOUT; comparison=lb_bif_sge_2(c_p,operands,I); SWAPIN;
+  FCALLS-=(Sint)c_p->last_native_cost;
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
+  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+  if(comparison!=am_true && comparison!=am_false) goto malformed_code;
+  if(comparison==am_false) { ASSERT(VALID_INSTR(*(I + (I[1]) + 0)));
+    I += I[1] + 0;;
+    Goto(*I); }
+    I += 4;
+    ASSERT(VALID_INSTR(*I));
+    Goto(*I);
+  }
+}
+
+OpCase(is_lt_fss):
+{
+  Eterm targ1;
+  Eterm targ2;
+  GetSource(I[2], targ1);
+  GetSource(I[3], targ2);
+  {
+    Eterm operands[2]={targ1,targ2},comparison;
+  SWAPOUT; comparison=lb_bif_slt_2(c_p,operands,I); SWAPIN;
+  FCALLS-=(Sint)c_p->last_native_cost;
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+  if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
+  if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+  if(comparison!=am_true && comparison!=am_false) goto malformed_code;
+  if(comparison==am_false) { ASSERT(VALID_INSTR(*(I + (I[1]) + 0)));
+    I += I[1] + 0;;
+    Goto(*I); }
+    I += 4;
+    ASSERT(VALID_INSTR(*I));
+    Goto(*I);
+  }
+}
+
 OpCase(move_cr):
 {
   BeamInstr next_pf = BeamCodeAddr(I[2]);

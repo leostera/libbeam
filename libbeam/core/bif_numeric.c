@@ -948,9 +948,9 @@ static Eterm exact_equal(LbProcess *p,Eterm left,Eterm right,int negate)
     }
     return (equal!=negate)?am_true:am_false;
 }
-Eterm lb_bif_seqeq_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+Eterm lb_bif_seq_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 { (void)pc; p->last_native_cost=0; return exact_equal(p,args[0],args[1],0); }
-Eterm lb_bif_sneqeq_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+Eterm lb_bif_sneq_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 { (void)pc; p->last_native_cost=0; return exact_equal(p,args[0],args[1],1); }
 static int proper_list_count(LbProcess *,Eterm,size_t *);
 static int compare_integer_terms(LbProcess *p,Eterm left,Eterm right,int *order)
@@ -1025,9 +1025,9 @@ static Eterm relaxed_equal(LbProcess *p,Eterm left,Eterm right,int negate)
     }
     return (equal!=negate)?am_true:am_false;
 }
-Eterm lb_bif_seq_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+Eterm lb_bif_seqeq_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 { (void)pc; p->last_native_cost=0; return relaxed_equal(p,args[0],args[1],0); }
-Eterm lb_bif_sneq_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+Eterm lb_bif_sneqeq_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 { (void)pc; p->last_native_cost=0; return relaxed_equal(p,args[0],args[1],1); }
 static int term_order_rank(Eterm term)
 {

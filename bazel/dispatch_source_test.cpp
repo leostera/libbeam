@@ -54,6 +54,17 @@ TEST(DispatchSource, RealDivisionRetainsBothGuestErrorBranchesAndOwnedFailureCau
     EXPECT_NE(body.find("goto malformed_code;"), std::string::npos);
     EXPECT_THROW(libbeam_build::fallible_integer_division("OpCase(i_int_div_jssd): {}"), std::runtime_error);
 }
+TEST(DispatchSource, OrderedComparisonsKeepFailuresOutOfGuestBranches) {
+    for (const char* name : {"is_ge_fxx","is_ge_literal_fcx","is_ge_literal_fxc","is_ge_fss",
+                             "is_lt_fxx","is_lt_literal_fcx","is_lt_literal_fxc","is_lt_fss"}) {
+        const auto body=libbeam_build::owned_ordered_compare(libbeam_build::dispatch_case(generated,name));
+        EXPECT_NE(body.find("if(comparison==am_false)"),std::string::npos);
+        for(const char* failure : {"work_failure","resource_limit","memory_failure","environment_failure","execution_refused","malformed_code"})
+            EXPECT_LT(body.find(std::string("goto ")+failure+";"),body.find("if(comparison==am_false)"));
+        EXPECT_EQ(body.find("CMP_"),std::string::npos);
+    }
+    EXPECT_THROW(libbeam_build::owned_ordered_compare("OpCase(is_ge_fxx): {}"),std::runtime_error);
+}
 TEST(DispatchCalls, RealApplyVariantsUseOwnedStateAndAccountFailures) {
     for (const char* name : {"i_apply", "i_apply_last_Q", "i_apply_only", "apply_t", "apply_last_tQ"}) {
         SCOPED_TRACE(name);

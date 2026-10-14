@@ -93,6 +93,8 @@ case op_i_get_sd: return 1;
 case op_i_get_hash_cWd: return 1;
 case op_i_apply: return 1;
 case op_i_apply_last_Q: return 1;
+case op_is_ge_fxx: case op_is_ge_literal_fcx: case op_is_ge_literal_fxc: case op_is_ge_fss:
+case op_is_lt_fxx: case op_is_lt_literal_fcx: case op_is_lt_literal_fxc: case op_is_lt_fss: return 1;
 case op_i_apply_only: return 1;
 case op_i_apply_fun: return 1;
 case op_i_apply_fun_last_Q: return 1;

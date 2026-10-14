@@ -7,6 +7,71 @@
 #include "flatmap.h"
 #include "world_internal.h"
 #include "exit_signal.h"
+typedef enum {
+    UNIQUE_DEFAULT=0, UNIQUE_POSITIVE=1, UNIQUE_MONOTONIC=2,
+    UNIQUE_POSITIVE_MONOTONIC=3
+} UniqueOptions;
+static Eterm unique_integer(LbProcess *p,Eterm modifiers)
+{
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    UniqueOptions options=UNIQUE_DEFAULT; p->last_native_cost=0;
+    if(!lb_work_domain_charge(domain,1)) goto work_failure;
+    p->last_native_cost=1;
+    while(is_list(modifiers)) {
+        if(!lb_work_domain_charge(domain,1)) goto work_failure;
+        ++p->last_native_cost; Eterm option=CAR(list_val(modifiers));
+        if(option==am_positive) options=(UniqueOptions)(options|UNIQUE_POSITIVE);
+        else if(option==am_monotonic) options=(UniqueOptions)(options|UNIQUE_MONOTONIC);
+        else goto badarg;
+        modifiers=CDR(list_val(modifiers));
+    }
+    if(!is_nil(modifiers)) goto badarg;
+    LbUniqueSequence *sequence=&p->entry_module->space->engine->unique_sequences[!!(options&UNIQUE_MONOTONIC)];
+    if(sequence->exhausted) { p->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE; }
+    Eterm result,words[4]; const Uint offset=(Uint)(-MIN_SMALL);
+    if(!(options&UNIQUE_POSITIVE) && !sequence->high && sequence->low<offset) {
+        result=make_small(MIN_SMALL+(Sint)sequence->low);
+    } else {
+        if(options&UNIQUE_POSITIVE) {
+            words[1]=sequence->low+1;
+            words[2]=sequence->high+(words[1]==0);
+            words[3]=!words[1] && !words[2];
+        } else {
+            words[1]=sequence->low-offset;
+            words[2]=sequence->high-(sequence->low<offset); words[3]=0;
+        }
+        if(!words[3] && !words[2] && words[1]<=(Uint)MAX_SMALL) result=make_small((Sint)words[1]);
+        else {
+            size_t digits=words[3]?3:words[2]?2:1,need,collections=p->collections;
+            words[0]=_make_header(digits,POS_BIG_SUBTAG);
+            if(!lb_work_domain_charge(domain,digits+1)) goto work_failure;
+            p->last_native_cost+=digits+1;
+            if(!lb_size_add(digits+1,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+            if(!lb_heap_reserve(p,need,MAX_REG)) {
+                LbAllocStatus cause=lb_alloc_domain_failure(domain);
+                p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+                    cause==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+                return THE_NON_VALUE;
+            }
+            if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+            result=make_boxed(p->htop); memcpy(p->htop,words,(digits+1)*sizeof(Eterm)); p->htop+=digits+1;
+        }
+    }
+    /* Serialized, infallible publication. Failed parsing, charging or GC cannot
+     * consume a value. Gaps after a successful query are allowed, as for refs. */
+    if(sequence->low==UINT64_MAX && sequence->high==UINT64_MAX) sequence->exhausted=1;
+    else if(++sequence->low==0) ++sequence->high;
+    return result;
+work_failure:
+    p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+badarg:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_unique_integer_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{ (void)args; (void)instruction; return unique_integer(p,NIL); }
+Eterm lb_bif_unique_integer_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{ (void)instruction; return unique_integer(p,args[0]); }
+
 /* Identity is allocated on first observation, with no moving-heap allocation.
  * The directory is owned by the world/code namespace and keeps its generations
  * after the last process exits. Spawn must obtain identity before publication;

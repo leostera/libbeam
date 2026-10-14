@@ -234,6 +234,8 @@ Eterm lb_bif_group_leader_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_garbage_collect_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_garbage_collect_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_make_ref_0(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_unique_integer_0(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_unique_integer_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_spawn_3(LbProcess *,Eterm *,const BeamInstr *);
 LbCodeStatus lb_code_preload(LbCodeSpace *);
 Eterm lb_bif_error_1(LbProcess *,Eterm *,const BeamInstr *);

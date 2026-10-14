@@ -16,8 +16,9 @@ typedef struct LbProcess LbProcess;
 typedef Eterm (*LbBifFn)(LbProcess *,Eterm *,const BeamInstr *);
 typedef enum { BIF_KIND_REGULAR, BIF_KIND_HEAVY, BIF_KIND_GUARD } BifKind;
 typedef struct { Eterm module,name; int arity; LbBifFn f; BifKind kind; } BifEntry;
-#define LB_NATIVE_COUNT 160 /* 132 local implementations, 27 denials, one compatibility exception */
+#define LB_NATIVE_COUNT 162 /* 134 local implementations, 27 denials, one compatibility exception */
 #define LB_NATIVE_EXTENSION_COUNT 24u
+typedef struct { Uint low,high; int exhausted; } LbUniqueSequence;
 struct LbEngine {
     LbAllocDomain *domain;
     LbResourceLimits limits;
@@ -27,6 +28,9 @@ struct LbEngine {
     unsigned native_ids[LB_NATIVE_COUNT];
     size_t spaces;
     uint64_t reference_counter; /* serialized native reference-number generator */
+    /* Like references, uniqueness spans the shared runtime Engine. Separate
+     * ordinary/monotonic streams; positive changes the offset, not the stream. */
+    LbUniqueSequence unique_sequences[2];
     int owner_live, closed;
     pthread_mutex_t mutex;
     pthread_cond_t wake;

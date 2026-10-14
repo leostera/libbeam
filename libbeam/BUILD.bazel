@@ -4685,6 +4685,60 @@ cc_test(
 )
 
 genrule(
+  name = "unique_slice_fixture",
+  srcs = ["tests/fixtures/unique_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/unique_slice_fixture/unique_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/unique_slice.erl)",
+)
+
+genrule(
+  name = "unique_reference_fixture",
+  srcs = ["tests/fixtures/unique_reference.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/unique_reference_fixture/unique_reference.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/unique_reference.erl)",
+)
+
+genrule(
+  name = "order_slice_fixture",
+  srcs = ["tests/fixtures/order_slice.S"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/order_slice_fixture/order_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/order_slice.S)",
+)
+
+cc_test(
+  name = "core_unique_test",
+  size = "medium",
+  srcs = ["tests/core_unique_test.c"],
+  copts = ["-std=c11"],
+  args = ["$(rootpath :unique_slice_fixture)", "$(rootpath :order_slice_fixture)"],
+  data = ["unique_slice_fixture", "order_slice_fixture"],
+  deps = ["core"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "core_unique_work",
+  size = "medium",
+  args = ["$(rootpath :unique_slice_fixture)", "unique_slice", "bad_type", "bad_option", "bad_tail"],
+  data = ["unique_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "unique_reference",
+  size = "small",
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "unique_reference", "run", "-", "$(rootpath :unique_slice_fixture)", "$(rootpath :unique_reference_fixture)", "$(rootpath :order_slice_fixture)"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "unique_slice_fixture", "unique_reference_fixture", "order_slice_fixture"],
+  deps = ["otp_reference_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
   name = "bit_size_slice_fixture",
   srcs = ["tests/fixtures/bit_size_slice.erl"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
