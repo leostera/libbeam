@@ -5,6 +5,115 @@ load("//bazel:testing.bzl", "cross_configuration_artifacts", "runtime_link_input
 
 package(default_visibility = ["//visibility:public"])
 
+cc_test(
+  name = "gc_roots_reference_test",
+  size = "small",
+  srcs = ["tests/gc_roots_reference_test.cpp", "tests/test_process.hpp"],
+  args = ["$(rootpath @libbeam_host//:otp/bin/escript)", "$(rootpath :gc_roots_fixture)"],
+  data = ["gc_roots_fixture", "tests/fixtures/gc_roots_reference.escript", "@libbeam_host//:otp", "@libbeam_host//:otp/bin/escript"],
+  copts = ["-std=c++17"],
+  deps = ["@googletest//:gtest"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
+  name = "gc_roots_fixture",
+  srcs = ["tests/fixtures/gc_roots.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/gc_roots_fixture/gc_roots.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/gc_roots.erl)",
+)
+
+cc_library(
+  name = "gc_roots_test_main",
+  testonly = True,
+  srcs = ["tests/core_gc_roots_test.c"],
+  copts = ["-std=c11"],
+  deps = ["core"],
+)
+
+cc_test(
+  name = "gc_register_stack_roots_test",
+  size = "medium",
+  args = ["$(rootpath :gc_roots_fixture)", "registers_stack"],
+  data = ["gc_roots_fixture"],
+  deps = ["gc_roots_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "gc_dictionary_roots_test",
+  size = "medium",
+  args = ["$(rootpath :gc_roots_fixture)", "dictionary"],
+  data = ["gc_roots_fixture"],
+  deps = ["gc_roots_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "gc_mailbox_roots_test",
+  size = "medium",
+  args = ["$(rootpath :gc_roots_fixture)", "mailbox"],
+  data = ["gc_roots_fixture"],
+  deps = ["gc_roots_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "gc_closure_roots_test",
+  size = "medium",
+  args = ["$(rootpath :gc_roots_fixture)", "closures"],
+  data = ["gc_roots_fixture"],
+  deps = ["gc_roots_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "gc_binary_backing_roots_test",
+  size = "medium",
+  args = ["$(rootpath :gc_roots_fixture)", "binary_views"],
+  data = ["gc_roots_fixture"],
+  deps = ["gc_roots_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "gc_pending_exception_roots_test",
+  size = "medium",
+  args = ["$(rootpath :gc_roots_fixture)", "pending_exception"],
+  data = ["gc_roots_fixture"],
+  deps = ["gc_roots_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "gc_timer_payload_roots_test",
+  size = "medium",
+  args = ["$(rootpath :gc_roots_fixture)", "timer_payload"],
+  data = ["gc_roots_fixture"],
+  deps = ["gc_roots_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "gc_alias_reference_roots_test",
+  size = "medium",
+  args = ["$(rootpath :gc_roots_fixture)", "alias_reference"],
+  data = ["gc_roots_fixture"],
+  deps = ["gc_roots_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "gc_hibernate_zero_roots_test",
+  size = "medium",
+  args = ["$(rootpath :gc_roots_fixture)", "hibernate_zero"],
+  data = ["gc_roots_fixture"],
+  deps = ["gc_roots_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+cc_test(
+  name = "gc_hibernate_mfa_roots_test",
+  size = "medium",
+  args = ["$(rootpath :gc_roots_fixture)", "hibernate_mfa"],
+  data = ["gc_roots_fixture"],
+  deps = ["gc_roots_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
 cc_binary(
   name = "boundary_library_probe.so",
   testonly = True,
