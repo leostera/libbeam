@@ -17,8 +17,7 @@ int main(int argc, char** argv) {
         const auto root = std::filesystem::absolute(argv[2]);
         const auto directory = root / "libbeam/core/otp";
         const auto report = libbeam_test::inventory::audit(root,
-            directory / "bif-batch-request.txt", directory / "bif-batch-contracts.json",
-            directory / "bif-batch-wrapper-plan.json");
+            directory / "bif-batch-request.txt");
         // Serialize only after the complete audit succeeds: no partial report
         // may look like a successful inventory after a parsing/read failure.
         std::cout << report.dump(2) << '\n';

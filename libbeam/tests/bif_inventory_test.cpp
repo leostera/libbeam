@@ -142,12 +142,22 @@ TEST(InventoryParsing, WrapperPlanCoverageIsExact) {
     EXPECT_THROW(wrappers(document, expected), std::invalid_argument);
 }
 TEST(InventorySources, DenialDeclarationsMatchPolicy) {
-    auto requests = requested(read_file(runfile("libbeam/core/otp/bif-batch-request.txt")));
-    auto document = Json::parse(read_file(runfile("libbeam/core/otp/bif-batch-contracts.json")));
-    auto assigned = contracts(document, {requests.begin(), requests.end()});
+    const std::map<std::string, std::string> policy = {
+        {"call_on_load_function/1", "CODE_LOADING"}, {"delete_module/1", "CODE_LOADING"},
+        {"display/1", "HOST_OUTPUT"}, {"display_string/1", "HOST_OUTPUT"}, {"display_string/2", "HOST_OUTPUT"},
+        {"dist_ctrl_put_data/2", "DISTRIBUTION"}, {"finish_after_on_load/2", "CODE_LOADING"},
+        {"finish_loading/1", "CODE_LOADING"}, {"halt/0", "HOST_CONTROL"}, {"halt/1", "HOST_CONTROL"},
+        {"halt/2", "HOST_CONTROL"}, {"has_prepared_code_on_load/1", "CODE_LOADING"},
+        {"load_nif/2", "NATIVE_LIBRARY"}, {"monitor_node/2", "DISTRIBUTION"}, {"monitor_node/3", "DISTRIBUTION"},
+        {"open_port/2", "HOST_PORT"}, {"port_close/1", "HOST_PORT"}, {"port_command/2", "HOST_PORT"},
+        {"port_command/3", "HOST_PORT"}, {"port_connect/2", "HOST_PORT"}, {"port_control/3", "HOST_PORT"},
+        {"port_set_data/2", "HOST_PORT"}, {"prepare_loading/2", "CODE_LOADING"},
+        {"process_display/2", "HOST_OUTPUT"}, {"purge_module/1", "CODE_LOADING"},
+        {"set_cookie/2", "DISTRIBUTION"}, {"setnode/2", "DISTRIBUTION"},
+    };
     std::set<Mfa> expected, actual;
     std::set<std::string> identities;
-    for (const auto& [mfa, contract] : assigned) if (contract["classification"] == "denial") expected.insert(mfa);
+    for (const auto& [mfa, category] : policy) expected.insert(Mfa::parse(mfa));
     auto declarations = read_file(runfile("libbeam/core/capability_denials.def"));
     const std::regex pattern(R"(^LB_DENIAL\(([^,]+), (\w+), (\d+), (\w+)\)$)", std::regex::multiline);
     size_t count = 0;
@@ -155,28 +165,29 @@ TEST(InventorySources, DenialDeclarationsMatchPolicy) {
         ++count;
         EXPECT_TRUE(actual.insert(Mfa::parse((*it)[2].str() + "/" + (*it)[3].str())).second);
         EXPECT_TRUE(identities.insert((*it)[1].str()).second);
-        if ((*it)[2] == "load_nif") EXPECT_EQ((*it)[4], "NATIVE_LIBRARY");
+        const auto mfa = (*it)[2].str() + "/" + (*it)[3].str();
+        ASSERT_TRUE(policy.count(mfa)) << mfa;
+        EXPECT_EQ((*it)[4].str(), policy.at(mfa));
     }
     EXPECT_EQ(actual, expected);
     EXPECT_EQ(count, expected.size());
 }
 TEST(InventorySources, PinnedInventory) {
     auto root = Path(runfile(""));
-    auto result = audit(root, root / "libbeam/core/otp/bif-batch-request.txt",
-                        root / "libbeam/core/otp/bif-batch-contracts.json", root / "libbeam/core/otp/bif-batch-wrapper-plan.json");
+    auto result = audit(root, root / "libbeam/core/otp/bif-batch-request.txt");
     EXPECT_EQ(result["requested_count"], 185);
     EXPECT_EQ(result["direct_native_declarations"], 135);
     for (const auto& row : result["entries"]) {
         SCOPED_TRACE(row["function"].dump());
-        const std::set<std::string> allowed{"local", "query", "denial", "exception"};
-        EXPECT_EQ(allowed.count(row["proposed_contract"]["classification"].get<std::string>()), 1u);
-        EXPECT_EQ(row["policy_status"], "contract-assigned; implementation-review-pending");
-        EXPECT_TRUE(row["proposed_implementation"].contains("mode"));
+        // Execution contracts live in the actual MFA tests. Source discovery
+        // must not upgrade a declaration into a claim of runtime support.
+        EXPECT_EQ(row["policy_status"], "unreviewed");
+        EXPECT_EQ(row["implementation_evidence"], Json::array());
         if (!row["native_declaration"].is_null()) EXPECT_FALSE(row["native_source_candidates"].empty());
         else EXPECT_FALSE(row["preloaded_head_candidate_lines"].empty());
     }
-    EXPECT_TRUE(result["source_hashes"].contains("libbeam/core/otp/bif-batch-contracts.json"));
-    EXPECT_TRUE(result["source_hashes"].contains("libbeam/core/otp/bif-batch-wrapper-plan.json"));
+    EXPECT_TRUE(result["source_hashes"].contains("beam/erts/emulator/beam/bif.tab"));
+    EXPECT_TRUE(result["source_hashes"].contains("beam/erts/preloaded/src/erlang.erl"));
 }
 TEST(SourceSupport, KnownSha256Values) {
     EXPECT_EQ(sha256(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
