@@ -75,6 +75,7 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_binary_to_list_1,{am_erlang,am_binary_to_list,1,lb_bif_binary_to_list_1,BIF_KIND_HEAVY}},
         {BIF_binary_to_list_3,{am_erlang,am_binary_to_list,3,lb_bif_binary_to_list_3,BIF_KIND_HEAVY}},
         {BIF_byte_size_1,{am_erlang,am_byte_size,1,lb_bif_byte_size_1,BIF_KIND_GUARD}},
+        {BIF_bit_size_1,{am_erlang,am_bit_size,1,lb_bif_bit_size_1,BIF_KIND_GUARD}},
         {BIF_throw_1,{am_erlang,am_throw,1,lb_bif_throw_1,BIF_KIND_HEAVY}},
         {BIF_sminus_2,{am_erlang,am_Minus,2,lb_bif_minus_2,BIF_KIND_HEAVY}},
         {BIF_binary_part_3,{am_erlang,am_binary_part,3,lb_bif_binary_part_3,BIF_KIND_HEAVY}},

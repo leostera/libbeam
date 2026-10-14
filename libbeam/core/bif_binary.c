@@ -17,6 +17,16 @@ Eterm lb_bif_byte_size_1(LbProcess *process,Eterm *args,const BeamInstr *instruc
     return make_small((Sint)((view.bit_size+7)/8));
 }
 
+Eterm lb_bif_bit_size_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    LbBitstringView view; (void)instruction; p->last_native_cost=0;
+    _Static_assert(LB_MAX_BINARY_BYTES<=MAX_SMALL/8,"owned bit counts fit small integers");
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost=1;
+    if(!lb_bitstring_view(args[0],&view)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    return make_small((Sint)view.bit_size);
+}
+
 static void allocation_failed(LbProcess *process,LbAllocStatus status)
 {
     if(status==LB_ALLOC_LIMIT) process->status=LB_PROCESS_LIMIT;

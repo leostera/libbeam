@@ -267,7 +267,7 @@ static int plain_bif_allowed(const LbEngine *engine,const BifEntry *native,size_
 #define LB_TYPE_PREDICATE(name, predicate) BIF_##name##_1,
 #include "type_predicates.def"
 #undef LB_TYPE_PREDICATE
-        BIF_tuple_size_1,BIF_node_1,BIF_splus_1};
+        BIF_tuple_size_1,BIF_node_1,BIF_splus_1,BIF_bit_size_1};
     static const unsigned binary[]={BIF_is_function_2,BIF_max_2,BIF_min_2,BIF_is_map_key_2,BIF_seqeq_2,BIF_and_2,BIF_or_2,BIF_xor_2};
     if(!native || native->kind!=BIF_KIND_GUARD) return 0;
     const unsigned *ids; size_t count;
@@ -421,6 +421,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                    native!=&st->space->engine->bifs[BIF_abs_1] &&
                    native!=&st->space->engine->bifs[BIF_map_size_1] &&
                    native!=&st->space->engine->bifs[BIF_byte_size_1] &&
+                   native!=&st->space->engine->bifs[BIF_bit_size_1] &&
                    native!=&st->space->engine->bifs[BIF_sminus_1] &&
                    native!=&st->space->engine->bifs[BIF_splus_1]) return LB_CODE_UNSUPPORTED;
             } else if(native!=&st->space->engine->bifs[BIF_splus_2] &&

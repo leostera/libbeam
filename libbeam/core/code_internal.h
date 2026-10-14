@@ -257,6 +257,7 @@ Eterm lb_bif_iolist_size_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_binary_to_list_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_binary_to_list_3(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_byte_size_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_bit_size_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_binary_part_3(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_throw_1(LbProcess *,Eterm *,const BeamInstr *);
 #endif
