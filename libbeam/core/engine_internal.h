@@ -16,7 +16,7 @@ typedef struct LbProcess LbProcess;
 typedef Eterm (*LbBifFn)(LbProcess *,Eterm *,const BeamInstr *);
 typedef enum { BIF_KIND_REGULAR, BIF_KIND_HEAVY, BIF_KIND_GUARD } BifKind;
 typedef struct { Eterm module,name; int arity; LbBifFn f; BifKind kind; } BifEntry;
-#define LB_NATIVE_COUNT 133 /* 105 local implementations, 27 denials, one compatibility exception */
+#define LB_NATIVE_COUNT 135 /* 107 local implementations, 27 denials, one compatibility exception */
 #define LB_NATIVE_EXTENSION_COUNT 19u
 struct LbEngine {
     LbAllocDomain *domain;

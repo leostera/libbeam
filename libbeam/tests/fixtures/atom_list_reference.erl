@@ -8,6 +8,8 @@ run() ->
     lists:foreach(fun(Chars) ->
         Atom = list_to_atom(Chars),
         Chars = atom_list_slice:convert(Atom),
+        Atom = atom_list_slice:from_list(Chars),
+        Atom = atom_list_slice:existing(Chars),
         Utf8 = unicode:characters_to_binary(Chars),
         Utf8 = atom_list_slice:utf8(Atom)
     end, Vectors),
@@ -15,8 +17,23 @@ run() ->
     badarg(fun() -> atom_list_slice:latin1(list_to_atom([256])) end),
     lists:foreach(fun(Value) -> badarg(fun() -> atom_list_slice:convert(Value) end) end,
         [[],0,1.0,<<"atom">>,[97],{atom}]),
+    lists:foreach(fun(Value) ->
+        badarg(fun() -> atom_list_slice:from_list(Value) end),
+        badarg(fun() -> atom_list_slice:existing(Value) end)
+    end, [7,[false],[-1],[16#d800],[16#110000],[1.0],[1 bsl 64],
+          lists:duplicate(255,97) ++ false, lists:duplicate(254,97) ++ [false,97]]),
+    lists:foreach(fun(Value) ->
+        failure(fun() -> atom_list_slice:from_list(Value) end, system_limit),
+        badarg(fun() -> atom_list_slice:existing(Value) end)
+    end, [lists:duplicate(256,97), lists:duplicate(255,97) ++ [false]]),
+    Fresh = [16#10ffff,108,105,115,116,0,113],
+    badarg(fun() -> atom_list_slice:existing(Fresh) end),
+    Created = atom_list_slice:from_list(Fresh),
+    Created = atom_list_slice:existing(Fresh),
+    Fresh = atom_to_list(Created),
     <<"payload">> = atom_list_slice:copy(<<"payload">>),
     io:format("OTP_ATOM_LIST_REFERENCE_OK unicode_scalars=true nul_empty=true max_length=true binary_regression=true~n").
-badarg(F) ->
-    try F() of _ -> error(expected_badarg)
-    catch error:badarg -> ok end.
+badarg(F) -> failure(F,badarg).
+failure(F,Reason) ->
+    try F() of _ -> error(expected_failure)
+    catch error:Reason -> ok end.

@@ -543,6 +543,64 @@ static Eterm binary_to_atom(LbProcess *p,Eterm *args,int existing)
     if(status==LB_ATOM_NO_MEMORY) return allocation_failure(p,LB_ALLOC_NO_MEMORY);
     return fail(p,LB_EXC_BADARG);
 }
+/* bif.c:list_to_atom_1/list_to_existing_atom_1 and
+ * utils.c:erts_unicode_list_to_buf. At character 256 the length error wins
+ * over an invalid head, but an improper tail is still badarg. */
+static Eterm list_to_atom(LbProcess *p,Eterm list,int existing)
+{
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    LbAtomTable *atoms=p->entry_module->space->atoms;
+    unsigned char bytes[4*255]; size_t size=0,count=0;
+    p->last_native_cost=1;
+    if(!lb_work_domain_charge(domain,1)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    while(!is_nil(list)) {
+        if(!lb_work_domain_charge(domain,1)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+        ++p->last_native_cost;
+        if(!is_list(list)) return fail(p,LB_EXC_BADARG);
+        if(count==255) return fail(p,existing?LB_EXC_BADARG:LB_EXC_SYSTEM_LIMIT);
+        Eterm value=CAR(list_val(list));
+        if(!is_small(value)) return fail(p,LB_EXC_BADARG);
+        Uint c=(Uint)signed_val(value);
+        if(c>0x10ffff || (c>=0xd800 && c<=0xdfff)) return fail(p,LB_EXC_BADARG);
+        size_t width=c<0x80?1:c<0x800?2:c<0x10000?3:4;
+        if(!lb_work_domain_charge(domain,width)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+        p->last_native_cost+=width;
+        if(width==1) bytes[size++]=(unsigned char)c;
+        else {
+            if(width==2) bytes[size++]=(unsigned char)(0xc0|(c>>6));
+            else if(width==3) bytes[size++]=(unsigned char)(0xe0|(c>>12));
+            else bytes[size++]=(unsigned char)(0xf0|(c>>18));
+            for(size_t shift=6*(width-1);shift;shift-=6)
+                bytes[size++]=(unsigned char)(0x80|((c>>(shift-6))&63));
+        }
+        ++count; list=CDR(list_val(list));
+    }
+    /* Conservative bound for colliding-name comparisons, and (for insertion)
+     * a second lookup plus transactional index/bucket rebuilding. Charge the
+     * entire bound before entering atom publication; scratch never moves. */
+    size_t entries,work;
+    if(!lb_size_add(lb_atoms_count(atoms),1,&entries) ||
+       !lb_size_mul(entries,(existing?1u:2u)*(size+8),&work))
+        return allocation_failure(p,LB_ALLOC_LIMIT);
+    if(!lb_work_domain_charge(domain,work)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    p->last_native_cost+=work;
+    Eterm atom; LbAtomStatus status=lb_atoms_find(atoms,bytes,size,&atom);
+    if(status==LB_ATOM_NOT_FOUND && !existing) status=lb_atoms_intern(atoms,bytes,size,&atom);
+    if(status==LB_ATOM_OK) return atom;
+    if(status==LB_ATOM_NO_MEMORY) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        return allocation_failure(p,cause==LB_ALLOC_OK?LB_ALLOC_NO_MEMORY:cause);
+    }
+    if(status==LB_ATOM_NOT_FOUND) return fail(p,LB_EXC_BADARG);
+    if(status==LB_ATOM_LIMIT) return fail(p,LB_EXC_SYSTEM_LIMIT);
+    /* Parsed scalar UTF-8 and serialized publication cannot be invalid/busy. */
+    p->status=LB_PROCESS_INVALID; return THE_NON_VALUE;
+}
+Eterm lb_bif_list_to_atom_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return list_to_atom(p,args[0],0); }
+Eterm lb_bif_list_to_existing_atom_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return list_to_atom(p,args[0],1); }
+
 /* Only committed namespace names reach this decoder: atom admission already
  * proves canonical scalar UTF-8 and at most 255 characters, including NUL.
  * Namespace-owned name storage is immutable and outside the moving heap. */
