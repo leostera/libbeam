@@ -218,7 +218,9 @@ LbAllocStatus lb_fun_prepare_instruction(LbProcess *p,const BeamInstr *pc,Uint *
 const BeamInstr *lb_fun_call(LbProcess *p,unsigned arity)
 {
     p->last_native_cost=0;
-    if(arity>MAX_ARG) { p->status=LB_PROCESS_INVALID; return NULL; }
+    /* apply/2 can present up to MAX_REG-1 arguments; larger-than-export
+     * arities still require the ordinary badarity payload, not a refusal. */
+    if(arity>=MAX_REG) { p->status=LB_PROCESS_INVALID; return NULL; }
     Eterm value=p->reg[arity]; const LbFun *fun=lb_fun(value);
     if(!fun) { p->current=NULL; p->freason=LB_EXC_BADFUN; p->fvalue=value; return NULL; }
     if(lb_fun_is_external(fun)) {
@@ -266,12 +268,18 @@ const BeamInstr *lb_fun_call(LbProcess *p,unsigned arity)
     }
     /* Build the native {Fun,Args} badarity payload in one fallible reservation.
      * Both the argument registers and fun register survive moving collection. */
-    if(!lb_work_domain_charge(p->entry_module->space->domain,arity+lb_work_bulk_units(2*(uint64_t)arity+3))) {
+    uint64_t work=arity+lb_work_bulk_units(2*(uint64_t)arity+3);
+    if(!lb_work_domain_charge(p->entry_module->space->domain,work)) {
         p->status=LB_PROCESS_WORK_LIMIT; return NULL;
     }
+    p->last_native_cost+=work;
     size_t before=p->collections,need;
-    if(!lb_size_add(2*(size_t)arity+3,p->heap_reserved,&need) || !lb_heap_reserve(p,need,arity+1)) {
-        p->status=LB_PROCESS_NO_MEMORY; return NULL;
+    if(!lb_size_add(2*(size_t)arity+3,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return NULL; }
+    if(!lb_heap_reserve(p,need,arity+1)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(p->entry_module->space->domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+        return NULL;
     }
     if(before!=p->collections) p->last_native_cost+=p->last_gc_cost;
     Eterm args=NIL; value=p->reg[arity];

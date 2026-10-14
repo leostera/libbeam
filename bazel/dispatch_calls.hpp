@@ -101,6 +101,18 @@ inline std::string owned_apply(std::string body) {
     regex_adapt_exact(body, R"( else if \(ERTS_PROC_GET_SAVED_CALLS_BUF\(c_p\)\) \{\s*save_calls\(c_p, ep\);\s*\})", "");
     return body;
 }
+inline std::string owned_apply_fun(std::string body) {
+    if (!has_case(body, "i_apply_fun|i_apply_fun_last_Q|i_apply_fun_only")) return body;
+    regex_adapt_exact(body, R"(HEAVY_SWAPOUT;\s+next = apply_fun\(c_p, x\(0\), x\(1\), reg\);\s+HEAVY_SWAPIN;)",
+        "SWAPOUT; c_p->heap_reserved=0; next=lb_apply_fun(c_p); SWAPIN;\n"
+        "FCALLS-=(Sint)c_p->last_native_cost;\n"
+        "if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;\n"
+        "if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;\n"
+        "if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;\n"
+        "if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;\n"
+        "if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;");
+    return body;
+}
 inline std::string owned_call_fun(std::string body) {
     if (!has_case(body, "i_call_fun_(?:t|last_tQ)")) return body;
     regex_adapt_exact(body, R"(HEAVY_SWAPOUT;\s+next = call_fun\(c_p, ([^\n]*?), reg, THE_NON_VALUE\);\s+HEAVY_SWAPIN;)",

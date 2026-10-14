@@ -4414,6 +4414,15 @@ cc_library(
 )
 
 cc_test(
+  name = "core_apply_fun_work",
+  size = "medium",
+  args = ["$(rootpath :apply_host_fixture)", "apply_host", "--entry", "fun_copy", "fun_bad", "fun_badarity", "fun_badargs"],
+  data = ["apply_host_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
   name = "core_apply_work",
   size = "medium",
   timeout = "moderate",

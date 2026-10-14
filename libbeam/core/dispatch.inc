@@ -4130,6 +4130,102 @@ OpCase(is_reference_fx):
   Goto(*I);
 }
 
+OpCase(i_apply_fun):
+{
+  const BeamInstr *next;
+  SWAPOUT; c_p->heap_reserved=0; next=lb_apply_fun(c_p); SWAPIN;
+FCALLS-=(Sint)c_p->last_native_cost;
+if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;
+
+  if (ERTS_UNLIKELY(next == NULL)) {
+    goto find_func_info;;
+  };
+  ASSERT(VALID_INSTR(*(I+1)));
+  *E = (BeamInstr) (I+1);;
+  do {
+    BeamInstr dis_next;
+
+    SET_I(next);
+
+    dis_next = *I;
+    CHECK_ARGS(I);
+
+    if (FCALLS > 0 || FCALLS > neg_o_reds) {
+      FCALLS--;
+      Goto(dis_next);
+    } else {
+      goto context_switch;
+    }
+  } while (0);ASSERT(!"Fell through 'i_apply_fun' (-no_next)");
+}
+
+OpCase(i_apply_fun_last_Q):
+{
+  const BeamInstr *next;
+  SWAPOUT; c_p->heap_reserved=0; next=lb_apply_fun(c_p); SWAPIN;
+FCALLS-=(Sint)c_p->last_native_cost;
+if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;
+
+  if (ERTS_UNLIKELY(next == NULL)) {
+    goto find_func_info;;
+  };
+  E = ADD_BYTE_OFFSET(E, I[1]);;
+  do {
+    BeamInstr dis_next;
+
+    SET_I(next);
+
+    dis_next = *I;
+    CHECK_ARGS(I);
+
+    if (FCALLS > 0 || FCALLS > neg_o_reds) {
+      FCALLS--;
+      Goto(dis_next);
+    } else {
+      goto context_switch;
+    }
+  } while (0);ASSERT(!"Fell through 'i_apply_fun_last' (-no_next)");
+}
+
+OpCase(i_apply_fun_only):
+{
+  const BeamInstr *next;
+  SWAPOUT; c_p->heap_reserved=0; next=lb_apply_fun(c_p); SWAPIN;
+FCALLS-=(Sint)c_p->last_native_cost;
+if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;
+
+  if (ERTS_UNLIKELY(next == NULL)) {
+    goto find_func_info;;
+  };
+  do {
+    BeamInstr dis_next;
+
+    SET_I(next);
+
+    dis_next = *I;
+    CHECK_ARGS(I);
+
+    if (FCALLS > 0 || FCALLS > neg_o_reds) {
+      FCALLS--;
+      Goto(dis_next);
+    } else {
+      goto context_switch;
+    }
+  } while (0);ASSERT(!"Fell through 'i_apply_fun_only' (-no_next)");
+}
+
 OpCase(i_call_fun_t):
 {
   const BeamInstr *next;

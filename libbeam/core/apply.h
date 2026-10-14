@@ -12,5 +12,6 @@
  * List apply never collects. Fixed apply may collect to build badarg arguments;
  * callers must swap heap/stack state out and reload it after either helper. */
 const Export *lb_apply(LbProcess *);
+const BeamInstr *lb_apply_fun(LbProcess *);
 const Export *lb_fixed_apply(LbProcess *,unsigned arity);
 #endif

@@ -69,6 +69,7 @@ struct LbCodeSpace {
     Export *exports;
     Export natives[LB_NATIVE_COUNT];
     Export apply_export; /* erlang:apply/3 is an instruction, not a value BIF */
+    Export apply_fun_export; /* erlang:apply/2 dispatches a retained fun */
     size_t messages; /* owned prepared/queued fragments pin atoms and namespace */
     int loading,has_fun_literals;
 };

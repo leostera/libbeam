@@ -270,7 +270,8 @@ static int pc_valid(LbProcess *p,const BeamInstr *pc)
 {
     LbCodeModule *m; Uint address=(Uint)pc; size_t i;
     if(pc==lb_host_return) return 1;
-    if(pc==p->entry_module->space->apply_export.dispatch.addresses[0]) return 1;
+    if(pc==p->entry_module->space->apply_export.dispatch.addresses[0] ||
+       pc==p->entry_module->space->apply_fun_export.dispatch.addresses[0]) return 1;
     for(i=0;i<LB_NATIVE_COUNT;++i) if(pc==p->entry_module->space->natives[i].dispatch.addresses[0]) return 1;
     if(address%sizeof(BeamInstr)) return 0;
     for(m=p->entry_module->space->modules;m;m=m->next)

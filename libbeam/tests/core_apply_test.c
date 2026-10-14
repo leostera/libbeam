@@ -2,12 +2,27 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  */
 #include "apply.h"
+#include "fun.h"
 #include "world_internal.h"
 #include "work_budget_internal.h"
 #include "alloc_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #define CHECK(x) do { if(!(x)) { fprintf(stderr,"%s:%d: %s\n",__FILE__,__LINE__,#x); exit(1); } } while(0)
+typedef struct { size_t live,bytes; } Memory;
+typedef union { max_align_t alignment; size_t size; } MemoryHeader;
+static void *owned_allocate(void *context,size_t size)
+{
+    Memory *m=context; if(size>SIZE_MAX-sizeof(MemoryHeader)) return NULL;
+    MemoryHeader *h=malloc(sizeof(*h)+size); if(!h) return NULL;
+    h->size=size; ++m->live; m->bytes+=size; return h+1;
+}
+static void owned_release(void *context,void *pointer)
+{
+    Memory *m=context; MemoryHeader *h=(MemoryHeader *)pointer-1;
+    CHECK(m->live && m->bytes>=h->size); --m->live; m->bytes-=h->size;
+    memset(pointer,0xa5,h->size); free(h);
+}
 static Eterm atom(LbWorld *w,const char *name)
 {
     Eterm value; if(lb_atoms_find(w->space->atoms,name,strlen(name),&value)==LB_ATOM_OK) return value;
@@ -210,15 +225,116 @@ static void execution(LbWorld *w,LbCodeModule *host,LbCodeModule *target)
         CHECK(d->current==baseline && !target->users);
     }
 }
+static Eterm external_fun(LbWorld *w,LbProcess *p,LbCodeModule *target)
+{
+    Export *entry=lb_export_find(w->space,target->name,atom(w,"one"),1); CHECK(entry);
+    Uint cost=0; CHECK(lb_fun_retain_export(w->space,&p->fun_leases,entry,&cost)==LB_ALLOC_OK);
+    LbFun *fun=(LbFun *)p->htop; fun->thing_word=LB_FUN_HEADER(1,0)|((Uint)1<<LB_FUN_KIND_SHIFT);
+    fun->entry.exp=entry; p->htop+=LB_FUN_WORDS; return make_boxed((Eterm *)fun);
+}
+static void fun_error(LbProcess *p,size_t count)
+{
+    CHECK(p->freason==LB_EXC_BADARITY && is_tuple(p->fvalue));
+    Eterm *payload=tuple_val(p->fvalue); CHECK(arityval(*payload)==2 && lb_fun(payload[1]));
+    Eterm args=payload[2]; for(size_t i=0;i<count;++i) { CHECK(is_list(args) && CAR(list_val(args))==make_small(i)); args=CDR(list_val(args)); }
+    CHECK(is_nil(args));
+}
+static void fun_components(LbWorld *w,LbCodeModule *host,LbCodeModule *target)
+{
+    LbAllocDomain *d=w->space->domain; size_t baseline=d->current;
+    const size_t counts[]={0,1,2,255,256,1022,1023,1024}; Eterm values[1024];
+    for(size_t i=0;i<1024;++i) values[i]=make_small(i);
+    for(unsigned invalid=0;invalid<2;++invalid) for(unsigned improper=0;improper<2;++improper)
+    for(size_t n=0;n<sizeof(counts)/sizeof(*counts);++n) {
+        LbProcess *p=create(w,host); p->reg[0]=invalid?am_true:external_fun(w,p,target);
+        p->reg[1]=list(p,values,counts[n],improper?am_true:NIL); Eterm before[]={p->reg[0],p->reg[1]};
+        p->heap_reserved=7; fill(p); const BeamInstr *next=lb_apply_fun(p);
+        if(counts[n]==1024 || improper) {
+            CHECK(!next && p->freason==(counts[n]==1024?LB_EXC_SYSTEM_LIMIT:LB_EXC_BADARG));
+            CHECK(!memcmp(before,p->reg,sizeof(before)) && !p->collections);
+        } else if(invalid) CHECK(!next && p->freason==LB_EXC_BADFUN && p->fvalue==am_true);
+        else if(counts[n]==1) CHECK(next && p->reg[0]==make_small(0) && !p->collections);
+        else { CHECK(!next && p->collections && p->heap_reserved==7); fun_error(p,counts[n]); }
+        lb_process_destroy(p); CHECK(d->current==baseline && !target->users);
+    }
+    {
+        LbProcess *p=create(w,host); p->reg[0]=external_fun(w,p,target);
+        Eterm value=TUPLE2(p->htop,p->reg[0],make_small(42)); p->htop+=3; p->construction_root=value;
+        Eterm args[]={value,value}; p->reg[1]=list(p,args,2,NIL); fill(p);
+        CHECK(!lb_apply_fun(p) && p->freason==LB_EXC_BADARITY && p->collections);
+        for(unsigned pass=0;pass<2;++pass) {
+            Eterm *payload=tuple_val(p->fvalue); Eterm tail=payload[2];
+            CHECK(lb_fun(payload[1]) && target->users==1);
+            for(unsigned i=0;i<2;++i) {
+                CHECK(is_list(tail) && CAR(list_val(tail))==p->construction_root);
+                Eterm *item=tuple_val(CAR(list_val(tail))); CHECK(item[1]==payload[1] && item[2]==make_small(42)); tail=CDR(list_val(tail));
+            }
+            CHECK(is_nil(tail)); if(!pass) CHECK(lb_process_collect(p,0)==LB_PROCESS_READY);
+        }
+        lb_process_destroy(p); CHECK(d->current==baseline && !target->users);
+    }
+    for(unsigned kind=0;kind<2;++kind) {
+        uint64_t cost=0;
+        for(uint64_t pass=0;pass<=cost+1;++pass) {
+            LbProcess *p=create(w,host); p->reg[0]=external_fun(w,p,target); p->reg[1]=list(p,values,kind?2:1,NIL);
+            if(kind) fill(p);
+            LbWorkBudget *budget=lb_work_budget_create(w); CHECK(budget); uint64_t credit=pass?pass-1:1000000;
+            budget->limit=budget->remaining=credit; lb_work_domain_borrow(d,budget);
+            const BeamInstr *next=lb_apply_fun(p);
+            if(!pass) { cost=credit-budget->remaining; CHECK(cost>1 && cost<20000); }
+            if(!pass || credit==cost) { CHECK(p->status==LB_PROCESS_READY); if(kind) { CHECK(!next); fun_error(p,2); } else CHECK(next); if(pass) CHECK(!budget->remaining); }
+            else CHECK(!next && p->status==LB_PROCESS_WORK_LIMIT && p->freason==LB_EXC_NULL);
+            lb_work_domain_borrow(d,NULL); lb_work_domain_clear_failure(d); lb_alloc_domain_begin_operation(d);
+            lb_process_destroy(p); lb_work_budget_release(budget); CHECK(d->current==baseline && !target->users);
+        }
+    }
+    int done=0;
+    for(size_t prefix=0;prefix<20 && !done;++prefix) {
+        LbProcess *p=create(w,host); p->reg[0]=external_fun(w,p,target); p->reg[1]=list(p,values,2,NIL); fill(p);
+        Eterm *heap=p->heap,*top=p->htop; size_t limit=d->limit,live=d->current;
+        Prefix state={d->system,prefix?prefix-1:0}; if(!prefix) d->limit=live; else d->system=(LbSystemAllocator){&state,allocate,release};
+        CHECK(!lb_apply_fun(p)); d->limit=limit; d->system=state.backing;
+        if(p->status==LB_PROCESS_READY) { fun_error(p,2); CHECK(p->collections); done=1; }
+        else CHECK(p->status==(prefix?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT) && p->freason==LB_EXC_NULL && p->heap==heap && p->htop==top && !p->collections && d->current==live);
+        lb_alloc_domain_begin_operation(d); lb_process_destroy(p); CHECK(d->current==baseline && !target->users);
+    }
+    CHECK(done);
+    const char *names[]={"fun_list","fun_call","fun_last","fun_external","fun_dynamic"};
+    const BeamInstr ops[]={op_i_apply_fun_only,op_i_apply_fun,op_i_apply_fun_last_Q,op_i_apply_fun_only,op_i_apply_fun_only};
+    for(size_t n=0;n<5;++n) {
+        uint64_t cost=0;
+        for(unsigned mode=0;mode<4;++mode) {
+            LbProcess *p=create_at(w,host,names[n]); Eterm fun=external_fun(w,p,target),value=TUPLE1(p->htop,make_small(42)); p->htop+=2;
+            Eterm args=list(p,&value,1,NIL); p->reg[0]=TUPLE2(p->htop,fun,args); p->htop+=3;
+            LbWorkBudget *budget=lb_work_budget_create(w); CHECK(budget); uint64_t credit=!mode?1000000:mode==1?cost:mode==2?cost-1:0;
+            budget->limit=budget->remaining=credit; lb_work_domain_borrow(d,budget);
+            if(!mode) {
+                for(unsigned step=0;step<100 && *p->i!=ops[n];++step) CHECK(lb_process_run(p,1,100)==LB_PROCESS_YIELDED);
+                CHECK(*p->i==ops[n]); if(n>=3) CHECK(p->i==w->space->apply_fun_export.dispatch.addresses[0]);
+            }
+            LbProcessStatus status=run(p);
+            if(mode<2) { CHECK(status==LB_PROCESS_DONE); outcome(w,p,names[n]); if(!mode) { cost=credit-budget->remaining; CHECK(cost>1); } else CHECK(!budget->remaining); }
+            else CHECK(status==LB_PROCESS_WORK_LIMIT);
+            lb_work_domain_borrow(d,NULL); lb_work_domain_clear_failure(d); lb_alloc_domain_begin_operation(d);
+            if(mode<2) { CHECK(lb_process_collect(p,0)==LB_PROCESS_DONE); outcome(w,p,names[n]); }
+            lb_process_destroy(p); lb_work_budget_release(budget); CHECK(d->current==baseline && !target->users);
+        }
+    }
+    LbProcess *denied=create_at(w,host,"fun_denied"); CHECK(run(denied)==LB_PROCESS_CAPABILITY_DENIED);
+    CHECK(denied->capability_failure && !strcmp(denied->capability_failure->function,"display") && denied->capability_failure->arity==1);
+    lb_process_destroy(denied); CHECK(d->current==baseline);
+    puts("CORE_APPLY_FUN_OK argument_limits=true badfun=true moving_badarity=true precedence=true opcode_variants=true native_export=true work_prefixes=true allocation_prefixes=true memory_limit=true code_leases=true reclaimed=true");
+}
 int main(int argc,char **argv)
 {
     CHECK(argc==3); LbEngine *engine; LbWorld *world;
-    CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_world_create(engine,&world)==LB_WORLD_OK); lb_engine_enter(engine);
+    Memory memory={0}; LbSystemAllocator allocator={&memory,owned_allocate,owned_release};
+    CHECK(lb_engine_create(&allocator,&engine)==LB_ENGINE_OK && lb_world_create(engine,&world)==LB_WORLD_OK); lb_engine_enter(engine);
     LbCodeModule *host=load(world,argv[1]),*target=load(world,argv[2]);
-    semantics(world,host,target); fixed_error(world,host); lifetime(world,host,target); boundaries(world,host,target); execution(world,host,target);
+    semantics(world,host,target); fixed_error(world,host); lifetime(world,host,target); boundaries(world,host,target); execution(world,host,target); fun_components(world,host,target);
     lb_engine_leave(engine); LbReclamation *reclamation;
     CHECK(lb_world_stop(world,&reclamation)==LB_WORLD_OK && lb_reclamation_poll(reclamation)==LB_WORLD_OK);
     CHECK(lb_reclamation_consume(reclamation)==LB_WORLD_OK); lb_reclamation_release(reclamation); lb_world_release(world);
-    CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
+    CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!memory.live && !memory.bytes);
     puts("CORE_APPLY_COMPONENTS_OK nested=true fixed=true argument_limits=true moving_badarg=true code_pc_stack_leases=true allocation_work_prefixes=true balanced=true instruction_dispatch=true external_apply_export=true"); return 0;
 }

@@ -60,6 +60,12 @@ LbCodeStatus lb_code_space_create_in_domain(LbEngine *engine,LbAllocDomain *doma
     apply->trampoline.op=op_i_apply_only;
     apply->dispatch.addresses[0]=&apply->trampoline.op;
     apply->next=space->exports; space->exports=apply;
+    apply=&space->apply_fun_export;
+    apply->bif_number=-1; apply->info.op=op_i_func_info_IaaI;
+    apply->info.mfa=(LbMFA){am_erlang,am_apply,2};
+    apply->trampoline.op=op_i_apply_fun_only;
+    apply->dispatch.addresses[0]=&apply->trampoline.op;
+    apply->next=space->exports; space->exports=apply;
     lb_engine_space_published(engine); *out=space; return LB_CODE_OK;
 }
 LbCodeStatus lb_code_space_create(LbEngine *engine,LbCodeSpace **out)

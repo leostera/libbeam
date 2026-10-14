@@ -65,6 +65,16 @@ TEST(DispatchCalls, RealApplyVariantsUseOwnedStateAndAccountFailures) {
         EXPECT_EQ(body.find("handle_error("), std::string::npos);
     }
 }
+TEST(DispatchCalls, ApplyFunVariantsRetainOwnedFailureBoundaries) {
+    for (const char* name : {"i_apply_fun", "i_apply_fun_last_Q", "i_apply_fun_only"}) {
+        const auto body = libbeam_build::owned_apply_fun(libbeam_build::dispatch_case(generated, name));
+        EXPECT_NE(body.find("next=lb_apply_fun(c_p)"), std::string::npos);
+        for (const char* failure : {"work_failure", "resource_limit", "memory_failure", "execution_refused", "malformed_code"})
+            EXPECT_NE(body.find(std::string("goto ")+failure+";"), std::string::npos);
+        EXPECT_EQ(body.find("apply_fun(c_p, x(0)"), std::string::npos);
+    }
+    EXPECT_THROW(libbeam_build::owned_apply_fun("OpCase(i_apply_fun): {}"), std::runtime_error);
+}
 TEST(DispatchCalls, RealClosuresRetainCodeAndCallsClearReservation) {
     const auto creation = libbeam_build::owned_make_fun(libbeam_build::dispatch_case(generated, "i_make_fun3_Fdtt"));
     EXPECT_NE(creation.find("lb_fun_retain(c_p,fe)"), std::string::npos);

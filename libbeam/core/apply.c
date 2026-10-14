@@ -79,6 +79,35 @@ const Export *lb_apply(LbProcess *p)
     for(unsigned i=0;i<arity;++i) { p->reg[i]=list_val(cursor)[0]; cursor=list_val(cursor)[1]; }
     return target;
 }
+const BeamInstr *lb_apply_fun(LbProcess *p)
+{
+    Eterm fun=p->reg[0],arguments=p->reg[1],cursor=arguments; unsigned arity=0;
+    p->last_native_cost=0;
+    if(!charge(p,1)) return NULL;
+    /* Validate the complete spine before overwriting any argument register.
+     * List errors precede badfun/badarity, as in the pinned apply_fun. */
+    while(is_list(cursor)) {
+        if(!charge(p,1)) return NULL;
+        if(arity==MAX_REG-1) {
+            p->current=&p->entry_module->space->apply_fun_export.info.mfa;
+            p->freason=LB_EXC_SYSTEM_LIMIT; return NULL;
+        }
+        ++arity; cursor=CDR(list_val(cursor));
+    }
+    if(!is_nil(cursor)) {
+        p->current=&p->entry_module->space->apply_fun_export.info.mfa;
+        p->freason=LB_EXC_BADARG; return NULL;
+    }
+    if(!charge(p,arity+lb_work_bulk_units(arity+1))) return NULL;
+    cursor=arguments;
+    for(unsigned i=0;i<arity;++i) { p->reg[i]=CAR(list_val(cursor)); cursor=CDR(list_val(cursor)); }
+    p->reg[arity]=fun;
+    /* All borrowed input views are now rooted in the register bank. Shared
+     * fun resolution checks namespace/code leases and owns any error GC. */
+    Uint prior=p->last_native_cost;
+    const BeamInstr *next=lb_fun_call(p,arity); p->last_native_cost+=prior;
+    return next;
+}
 const Export *lb_fixed_apply(LbProcess *p,unsigned arity)
 {
     p->last_native_cost=0;
