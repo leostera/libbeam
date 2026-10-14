@@ -7,6 +7,7 @@
 #include "code_internal.h"
 #include "fun.h"
 #include "flatmap.h"
+#include "binary.h"
 #define BITS (MAX_REG/64)
 #define NO_FRAME SIZE_MAX
 #define TUPLE_SHAPE UINT32_C(0x1000000)
@@ -15,6 +16,7 @@
 #define MATCH_CONTEXT_SHAPE UINT32_C(0x10000000)
 #define POSSIBLE_MATCH_CONTEXT UINT32_C(0x20000000)
 #define MAP_SHAPE UINT32_C(0x40000000)
+#define BITSTRING_SHAPE UINT32_C(0x80000000)
 #define MATCH_CONTEXT_FLAGS (MATCH_CONTEXT_SHAPE|POSSIBLE_MATCH_CONTEXT)
 #define CONSUMED_VALUE UINT32_C(0x8000000) /* initialized GC root, unavailable logical value */
 #define ARITY_MASK UINT32_C(0xffffff)
@@ -55,6 +57,7 @@ static uint32_t shape(LoaderState *st,const Flow *f,BeamOpArg arg)
         if(is_tuple(term)) return TUPLE_SHAPE | (uint32_t)arityval(*tuple_val(term));
         if(is_list(term)) return LIST_SHAPE;
         if(lb_is_flatmap(term)) return MAP_SHAPE;
+        LbBitstringView view; if(lb_bitstring_view(term,&view)) return BITSTRING_SHAPE;
     }
     return 0;
 }
@@ -174,7 +177,7 @@ static int same_register(BeamOpArg a,BeamOpArg b)
 }
 static LbCodeStatus binary_flow(LoaderState *st,Flow *f,Flow *failed,BeamOp *op)
 {
-    BeamOpArg *a=op->a; uint32_t result_shape=0; int consuming;
+    BeamOpArg *a=op->a; uint32_t result_shape=BITSTRING_SHAPE; int consuming;
     REQUIRE(op->arity>=12 && a[5].type==TAG_u && a[5].val>=6 &&
             (Uint)a[5].val==op->arity-6 && a[5].val%6==0 && (Uint)a[5].val<=65536);
     REQUIRE(a[1].type==TAG_u && (Uint)a[1].val<=UINT32_MAX && a[2].type==TAG_u && roots(f,(Uint)a[2].val));
@@ -279,7 +282,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:case genop_select_val_3:
         case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_get_list_3:
         case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif1_5:case genop_gc_bif2_6:
-        case genop_bs_match_3:case genop_bs_start_match3_4:case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_make_fun3_3:
+        case genop_bs_match_3:case genop_bs_start_match3_4:case genop_bs_start_match4_4:case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_make_fun3_3:
         case genop_new_map_3:case genop_put_map_assoc_5:case genop_put_map_exact_5:
         case genop_get_map_elements_3:case genop_has_map_fields_3:
         case genop_badmatch_1:case genop_case_end_1:break;
@@ -399,6 +402,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                    native!=&st->space->engine->bifs[BIF_byte_size_1] &&
                    native!=&st->space->engine->bifs[BIF_sminus_1]) return LB_CODE_UNSUPPORTED;
             } else if(native!=&st->space->engine->bifs[BIF_splus_2] &&
+                      native!=&st->space->engine->bifs[BIF_sminus_2] &&
                       native!=&st->space->engine->bifs[BIF_stimes_2] &&
                       native!=&st->space->engine->bifs[BIF_intdiv_2] &&
                       native!=&st->space->engine->bifs[BIF_rem_2]) return LB_CODE_UNSUPPORTED;
@@ -527,6 +531,16 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             }
             break;
         }
+        case genop_bs_start_match4_4:
+            /* no_fail becomes a zero-offset failure edge. Only an actual
+             * constructor/literal/context proof can make that edge unreachable;
+             * compiler type hints alone must never authorize it. */
+            REQUIRE(a[0].type==TAG_a && a[0].val==am_no_fail && root_source(st,&f,a[2]));
+            s=shape(st,&f,a[2]);
+            REQUIRE(s==BITSTRING_SHAPE || s==APPEND_SHAPE || s==MATCH_CONTEXT_SHAPE);
+            REQUIRE(a[1].type==TAG_u && (Uint)a[1].val<MAX_REG && roots(&f,(Uint)a[1].val));
+            trim_live(&f,(Uint)a[1].val); f.heap=0;
+            REQUIRE(destination(&f,a[3],MATCH_CONTEXT_SHAPE)); break;
         case genop_bs_start_match3_4:
             REQUIRE(label(st,a[0]) && root_source(st,&f,a[1]) && a[2].type==TAG_u && (Uint)a[2].val<MAX_REG);
             REQUIRE(roots(&f,(Uint)a[2].val));

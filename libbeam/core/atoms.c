@@ -333,6 +333,12 @@ LbAtomStatus lb_atoms_name(const LbAtomTable *t, Eterm term, LbBeamBytes *out)
     *out = (LbBeamBytes){entry->name, entry->length};
     return LB_ATOM_OK;
 }
+LbAtomStatus lb_atoms_hash(const LbAtomTable *t,Eterm term,uint32_t *out)
+{
+    if(!out || !t || !is_atom(term)) return LB_ATOM_INVALID;
+    if(atom_val(term)>=t->count) return LB_ATOM_NOT_FOUND;
+    *out=(uint32_t)t->index[atom_val(term)]->hash; return LB_ATOM_OK;
+}
 LbAtomStatus lb_atoms_retain(LbAtomTable *t)
 {
     if (!t) return LB_ATOM_INVALID;

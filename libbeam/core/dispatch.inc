@@ -3324,6 +3324,29 @@ OpCase(move3_xxxxxx):
   GotoPF(next_pf);
 }
 
+OpCase(i_bs_read_integer_8_xx):
+{
+  Eterm tmp_packed1 = I[1];
+  BeamInstr next_pf = BeamCodeAddr(I[2]);
+  ErlSubBits *sb = (ErlSubBits*)bitstring_val(xb(tmp_packed1&BEAM_LOOSE_MASK));
+  const byte *byte_ptr;
+  Uint bit_offset = sb->start % 8;
+  Eterm result;
+
+  byte_ptr = erl_sub_bits_get_base(sb) + BYTE_OFFSET(sb->start);
+  sb->start += 8;
+  result = byte_ptr[0];
+  if (bit_offset != 0) {
+    result = result << 8 | byte_ptr[1];
+    result = ((result << bit_offset) >> 8) & 0xff;
+  }
+  result = make_small(result);
+  xb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = result;
+  I += 2;
+  ASSERT(VALID_INSTR(next_pf));
+  GotoPF(next_pf);
+}
+
 OpCase(move2_par_yxxy):
 {
   Eterm tmp_packed1 = I[1];

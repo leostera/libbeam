@@ -15,7 +15,7 @@ inline const std::set<std::string> owned_predicates = {
     "needs_nif_padding", "is_heavy_bif", "smp_already_locked", "smp_mark_target_label",
 };
 inline const std::set<std::string> transform_generators = {
-    "allocate", "allocate_heap", "init_yregs", "select_tuple_arity", "increment", "create_bin",
+    "allocate", "allocate_heap", "init_yregs", "select_tuple_arity", "increment", "increment_from_minus", "plus_from_minus", "create_bin",
     "call_fun2", "make_fun3", "is_function2", "get", "element", "literal_timeout",
     "literal_timeout_locked", "select_val", "bs_match", "const_select_val", "jump_tab",
     "select_literals", "split_values",

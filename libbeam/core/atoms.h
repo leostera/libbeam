@@ -34,6 +34,8 @@ void lb_atoms_commit(LbAtomTransaction *);
 void lb_atoms_abort(LbAtomTransaction *);
 LbAtomStatus lb_atoms_find(const LbAtomTable *, const void *, size_t, Eterm *);
 LbAtomStatus lb_atoms_name(const LbAtomTable *, Eterm, LbBeamBytes *);
+/* Pinned hashpjw value, independent of namespace insertion order. */
+LbAtomStatus lb_atoms_hash(const LbAtomTable *, Eterm, uint32_t *);
 /* Leases require an already-valid table. Release never automatically destroys.
  * Raw borrowed names/terms require the caller to retain their owner. */
 LbAtomStatus lb_atoms_retain(LbAtomTable *);

@@ -288,6 +288,7 @@ case op_wait_timeout_unlocked_sf: return 1;
 case op_wait_unlocked_f: return 1;
 case op_wait_timeout_locked_int_If: return 1;
 case op_wait_timeout_locked_sf: return 1;
+case op_i_bs_read_integer_8_xx: return 1;
 case op_i_bs_start_match3_xtjd: return 1;
 case op_i_bs_start_match3_ytjd: return 1;
 case op_i_bs_ensure_bits_read_xtf: return 1;

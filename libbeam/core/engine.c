@@ -40,6 +40,8 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_integer_to_binary_1,{am_erlang,am_integer_to_binary,1,lb_bif_integer_to_binary_1,BIF_KIND_HEAVY}},
         {BIF_send_2,{am_erlang,am_send,2,lb_bif_send_2,BIF_KIND_HEAVY}},
         {BIF_self_0,{am_erlang,am_self,0,lb_bif_self_0,BIF_KIND_HEAVY}},
+        {BIF_phash2_1,{am_erlang,am_phash2,1,lb_bif_phash2_1,BIF_KIND_HEAVY}},
+        {BIF_phash2_2,{am_erlang,am_phash2,2,lb_bif_phash2_2,BIF_KIND_HEAVY}},
         {BIF_group_leader_0,{am_erlang,am_group_leader,0,lb_bif_group_leader_0,BIF_KIND_HEAVY}},
         {BIF_SIZE+21u,{am_erlang,am_group_leader,2,lb_bif_group_leader_2,BIF_KIND_HEAVY}},
         {BIF_SIZE+19u,{am_erlang,am_garbage_collect,0,lb_bif_garbage_collect_0,BIF_KIND_HEAVY}},

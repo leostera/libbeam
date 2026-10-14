@@ -218,6 +218,8 @@ Eterm lb_bif_setelement_3(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_integer_to_binary_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_send_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_self_0(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_phash2_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_phash2_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_group_leader_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_group_leader_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_garbage_collect_0(LbProcess *,Eterm *,const BeamInstr *);

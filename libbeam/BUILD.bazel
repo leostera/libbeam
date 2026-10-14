@@ -5666,6 +5666,51 @@ cc_library(
 )
 
 genrule(
+  name = "hash_slice_fixture",
+  srcs = ["tests/fixtures/hash_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/hash_slice_fixture/hash_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/hash_slice.erl)",
+)
+
+genrule(
+  name = "hash_reference_fixture",
+  srcs = ["tests/fixtures/hash_reference.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/hash_reference_fixture/hash_reference.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/hash_reference.erl)",
+)
+
+cc_test(
+  name = "core_hash_test",
+  size = "medium",
+  srcs = ["tests/core_hash_test.c"],
+  args = ["$(rootpath :hash_slice_fixture)"],
+  data = ["hash_slice_fixture"],
+  deps = ["core"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "core_hash_work",
+  size = "medium",
+  args = ["$(rootpath :hash_slice_fixture)", "hash_slice", "zero", "negative", "too_large", "wrong_type"],
+  data = ["hash_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "hash_reference",
+  size = "medium",
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "phash2"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "hash_slice_fixture", "hash_reference_fixture", "core_hash_test"],
+  deps = ["reference_comparison_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
   name = "group_leader_slice_fixture",
   srcs = ["tests/fixtures/group_leader_slice.erl"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],

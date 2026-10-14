@@ -226,11 +226,23 @@ static void arithmetic_edges(LbCodeSpace *space)
     ret(&p); ADD(&p,label_1,U(3)); ADD(&p,get_hd_2,X(1),X(0)); ret(&p);
     verify(space,&p,LB_CODE_FORMAT);
 }
+static void proven_match_start(LbCodeSpace *space)
+{
+    Eterm empty[2]={_make_header(1,HEAP_BITS_SUBTAG),0};
+    Eterm literals[]={make_boxed(empty),make_small(0)};
+    for(unsigned mode=0;mode<4;++mode) {
+        Program p; begin(&p);
+        if(mode!=1) ADD(&p,move_2,((BeamOpArg){TAG_q,mode==2?1:0}),X(0));
+        ADD(&p,bs_start_match4_4,((BeamOpArg){TAG_a,mode==3?am_resume:am_no_fail}),U(2),X(0),X(1));
+        ADD(&p,move_2,N,X(0)); ret(&p);
+        verify_literals(space,&p,mode==0?LB_CODE_OK:LB_CODE_FORMAT,literals,2);
+    }
+}
 int main(void)
 {
     LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
+    proven_match_start(space); joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     puts("CORE_SHAPE_PROOF_OK failure_edges=true late_joins=true backedges=true bounds=true alias_moves=true call_clobbers=true y_facts=true hints_not_authority=true arithmetic_edges=true predicate_scratch=true list_not_cons=true trim_facts=true execution=false");
     return 0;
