@@ -4238,12 +4238,28 @@ cc_test(
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
+genrule(
+  name = "batch_conflict_fixture",
+  srcs = ["tests/fixtures/batch_conflict/batch_alpha.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/batch_conflict_fixture/batch_alpha.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/batch_conflict/batch_alpha.erl)",
+)
+
+genrule(
+  name = "batch_gamma_fixture",
+  srcs = ["tests/fixtures/batch_gamma.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/batch_gamma_fixture/batch_gamma.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/batch_gamma.erl)",
+)
+
 cc_test(
   name = "core_batch_admission",
   size = "medium",
   timeout = "moderate",
-  args = ["$(rootpath :batch_alpha_fixture)", "$(rootpath :batch_beta_fixture)", "$(rootpath :batch_unsupported_fixture)"],
-  data = ["batch_alpha_fixture", "batch_beta_fixture", "batch_unsupported_fixture"],
+  args = ["$(rootpath :batch_alpha_fixture)", "$(rootpath :batch_beta_fixture)", "$(rootpath :batch_unsupported_fixture)", "$(rootpath :batch_gamma_fixture)", "$(rootpath :batch_conflict_fixture)"],
+  data = ["batch_alpha_fixture", "batch_beta_fixture", "batch_unsupported_fixture", "batch_gamma_fixture", "batch_conflict_fixture"],
   deps = ["core_batch_admission_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )

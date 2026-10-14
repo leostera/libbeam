@@ -35,10 +35,10 @@ static Eterm atom(LbCodeSpace *space,const char *name)
 {
     Eterm result; CHECK(lb_atoms_find(space->atoms,name,strlen(name),&result)==LB_ATOM_OK); return result;
 }
-static void run_zero_arity(LbCodeSpace *space)
+static void run_named_zero_arity(LbCodeSpace *space,const char *name)
 {
     LbCodeEntry *entry=NULL; LbProcess *process=NULL; LbProcessStatus status=LB_PROCESS_YIELDED;
-    Eterm module=atom(space,"batch_alpha"),function=atom(space,"run"); size_t steps;
+    Eterm module=atom(space,name),function=atom(space,"run"); size_t steps;
     LbCodeEntry *binary_entry=NULL;
     CHECK(lb_code_entry_acquire(space,module,atom(space,"entry"),1,&binary_entry)==LB_CODE_OK);
     lb_code_entry_release(binary_entry);
@@ -53,6 +53,7 @@ static void run_zero_arity(LbCodeSpace *space)
     CHECK(tuple_val(result)[1]==make_small(42) && tuple_val(result)[2]==atom(space,"batch_value"));
     lb_process_destroy(process);
 }
+static void run_zero_arity(LbCodeSpace *space) { run_named_zero_arity(space,"batch_alpha"); }
 static void expect_name(const unsigned char *actual,size_t actual_size,const char *expected)
 {
     CHECK(actual_size==strlen(expected) && !memcmp(actual,expected,actual_size));
@@ -96,6 +97,70 @@ static void failures(LbEngine *engine,Memory *memory,const unsigned char *alpha,
     CHECK(lb_code_unload_all(space)==LB_CODE_OK);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK);
 }
+static void store_u32(unsigned char *target,size_t value)
+{
+    CHECK(value<=UINT32_MAX);
+    target[0]=(unsigned char)(value>>24); target[1]=(unsigned char)(value>>16);
+    target[2]=(unsigned char)(value>>8); target[3]=(unsigned char)value;
+}
+static unsigned char *padded_image(const unsigned char *original,size_t size,size_t target)
+{
+    /* Unknown IFF chunks are valid BEAM. Preserve every original chunk and
+     * instruction while exercising the real encoded-byte admission boundary. */
+    CHECK(size%4==0 && target%4==0 && target>=size+8);
+    unsigned char *bytes=calloc(1,target+1); CHECK(bytes);
+    memcpy(bytes,original,size); store_u32(bytes+4,target-8);
+    memcpy(bytes+size,"LbPd",4); store_u32(bytes+size+4,target-size-8);
+    return bytes;
+}
+static void exact_batch_limits(LbEngine *engine,Memory *memory,const unsigned char *alpha,size_t alpha_size,
+                               const unsigned char *beta,size_t beta_size)
+{
+    LbCodeSpace *space=NULL; LbBeamError error; LbLoadReport report;
+    CHECK(LB_CODE_BATCH_MODULE_LIMIT==4096u);
+    CHECK(LB_CODE_BATCH_BYTES_LIMIT==64u*1024u*1024u);
+    LbCodeInput *repeated=calloc(4097,sizeof(*repeated)); CHECK(repeated);
+    for(size_t i=0;i<4097;++i) repeated[i]=(LbCodeInput){alpha,alpha_size};
+    CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
+    size_t live=memory->live,bytes=memory->bytes,atoms=lb_atoms_count(space->atoms),calls=memory->calls;
+    CHECK(lb_code_load_batch(space,repeated,0,&error,&report)==LB_CODE_INVALID);
+    CHECK(lb_code_load_batch(space,repeated,4097,&error,&report)==LB_CODE_LIMIT);
+    CHECK(!strcmp(report.stage,"batch module limit") && memory->calls==calls);
+    for(size_t count=4095;count<=4096;++count) {
+        /* Within the count boundary, actual parsing/duplicate detection must
+         * run. A lower hidden count cap must not masquerade as acceptance. */
+        CHECK(lb_code_load_batch(space,repeated,count,&error,&report)==LB_CODE_EXISTS);
+        CHECK(report.has_module_index && report.module_index==1);
+        CHECK(!space->modules && !space->loading);
+        CHECK(memory->live==live && memory->bytes==bytes && lb_atoms_count(space->atoms)==atoms);
+    }
+    CHECK(lb_code_space_destroy(space)==LB_CODE_OK); free(repeated);
+
+    const size_t boundary=64u*1024u*1024u;
+    const size_t encoded_sizes[2]={boundary-4,boundary};
+    for(size_t i=0;i<2;++i) {
+        const size_t alpha_bytes=encoded_sizes[i]-beta_size;
+        unsigned char *owned_alpha=padded_image(alpha,alpha_size,alpha_bytes);
+        unsigned char *owned_beta=malloc(beta_size); CHECK(owned_beta); memcpy(owned_beta,beta,beta_size);
+        LbCodeInput group[2]={{owned_alpha,alpha_bytes},{owned_beta,beta_size}};
+        CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
+        if(encoded_sizes[i]==boundary) {
+            live=memory->live; bytes=memory->bytes; atoms=lb_atoms_count(space->atoms); calls=memory->calls;
+            group[0].size=alpha_bytes+1; /* backed by a real extra byte */
+            CHECK(lb_code_load_batch(space,group,2,&error,&report)==LB_CODE_LIMIT);
+            CHECK(!strcmp(report.stage,"batch byte limit") && memory->calls==calls);
+            CHECK(!space->modules && !space->loading);
+            CHECK(memory->live==live && memory->bytes==bytes && lb_atoms_count(space->atoms)==atoms);
+            group[0].size=alpha_bytes;
+        }
+        CHECK(lb_code_load_batch(space,group,2,&error,&report)==LB_CODE_OK);
+        /* Published code and literals cannot borrow either caller buffer. */
+        memset(owned_alpha,0xa5,alpha_bytes); memset(owned_beta,0xa5,beta_size);
+        free(owned_alpha); free(owned_beta);
+        run_zero_arity(space);
+        CHECK(lb_code_unload_all(space)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
+    }
+}
 static void allocation_prefixes(LbEngine *engine,Memory *memory,const unsigned char *alpha,size_t alpha_size,
                                 const unsigned char *beta,size_t beta_size)
 {
@@ -121,18 +186,78 @@ static void allocation_prefixes(LbEngine *engine,Memory *memory,const unsigned c
         CHECK(lb_code_unload_all(space)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
     }
 }
+static void existing_allocation_prefixes(LbEngine *engine,Memory *memory,
+                                        const LbCodeInput base[2],const LbCodeInput *addition)
+{
+    LbCodeSpace *space=NULL,*peer=NULL; LbBeamError error; LbLoadReport report;
+    CHECK(lb_code_space_create(engine,&peer)==LB_CODE_OK);
+    CHECK(lb_code_load_batch(peer,base,2,&error,&report)==LB_CODE_OK);
+    CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
+    CHECK(lb_code_load_batch(space,base,2,&error,&report)==LB_CODE_OK);
+    size_t before=memory->calls;
+    CHECK(lb_code_load_batch(space,addition,1,&error,&report)==LB_CODE_OK);
+    const size_t allocations=memory->calls-before; CHECK(allocations>0);
+    run_named_zero_arity(space,"batch_gamma");
+    CHECK(lb_code_unload_all(space)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
+    for(size_t i=1;i<=allocations;++i) {
+        CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
+        CHECK(lb_code_load_batch(space,base,2,&error,&report)==LB_CODE_OK);
+        LbCodeModule *head=space->modules,*next=head->next;
+        CHECK(next && !next->next);
+        size_t live=memory->live,bytes=memory->bytes,atoms=lb_atoms_count(space->atoms);
+        size_t head_importers=head->importers,next_importers=next->importers;
+        memory->fail=memory->calls+i;
+        CHECK(lb_code_load_batch(space,addition,1,&error,&report)==LB_CODE_NO_MEMORY);
+        memory->fail=0;
+        CHECK(!space->loading && space->modules==head && head->next==next && !next->next);
+        CHECK(head->importers==head_importers && next->importers==next_importers);
+        CHECK(memory->live==live && memory->bytes==bytes && lb_atoms_count(space->atoms)==atoms);
+        run_zero_arity(space); run_zero_arity(peer);
+        CHECK(lb_code_load_batch(space,addition,1,&error,&report)==LB_CODE_OK);
+        run_named_zero_arity(space,"batch_gamma");
+        CHECK(lb_code_unload_all(space)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
+    }
+    run_zero_arity(peer);
+    CHECK(lb_code_unload_all(peer)==LB_CODE_OK && lb_code_space_destroy(peer)==LB_CODE_OK);
+}
+static void conflicting_code_rollback(LbEngine *engine,Memory *memory,const LbCodeInput base[2],
+                                      const LbCodeInput *addition,const LbCodeInput *conflict)
+{
+    LbCodeSpace *space=NULL; LbBeamError error; LbLoadReport report;
+    CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
+    CHECK(lb_code_load_batch(space,base,2,&error,&report)==LB_CODE_OK);
+    LbCodeModule *head=space->modules,*next=head->next;
+    size_t live=memory->live,bytes=memory->bytes,atoms=lb_atoms_count(space->atoms);
+    LbCodeInput attempted[2]={*addition,*conflict};
+    CHECK(lb_code_load_batch(space,attempted,2,&error,&report)==LB_CODE_EXISTS);
+    CHECK(report.has_module_index && report.module_index==1 && !space->loading);
+    CHECK(space->modules==head && head->next==next && !next->next);
+    CHECK(memory->live==live && memory->bytes==bytes && lb_atoms_count(space->atoms)==atoms);
+    /* The conflicting real compiler output returns 43, not 42. Neither that
+     * replacement nor its batch peer may have escaped the failed transaction. */
+    run_zero_arity(space);
+    CHECK(lb_code_load_batch(space,addition,1,&error,&report)==LB_CODE_OK);
+    run_named_zero_arity(space,"batch_gamma");
+    CHECK(lb_code_unload_all(space)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
+}
 int main(int argc,char **argv)
 {
     Memory memory={0}; LbSystemAllocator allocator={&memory,allocate,release}; LbEngine *engine=NULL;
     LbCodeSpace *first=NULL,*second=NULL; LbCodeInput group[2]; LbBeamError error; LbLoadReport report;
-    LbCodeModule *module; size_t alpha_size,beta_size,unsupported_size;
-    unsigned char *alpha,*beta,*unsupported;
-    CHECK(argc==4); alpha=read_image(argv[1],&alpha_size); beta=read_image(argv[2],&beta_size);
-    unsupported=read_image(argv[3],&unsupported_size);
+    LbCodeModule *module; size_t alpha_size,beta_size,unsupported_size,gamma_size,conflict_size;
+    unsigned char *alpha,*beta,*unsupported,*gamma,*conflict;
+    CHECK(argc==6); alpha=read_image(argv[1],&alpha_size); beta=read_image(argv[2],&beta_size);
+    unsupported=read_image(argv[3],&unsupported_size); gamma=read_image(argv[4],&gamma_size);
+    conflict=read_image(argv[5],&conflict_size);
     group[0]=(LbCodeInput){beta,beta_size}; group[1]=(LbCodeInput){alpha,alpha_size};
     CHECK(lb_engine_create(&allocator,&engine)==LB_ENGINE_OK);
     failures(engine,&memory,alpha,alpha_size,beta,beta_size,unsupported,unsupported_size);
     allocation_prefixes(engine,&memory,alpha,alpha_size,beta,beta_size);
+    exact_batch_limits(engine,&memory,alpha,alpha_size,beta,beta_size);
+    LbCodeInput addition={gamma,gamma_size};
+    existing_allocation_prefixes(engine,&memory,group,&addition);
+    LbCodeInput conflicting={conflict,conflict_size};
+    conflicting_code_rollback(engine,&memory,group,&addition,&conflicting);
     CHECK(lb_code_space_create(engine,&first)==LB_CODE_OK && lb_code_space_create(engine,&second)==LB_CODE_OK);
     CHECK(lb_code_load_batch(first,group,2,&error,&report)==LB_CODE_OK);
     CHECK(lb_code_load_batch(second,group,2,&error,&report)==LB_CODE_OK);
@@ -148,7 +273,7 @@ int main(int argc,char **argv)
     CHECK(lb_code_unload_all(second)==LB_CODE_OK && lb_code_space_destroy(second)==LB_CODE_OK);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     CHECK(!memory.live && !memory.bytes);
-    free(alpha); free(beta); free(unsupported);
+    free(alpha); free(beta); free(unsupported); free(gamma); free(conflict);
     puts("CORE_BATCH_ADMISSION_OK forward_imports=true mutual_imports=true rollback=true allocation_prefixes=true independent_spaces=true physical_retirement=true");
     return 0;
 }
