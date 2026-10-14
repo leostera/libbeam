@@ -5,6 +5,42 @@ load("//bazel:testing.bzl", "cross_configuration_artifacts", "runtime_link_input
 
 package(default_visibility = ["//visibility:public"])
 
+cc_binary(
+  name = "boundary_library_probe.so",
+  testonly = True,
+  srcs = ["tests/boundary_library_probe.c"],
+  linkshared = True,
+)
+
+cc_test(
+  name = "boundary_test",
+  size = "medium",
+  srcs = ["tests/boundary_test.cpp", "tests/test_directory.hpp", "tests/test_process.hpp"],
+  args = ["$(rootpath :boundary_slice_fixture)", "$(rootpath @libbeam_host//:otp/bin/erl)", "$(rootpath :boundary_library_probe.so)"],
+  data = ["boundary_slice_fixture", "boundary_library_probe.so", "@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl"],
+  copts = ["-std=c++17"],
+  deps = ["libbeam", "@googletest//:gtest"],
+  linkopts = select({"@platforms//os:linux": ["-ldl"], "//conditions:default": []}),
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
+  name = "boundary_slice_fixture",
+  srcs = ["tests/fixtures/boundary_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/boundary_slice_fixture/boundary_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/boundary_slice.erl)",
+)
+
+genrule(
+  name = "sdk_boundary_fixture",
+  srcs = ["tests/fixtures/sdk_boundary_worker.ex", "tests/fixtures/hello_worker/midgard/worker.ex", "tests/fixtures/hello_worker/midgard/protocol.ex", "tests/fixtures/hello_worker/midgard/request.ex"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "@libbeam_host//:elixir", "@libbeam_host//:elixir/bin/elixir"],
+  outs = ["fixtures/sdk_boundary/Elixir.BoundaryWorker.beam", "fixtures/sdk_boundary/Elixir.Midgard.Worker.beam", "fixtures/sdk_boundary/Elixir.Midgard.Protocol.beam", "fixtures/sdk_boundary/Elixir.Midgard.Request.beam"],
+  cmd = "mkdir -p $(@D)/fixtures/sdk_boundary; PATH=$$PWD/$$(dirname $(location @libbeam_host//:otp/bin/erl)):$$PATH ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' ERL_COMPILER_OPTIONS=deterministic $(location @libbeam_host//:elixir/bin/elixir) -e '[output | sources] = System.argv(); {:ok, _, _} = Kernel.ParallelCompiler.compile_to_path(sources, output, return_diagnostics: true)' $(@D)/fixtures/sdk_boundary $(SRCS)",
+)
+
 genrule(
   name = "hello_worker_repeat_fixture",
   srcs = [
@@ -38,9 +74,9 @@ cc_test(
   name = "hello_worker_test",
   size = "medium",
   srcs = ["tests/hello_worker_test.cpp", "tests/source_support.hpp", "tests/test_process.hpp"],
-  args = ["$(rootpath :hello_worker_fixture)", "$(rootpath :hello_worker_repeat_fixture)"],
+  args = ["$(rootpath :hello_worker_fixture)", "$(rootpath :hello_worker_repeat_fixture)", "$(rootpath :fixtures/sdk_boundary/Elixir.BoundaryWorker.beam)"],
   data = [
-    "hello_worker_fixture", "hello_worker_repeat_fixture",
+    "hello_worker_fixture", "hello_worker_repeat_fixture", "fixtures/sdk_boundary/Elixir.BoundaryWorker.beam",
     "tests/fixtures/hello_worker/app/hello_worker.ex",
     "tests/fixtures/hello_worker/app/greeter.ex",
     "tests/fixtures/hello_worker/midgard/protocol.ex",

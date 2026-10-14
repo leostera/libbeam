@@ -18,6 +18,7 @@ using libbeam_test::runfile;
 using libbeam_test::sha256;
 std::string fixture_path;
 std::string repeat_fixture_path;
+std::string sdk_fixture_path;
 
 class Reader {
 public:
@@ -209,14 +210,14 @@ protected:
         return target.load_modules(modules);
     }
     std::string invoke(std::string_view bytes) {
-        auto call = take(started ? isolate->call("Elixir.HelloWorker", "__midgard_call__", view(bytes))
-                                : isolate->start("Elixir.HelloWorker", "__midgard_call__", view(bytes)));
+        auto call = take(started ? isolate->call(entry_module, "__midgard_call__", view(bytes))
+                                : isolate->start(entry_module, "__midgard_call__", view(bytes)));
         started = true;
         const auto result = take(call.wait_until(deadline()));
         const auto consumed = call.wait_until(deadline());
         EXPECT_TRUE(std::holds_alternative<libbeam::Error>(consumed));
         if (const auto* error = std::get_if<libbeam::Error>(&consumed))
-            EXPECT_EQ(error->code, libbeam::ErrorCode::invalid_state);
+            EXPECT_EQ(error->code, libbeam::ErrorCode::closed);
         return {result.begin(), result.end()};
     }
     static void reclaim(libbeam::Isolate& target) {
@@ -235,6 +236,7 @@ protected:
     std::optional<libbeam::Engine> engine;
     std::optional<libbeam::Isolate> isolate;
     bool started = false;
+    std::string entry_module = "Elixir.HelloWorker";
 };
 TEST_F(HelloWorker, DefaultGreeting) {
     EXPECT_EQ(invoke(request("GET", "/hello")), response(200, "Hello, world!\n"));
@@ -341,12 +343,46 @@ TEST_F(HelloWorker, TwoIsolatesShareEngineNotApplicationState) {
     reclaim(peer);
     EXPECT_EQ(invoke(request("GET", "/hello")), response(200, "Hello, world!\n"));
 }
+// Separate callback fixtures exercise the real SDK without altering HelloWorker.
+class SdkBoundary : public HelloWorker {
+protected:
+    void SetUp() override {
+        HelloWorker::SetUp();
+        if (HasFatalFailure()) return;
+        const auto beam = read_file(sdk_fixture_path);
+        const auto loaded = isolate->load_module(view(beam));
+        ASSERT_FALSE(loaded) << (loaded ? loaded->message : "");
+        entry_module = "Elixir.BoundaryWorker";
+    }
+};
+TEST_F(SdkBoundary, OrdinaryCallbackExceptionBecomes500AndAllowsReuse) {
+    EXPECT_EQ(invoke(request("GET", "/raise")), response(500, "worker error\n"));
+    EXPECT_EQ(invoke(request("GET", "/ok")), response(200, "still usable\n"));
+}
+TEST_F(SdkBoundary, InvalidCallbackResponseBecomes500AndAllowsReuse) {
+    EXPECT_EQ(invoke(request("GET", "/invalid")), response(500, "worker error\n"));
+    EXPECT_EQ(invoke(request("GET", "/ok")), response(200, "still usable\n"));
+}
+TEST_F(SdkBoundary, RescueCannotConvertHostDenialInto500) {
+    const auto bytes = request("GET", "/deny");
+    {
+        auto call = take(isolate->start(entry_module, "__midgard_call__", view(bytes)));
+        started = true;
+        const auto result = call.wait_until(deadline());
+        const auto* error = std::get_if<libbeam::Error>(&result);
+        ASSERT_NE(error, nullptr);
+        EXPECT_EQ(error->code, libbeam::ErrorCode::capability_denied);
+        EXPECT_EQ(error->message, "erlang:load_nif/2 denied: NATIVE_LIBRARY");
+    }
+    EXPECT_EQ(invoke(request("GET", "/ok")), response(200, "still usable\n"));
+}
 } // namespace
 
 int main(int argc, char** argv) {
     testing::InitGoogleTest(&argc, argv);
-    if (argc != 3) return 2;
+    if (argc != 4) return 2;
     fixture_path = runfile(argv[1]);
     repeat_fixture_path = runfile(argv[2]);
+    sdk_fixture_path = runfile(argv[3]);
     return RUN_ALL_TESTS();
 }
