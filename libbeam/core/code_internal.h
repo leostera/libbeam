@@ -135,6 +135,7 @@ Eterm lb_bif_list_to_tuple_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_tuple_to_list_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_make_tuple_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_error_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_exit_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_get_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_put_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_erase_1(LbProcess *,Eterm *,const BeamInstr *);

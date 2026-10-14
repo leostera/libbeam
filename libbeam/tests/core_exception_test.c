@@ -155,6 +155,24 @@ static void actual_errors(LbCodeSpace *space,LbCodeModule *module,LbCodeEntry *i
     CHECK(lb_process_exception_value(p)==am_badarg && is_non_value(lb_process_exception_info(p)));
     lb_process_destroy(p); lb_code_entry_release(bif);
 }
+static void actual_exits(LbCodeSpace *space,LbCodeModule *module,LbCodeEntry *identity)
+{
+    LbCodeEntry *code=entry(space,module,"exiting");
+    LbProcess *p=process(code);
+    CHECK(run(p)==LB_PROCESS_EXCEPTION && lb_exception_class(p->freason)==am_exit);
+    for(size_t x=0;x<MAX_REG;++x) p->reg[x]=NIL;
+    CHECK(lb_process_collect(p,0)==LB_PROCESS_EXCEPTION);
+    Eterm reason=lb_process_exception_value(p); LbBitstringView view;
+    CHECK(lb_bitstring_view(reason,&view) && view.bit_size==520);
+    for(size_t i=0;i<65;++i) CHECK(view.data[i]==0x57);
+    Eterm normal=am_normal;
+    LbProcess *peer; CHECK(lb_process_create(code,&normal,1,32,&peer)==LB_PROCESS_READY);
+    CHECK(run(peer)==LB_PROCESS_EXCEPTION && lb_exception_class(peer->freason)==am_exit);
+    CHECK(lb_process_exception_value(peer)==am_normal); lb_process_destroy(peer);
+    CHECK(lb_process_create(identity,&normal,1,32,&peer)==LB_PROCESS_READY);
+    CHECK(run(peer)==LB_PROCESS_DONE && lb_process_result(peer)==am_normal);
+    lb_process_destroy(peer); lb_process_destroy(p); lb_code_entry_release(code);
+}
 static void execution(const char *path,int vectors)
 {
     FILE *f=fopen(path,"rb"); CHECK(f && !fseek(f,0,SEEK_END)); long size=ftell(f); CHECK(size>0 && !fseek(f,0,SEEK_SET));
@@ -164,6 +182,7 @@ static void execution(const char *path,int vectors)
     CHECK(lb_engine_create(&callbacks,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
     CHECK(lb_code_load(space,data,(size_t)size,&module,&error)==LB_CODE_OK); memset(data,0xa5,(size_t)size); free(data);
     LbCodeEntry *identity=entry(space,module,"identity"); expansion(identity,&m); actual_errors(space,module,identity,&m,vectors);
+    actual_exits(space,module,identity);
     lb_code_entry_release(identity); CHECK(lb_code_unload(module)==LB_CODE_OK);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!m.live);
     if(!vectors) puts("CORE_EXCEPTION_EXECUTION_OK encoded_reasons=true scalar_not_gc_root=true native_expansion=true real_instruction_errors=true error_root_gc=true copied_lifetime=true failure_retry=true binary_info_atomic=true stale_info_cleared=true exact_retirement=true stacktrace=false catch=false");

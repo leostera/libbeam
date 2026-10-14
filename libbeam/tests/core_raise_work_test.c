@@ -48,9 +48,9 @@ int main(int argc,char **argv)
     CHECK(bytes && fread(bytes,1,(size_t)size,file)==(size_t)size && !fclose(file));
     LbBytesView beam={bytes,(size_t)size}; LbEngine *engine; CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK);
     LbWorld *peer=make(engine,beam,1000000); LbCall *peer_call=invoke(peer,"identity",1); result(peer_call,LB_WORLD_OK); consume(peer_call);
-    const char *names[]={"raised_error","raised_exit","raised_throw","plain_throw","fun_frame","monitored"};
-    for(size_t i=0;i<6;++i) {
-        LbWorldStatus expected=i==5?LB_WORLD_OK:LB_WORLD_EXCEPTION;
+    const char *names[]={"raised_error","raised_exit","raised_throw","plain_throw","fun_frame","monitored","plain_exit"};
+    for(size_t i=0;i<sizeof(names)/sizeof(names[0]);++i) {
+        LbWorldStatus expected=!strcmp(names[i],"monitored")?LB_WORLD_OK:LB_WORLD_EXCEPTION;
         LbWorld *world=make(engine,beam,1000000); LbCall *call=invoke(world,names[i],1); result(call,expected);
         uint64_t cost=1000000-remaining(call); CHECK(cost>1 && cost<1000000);
         fprintf(stderr,"%s units=%llu\n",names[i],(unsigned long long)cost); consume(call); retire(world);

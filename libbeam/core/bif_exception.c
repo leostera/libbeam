@@ -5,6 +5,17 @@
  */
 #include "process_internal.h"
 #include "raise_trace.h"
+/* bif.c:exit_1 accepts any reason and raises an ordinary, catchable exit.
+ * Resource failure takes precedence and must never become a guest exit. */
+Eterm lb_bif_exit_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    p->fvalue=args[0]; p->freason=LB_EXC_EXIT;
+    return THE_NON_VALUE;
+}
 /* Native error_2 accepts any argument term. The wrapper is retained for trace
  * construction; only the first element becomes the terminal error reason. */
 Eterm lb_bif_error_2(LbProcess *p,Eterm *args,const BeamInstr *pc)

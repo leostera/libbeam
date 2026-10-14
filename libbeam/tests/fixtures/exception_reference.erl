@@ -16,4 +16,6 @@ run() ->
                     io:format("~w:~w~n", [Function, Atom])
             end
         end
-    end, [badmatch, case_clause, function_clause, bif]).
+    end, [badmatch, case_clause, function_clause, bif]),
+    {'EXIT', Value} = (catch exception_slice:exiting(Value)),
+    {'EXIT', normal} = (catch exception_slice:exiting(normal)).
