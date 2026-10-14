@@ -33,6 +33,13 @@ struct LbCall {
     int owner_live, slot_held, consumed;
 };
 struct LbReclamation { LbWorld *world; int consumed; };
+/* Serialized host-control variants, shared with the public operations. Require
+ * an active non-reentrant Engine borrow; they never interpret guest code.
+ * Keeping publication and cancellation in one borrow exposes the genuinely
+ * queued state without adding scheduler gates or timing-dependent tests. */
+LbWorldStatus lb_world_start_locked(LbWorld *,LbBytesView,LbBytesView,LbBytesView,LbCall **);
+LbWorldStatus lb_call_cancel_locked(LbCall *);
+LbWorldStatus lb_world_stop_locked(LbWorld *,LbReclamation **);
 /* These helpers run with the Engine mutex held, including on its worker.
  * Completion is an owned runtime operation, never an arbitrary host callback. */
 void lb_call_complete(LbCall *,LbProcess *,LbTaskStatus);

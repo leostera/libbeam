@@ -135,7 +135,7 @@ static LbWorldStatus resolve(LbWorld *world,LbBytesView module,LbBytesView funct
     if(status!=LB_ATOM_OK) return status==LB_ATOM_NOT_FOUND?LB_WORLD_NOT_FOUND:LB_WORLD_INVALID;
     return code_status(lb_code_entry_acquire(world->space,m,f,1,entry));
 }
-static LbWorldStatus admit(LbWorld *world,LbBytesView module,LbBytesView function,
+static LbWorldStatus admit_locked(LbWorld *world,LbBytesView module,LbBytesView function,
                            LbBytesView input,int starting,LbCall **out)
 {
     LbCall *call; LbCodeEntry *entry=NULL; void *memory;
@@ -143,21 +143,21 @@ static LbWorldStatus admit(LbWorld *world,LbBytesView module,LbBytesView functio
     if(!out) return LB_WORLD_INVALID;
     *out=NULL;
     if(!world) return LB_WORLD_INVALID;
-    lb_engine_enter(world->engine);
-    if(closed(world)) { status=LB_WORLD_CLOSED; goto unlock; }
+    if(!world->engine->control_borrow) abort();
+    if(closed(world)) { status=LB_WORLD_CLOSED; goto done; }
     if((module.size && !module.data) || (function.size && !function.data) ||
        (input.size && !input.data) || module.size>1020 || function.size>1020) {
-        status=LB_WORLD_INVALID; goto unlock;
+        status=LB_WORLD_INVALID; goto done;
     }
-    if(input.size>LB_CALL_BYTES_LIMIT) { status=LB_WORLD_LIMIT; goto unlock; }
+    if(input.size>LB_CALL_BYTES_LIMIT) { status=LB_WORLD_LIMIT; goto done; }
     charge=input.size+LB_CALL_BYTES_LIMIT; /* reserve worst-case output before accepting */
-    if(world->phase!=(starting?LB_WORLD_LOADING:LB_WORLD_RUNNING)) { status=LB_WORLD_INVALID_STATE; goto unlock; }
-    if(world->references==SIZE_MAX) { status=LB_WORLD_LIMIT; goto unlock; }
+    if(world->phase!=(starting?LB_WORLD_LOADING:LB_WORLD_RUNNING)) { status=LB_WORLD_INVALID_STATE; goto done; }
+    if(world->references==SIZE_MAX) { status=LB_WORLD_LIMIT; goto done; }
     if(world->outstanding==LB_CALL_COUNT_LIMIT || charge>LB_CALL_QUEUE_LIMIT-world->queued_bytes) {
-        status=LB_WORLD_FULL; goto unlock;
+        status=LB_WORLD_FULL; goto done;
     }
     lb_alloc_domain_begin_operation(&world->domain);
-    status=resolve(world,module,function,&entry); if(status!=LB_WORLD_OK) goto unlock;
+    status=resolve(world,module,function,&entry); if(status!=LB_WORLD_OK) goto done;
     if(lb_alloc_domain_allocate(world->engine->domain,sizeof(*call),&memory)!=LB_ALLOC_OK) {
         status=LB_WORLD_NO_MEMORY; goto release_entry;
     }
@@ -186,9 +186,20 @@ static LbWorldStatus admit(LbWorld *world,LbBytesView module,LbBytesView functio
     *out=call; status=LB_WORLD_OK;
 release_entry:
     lb_code_entry_release(entry);
-unlock:
+done:
+    return status;
+}
+static LbWorldStatus admit(LbWorld *world,LbBytesView module,LbBytesView function,
+                           LbBytesView input,int starting,LbCall **out)
+{
+    if(!out) return LB_WORLD_INVALID;
+    *out=NULL; if(!world) return LB_WORLD_INVALID;
+    lb_engine_enter(world->engine);
+    LbWorldStatus status=admit_locked(world,module,function,input,starting,out);
     lb_engine_leave(world->engine); return status;
 }
+LbWorldStatus lb_world_start_locked(LbWorld *w,LbBytesView m,LbBytesView f,LbBytesView b,LbCall **out)
+{ return admit_locked(w,m,f,b,1,out); }
 LbWorldStatus lb_world_start(LbWorld *w,LbBytesView m,LbBytesView f,LbBytesView b,LbCall **out)
 { return admit(w,m,f,b,1,out); }
 LbWorldStatus lb_world_call(LbWorld *w,LbBytesView m,LbBytesView f,LbBytesView b,LbCall **out)
@@ -292,13 +303,20 @@ LbWorldStatus lb_call_consume(LbCall *call)
     }
     lb_engine_leave(engine); return status;
 }
+LbWorldStatus lb_call_cancel_locked(LbCall *call)
+{
+    if(!call) return LB_WORLD_INVALID;
+    if(!call->world->engine->control_borrow) abort();
+    LbWorldStatus status=call->consumed?LB_WORLD_CLOSED:
+        (call->status==LB_WORLD_PENDING?LB_WORLD_OK:LB_WORLD_INVALID_STATE);
+    if(status==LB_WORLD_OK) lb_task_cancel_family_locked(call->budget,LB_TASK_CANCELLED);
+    return status;
+}
 LbWorldStatus lb_call_cancel(LbCall *call)
 {
     if(!call) return LB_WORLD_INVALID;
     LbEngine *engine=call->world->engine; lb_engine_enter(engine);
-    LbWorldStatus status=call->consumed?LB_WORLD_CLOSED:
-        (call->status==LB_WORLD_PENDING?LB_WORLD_OK:LB_WORLD_INVALID_STATE);
-    if(status==LB_WORLD_OK) lb_task_cancel_family_locked(call->budget,LB_TASK_CANCELLED);
+    LbWorldStatus status=lb_call_cancel_locked(call);
     lb_engine_leave(engine); return status;
 }
 void lb_call_release(LbCall *call)
@@ -346,12 +364,12 @@ static void close_admission(LbWorld *world)
 }
 void lb_world_close_for_limit_locked(LbWorld *world)
 { if(!closed(world)) close_admission(world); }
-LbWorldStatus lb_world_stop(LbWorld *world,LbReclamation **out)
+LbWorldStatus lb_world_stop_locked(LbWorld *world,LbReclamation **out)
 {
     LbReclamation *reclamation; void *memory; LbWorldStatus status;
     if(!out) return LB_WORLD_INVALID;
     *out=NULL; if(!world) return LB_WORLD_INVALID;
-    lb_engine_enter(world->engine);
+    if(!world->engine->control_borrow) abort();
     if(closed(world)) status=LB_WORLD_CLOSED;
     else if(world->references==SIZE_MAX) status=LB_WORLD_LIMIT;
     else if(lb_alloc_domain_allocate(world->engine->domain,sizeof(*reclamation),&memory)!=LB_ALLOC_OK)
@@ -360,6 +378,14 @@ LbWorldStatus lb_world_stop(LbWorld *world,LbReclamation **out)
         reclamation=memory; reclamation->world=world; reclamation->consumed=0; ++world->references;
         close_admission(world); *out=reclamation; status=LB_WORLD_OK;
     }
+    return status;
+}
+LbWorldStatus lb_world_stop(LbWorld *world,LbReclamation **out)
+{
+    if(!out) return LB_WORLD_INVALID;
+    *out=NULL; if(!world) return LB_WORLD_INVALID;
+    lb_engine_enter(world->engine);
+    LbWorldStatus status=lb_world_stop_locked(world,out);
     lb_engine_leave(world->engine); return status;
 }
 void lb_world_release(LbWorld *world)

@@ -5,6 +5,7 @@
 #include "world_internal.h"
 #include "pid_table.h"
 #include "process_internal.h"
+#include "work_budget_internal.h"
 #include <stdio.h>
 #include <stdatomic.h>
 #include <time.h>
@@ -59,6 +60,7 @@ static void expect(LbCall *call,LbWorldStatus status)
 {
     LbBytesView view; CHECK(await_call(call,&view)==status);
     CHECK(lb_call_consume(call)==LB_WORLD_OK && lb_call_consume(call)==LB_WORLD_CLOSED);
+    CHECK(lb_call_cancel(call)==LB_WORLD_CLOSED);
     CHECK(lb_call_poll(call,&view)==LB_WORLD_CLOSED && !view.data && !view.size); lb_call_release(call);
 }
 static void balanced(LbEngine *e,Memory *m,size_t live,size_t bytes)
@@ -173,6 +175,73 @@ static void execution(LbBytesView code)
     expect(retained,LB_WORLD_OK); CHECK(!m.live && !m.bytes);
     for(i=0;i<sizeof(host_reply);++i) CHECK(host_reply[i]==0x6b);
     puts("CORE_WORLD_EXECUTION_OK worker=true copied_results=true peer_progress=true capacity=true stopped_reclaimed=true replacement=true owner_drop=true public_api=false");
+}
+typedef enum { QUEUED, EXECUTING, WAITING } CancelState;
+static void await_cancel_state(LbCall *call,CancelState wanted,uint64_t initial_credit)
+{
+    const struct timespec delay={0,1000000};
+    for(unsigned i=0;i<5000;++i) {
+        LbTaskObservation observation=lb_task_observe(call->task);
+        lb_engine_enter(call->world->engine);
+        CHECK(call->status==LB_WORLD_PENDING);
+        int progressed=call->budget->remaining<initial_credit;
+        lb_engine_leave(call->world->engine);
+        CHECK(observation.status==LB_TASK_PENDING);
+        if(progressed && observation.waiting==(wanted==WAITING)) return;
+        nanosleep(&delay,NULL);
+    }
+    CHECK(0);
+}
+static void cancellation_states(LbBytesView code)
+{
+    Memory m={0}; LbEngine *engine=create(&m); LbWorld *peer;
+    LbCall *call; LbBytesView value;
+    CHECK(lb_world_create(engine,&peer)==LB_WORLD_OK && lb_world_load(peer,code)==LB_WORLD_OK);
+    CHECK(lb_world_start(peer,text("async_slice"),text("identity"),text("peer"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_OK);
+    lb_engine_enter(engine); size_t live=m.live,bytes=m.bytes; lb_engine_leave(engine);
+    for(unsigned round=0;round<8;++round) for(CancelState state=QUEUED;state<=WAITING;++state)
+    for(unsigned stopping=0;stopping<2;++stopping) {
+        LbWorld *world; LbCall *root; LbReclamation *receipt=NULL;
+        CHECK(lb_world_create(engine,&world)==LB_WORLD_OK && lb_world_load(world,code)==LB_WORLD_OK);
+        const char *function=state==QUEUED?"identity":state==EXECUTING?"loop":"park";
+        lb_engine_enter(engine);
+        CHECK(lb_world_start_locked(world,text("async_slice"),text(function),text("retained"),&root)==LB_WORLD_OK);
+        uint64_t credit=root->budget->remaining;
+        CHECK(root->status==LB_WORLD_PENDING && world->phase==LB_WORLD_RUNNING);
+        if(state==QUEUED) {
+            /* The worker cannot dispatch between publication and this operation. */
+            if(stopping) CHECK(lb_world_stop_locked(world,&receipt)==LB_WORLD_OK);
+            else CHECK(lb_call_cancel_locked(root)==LB_WORLD_OK);
+            CHECK(root->status==LB_WORLD_CANCELLED);
+        }
+        lb_engine_leave(engine);
+        if(state!=QUEUED) {
+            await_cancel_state(root,state,credit);
+            CHECK(lb_call_consume(root)==LB_WORLD_PENDING);
+            if(stopping) CHECK(lb_world_stop(world,&receipt)==LB_WORLD_OK);
+            else CHECK(lb_call_cancel(root)==LB_WORLD_OK);
+        }
+        CHECK(lb_call_cancel(root)==LB_WORLD_INVALID_STATE);
+        if(!stopping) {
+            CHECK(lb_world_call(world,text("async_slice"),text("identity"),text("reuse"),&call)==LB_WORLD_OK);
+            CHECK(await_call(call,&value)==LB_WORLD_OK && value.size==5 && !memcmp(value.data,"reuse",5));
+            expect(call,LB_WORLD_OK);
+            CHECK(lb_world_stop(world,&receipt)==LB_WORLD_OK);
+        }
+        reclaimed(receipt); lb_reclamation_release(receipt);
+        LbWorldResourceUsage usage;
+        CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && usage.closed && !world->space);
+        expect(root,LB_WORLD_CANCELLED);
+        CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && !usage.current);
+        lb_world_release(world);
+        CHECK(lb_world_call(peer,text("async_slice"),text("identity"),text("peer"),&call)==LB_WORLD_OK);
+        CHECK(await_call(call,&value)==LB_WORLD_OK && value.size==4 && !memcmp(value.data,"peer",4));
+        expect(call,LB_WORLD_OK); balanced(engine,&m,live,bytes);
+    }
+    lb_world_release(peer); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
+    CHECK(!m.live && !m.bytes);
+    puts("CORE_WORLD_CANCEL_STATES_OK queued=true executing=true waiting=true cancel_and_stop=true rounds=48 default_limits=true peer_survives=true exact_balance=true");
 }
 static void physical_release(LbBytesView code)
 {
@@ -452,9 +521,18 @@ static void stateful_probes(LbBytesView a_code,LbBytesView b_code)
         CHECK(!world->space && detached.size==4 && !memcmp(detached.data,"A:64",4));
         LbCall *closed=NULL;
         CHECK(lb_world_call(world,text("probe"),text("request"),text("read"),&closed)==LB_WORLD_CLOSED && !closed);
+        unsigned seen=0;
         for(unsigned i=0;i<8;++i) {
             LbBytesView result; LbWorldStatus status=await_call(queued[i],&result);
-            CHECK(status==LB_WORLD_OK || status==LB_WORLD_CANCELLED); expect(queued[i],status);
+            CHECK(status==LB_WORLD_OK || status==LB_WORLD_CANCELLED);
+            if(status==LB_WORLD_OK) {
+                CHECK(result.size==4 && result.data[0]=='A' && result.data[1]==':');
+                CHECK(result.data[2]>='0' && result.data[2]<='9' && result.data[3]>='0' && result.data[3]<='9');
+                unsigned value=(result.data[2]-'0')*10+result.data[3]-'0';
+                CHECK(value>=65 && value<=72 && !(seen&(1u<<(value-65))));
+                seen|=1u<<(value-65);
+            }
+            expect(queued[i],status);
         }
         expect(retained,LB_WORLD_OK); lb_reclamation_release(r); lb_world_release(world);
         expect(probe_call(peer,"request","read","B:0"),LB_WORLD_OK);
@@ -468,7 +546,7 @@ static void stateful_probes(LbBytesView a_code,LbBytesView b_code)
 int main(int argc,char **argv)
 {
     construction();
-    if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
+    if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); cancellation_states(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
     if(argc>=3) { LbBytesView code=image(argv[2]); spawned_children(code); free((void *)code.data); }
     if(argc==5) {
         LbBytesView a=image(argv[3]),b=image(argv[4]); stateful_probes(a,b);

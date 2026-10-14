@@ -97,7 +97,7 @@ static void stop(LbWorld *world)
     CHECK(status==LB_WORLD_OK && lb_reclamation_consume(receipt)==LB_WORLD_OK);
     lb_reclamation_release(receipt);
     LbWorldResourceUsage usage; CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK);
-    CHECK(usage.closed && !usage.current);
+    CHECK(usage.closed && !world->space);
 }
 int main(int argc,char **argv)
 {
@@ -141,10 +141,15 @@ int main(int argc,char **argv)
     CHECK(retained.size==sizeof(expected) && !memcmp(retained.data,expected,sizeof(expected)));
     stop(world);
     CHECK(retained.size==sizeof(expected) && !memcmp(retained.data,expected,sizeof(expected)));
-    consume(root); lb_world_release(world);
+    consume(root);
+    LbWorldResourceUsage usage;
+    CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && !usage.current);
+    lb_world_release(world);
     CHECK(lb_world_call(peer,text("gc_roots"),text("identity"),text("survived"),&other)==LB_WORLD_OK);
     value=await(other); CHECK(value.size==8 && !memcmp(value.data,"survived",8)); consume(other);
-    stop(peer); lb_world_release(peer);
+    stop(peer);
+    CHECK(lb_world_resource_usage(peer,&usage)==LB_WORLD_OK && !usage.current);
+    lb_world_release(peer);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     CHECK(!memory.live && !memory.bytes);
     printf("GC_ROOT_OK kind=%s collections_before=%zu collections_after=%zu poisoned_retirement=true peer_survived=true\n",argv[2],before,after);

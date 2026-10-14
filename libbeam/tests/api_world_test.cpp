@@ -50,12 +50,9 @@ int main(int argc,char** argv) {
     auto engine=take(Engine::create());
     Bytes kept;
     {
-        // This loop must remain live while the peer runs unrelated checks.
-        // Budget exhaustion has separate api_work/core_work coverage; racing it
-        // against stop makes this cancellation assertion machine-speed dependent.
-        ResourceOverrides cancellation_limits;
-        cancellation_limits.invocation_work_limit=UINT64_MAX;
-        auto a=take(engine.create_isolate(cancellation_limits)), b=take(engine.create_isolate());
+        // Keep a receive pending across peer checks under the default budget.
+        // Executing cancellation is checked at a worker boundary by core_world.
+        auto a=take(engine.create_isolate()), b=take(engine.create_isolate());
         Bytes invalid_image(64,0); auto refused=a.load_module(view(invalid_image));
         CHECK(refused && refused->code==ErrorCode::invalid_beam &&
               refused->message.find("stage=image")!=std::string::npos);
@@ -73,7 +70,8 @@ int main(int argc,char** argv) {
         CHECK(take(second.wait_until(deadline())).empty());
         fail_next_new=true;
         error(first.wait_until(deadline()),ErrorCode::limit);
-        CHECK(!fail_next_new); kept=take(first.wait_until(deadline()));
+        // The completion is already ready: an expired deadline must not hide it.
+        CHECK(!fail_next_new); kept=take(first.wait_until(Deadline::min()));
         CHECK(kept==Bytes(65,0x31)); error(first.wait_until(deadline()),ErrorCode::closed);
         auto own_a=take(a.call("pid_slice","echo",view(kept)));
         auto own_b=take(b.call("pid_slice","echo",view(kept)));
@@ -132,7 +130,7 @@ int main(int argc,char** argv) {
             auto rejected=take(b.call("compare_slice",function,view(other)));
             CHECK(take(rejected.wait_until(deadline()))==Bytes({'o','t','h','e','r'}));
         }
-        auto loop=take(a.call("async_slice","loop",{nullptr,0}));
+        auto loop=take(a.call("async_slice","park",{nullptr,0}));
         error(loop.wait_until(Deadline::min()),ErrorCode::timeout);
         auto peer=take(b.call("async_slice","identity",view(input)));
         CHECK(take(peer.wait_until(deadline()))==input);
