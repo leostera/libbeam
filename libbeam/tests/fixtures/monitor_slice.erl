@@ -4,7 +4,7 @@
 -export([identity/1, copy/1, named/1, local_name/1, missing/1, dead/1, cancel/1,
          arm/1, drain/1, self_monitor/1, bad_kind/1, bad_target/1,
          bad_name/1, bad_node/1, bad_reference/1,
-         mfa/1, mfa_peer/1, mfa_child/3, mfa_zero/0, bad_module/1, bad_function/1, bad_args/1]).
+         mfa/1, mfa_peer/1, mfa_child/3, mfa_zero/0, exit_payload/1, bad_module/1, bad_function/1, bad_args/1]).
 identity(B) -> B.
 self_monitor(B) ->
     Ref = monitor(process,self()),
@@ -29,6 +29,13 @@ mfa(B) ->
     receive {'DOWN',Ref,process,Pid,normal} -> ok end,
     {Empty,EmptyRef} = spawn_monitor(?MODULE,mfa_zero,[]),
     receive {'DOWN',EmptyRef,process,Empty,normal} -> B end.
+exit_payload(B) ->
+    Reason = {payload,repeat(20,{B,fun() -> B end},[]),make_ref()},
+    {Pid,Ref} = spawn_monitor(fun() -> receive never -> ok end end),
+    true = exit(Pid,Reason),
+    receive {'DOWN',Ref,process,Pid,Reason} -> B end.
+repeat(0,_,Acc) -> Acc;
+repeat(N,Value,Acc) -> repeat(N-1,Value,[Value|Acc]).
 mfa_peer(B) ->
     {Pid,Ref} = spawn_monitor(group_leader_slice,identity,[B]),
     receive {'DOWN',Ref,process,Pid,normal} -> B end.

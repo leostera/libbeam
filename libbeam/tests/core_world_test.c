@@ -6,6 +6,7 @@
 #include "pid_table.h"
 #include "process_internal.h"
 #include "work_budget_internal.h"
+#include "exit_signal.h"
 #include <stdio.h>
 #include <stdatomic.h>
 #include <time.h>
@@ -836,6 +837,69 @@ static void mfa_preparation(LbWorld *world,Memory *memory)
     lb_process_destroy(child); lb_engine_leave(world->engine);
     puts("CORE_MFA_PREPARATION_OK exact_credit=true one_below=true zero=true allocation_prefixes=true memory_limit=true moving_child_roots=true borrowed_parent_stable=true balanced_leases=true");
 }
+static void exit_signal_ownership(LbBytesView code)
+{
+    Memory m={0}; LbEngine *engine=create(&m); LbWorld *world;
+    CHECK(lb_world_create(engine,&world)==LB_WORLD_OK && lb_world_load(world,code)==LB_WORLD_OK);
+    lb_engine_enter(engine);
+    Eterm module,function; LbCodeEntry *entry; LbProcess *sender,*receiver; Eterm input=NIL,from;
+    CHECK(lb_atoms_find(world->space->atoms,"async_slice",11,&module)==LB_ATOM_OK);
+    CHECK(lb_atoms_find(world->space->atoms,"identity",8,&function)==LB_ATOM_OK);
+    CHECK(lb_code_entry_acquire(world->space,module,function,1,&entry)==LB_CODE_OK);
+    unsigned char bytes[256]; memset(bytes,0x92,sizeof(bytes));
+    CHECK(lb_process_create_binary(entry,bytes,sizeof(bytes),128,&sender)==LB_PROCESS_READY);
+    CHECK(lb_process_create(entry,&input,1,64,&receiver)==LB_PROCESS_READY); lb_code_entry_release(entry);
+    CHECK(lb_process_identity(sender,&from)==LB_PROCESS_READY);
+    Eterm reason=TUPLE2(sender->htop,sender->reg[0],make_small(42)); sender->htop+=3; sender->reg[0]=reason;
+    size_t live=m.live,used=m.bytes; uint64_t cost=0; LbAllocDomain *domain=&world->domain;
+    for(unsigned mode=0;mode<4;++mode) {
+        LbWorkBudget *budget=lb_work_budget_create(world); CHECK(budget);
+        uint64_t credit=mode==0?1000000:mode==1?cost:mode==2?cost-1:0;
+        budget->limit=budget->remaining=credit; lb_work_domain_borrow(domain,budget); receiver->waiting=1;
+        LbProcessStatus status=lb_exit_signal_send(sender,receiver,from,reason,LB_EXIT_EXPLICIT);
+        if(mode<2) {
+            CHECK(status==LB_PROCESS_READY && receiver->exit_signal && !receiver->waiting);
+            if(!mode) { cost=credit-budget->remaining; CHECK(cost>1); } else CHECK(!budget->remaining);
+            lb_message_destroy(receiver->exit_signal); receiver->exit_signal=NULL;
+        } else CHECK(status==LB_PROCESS_WORK_LIMIT && !receiver->exit_signal && receiver->waiting);
+        lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+        lb_work_budget_release(budget); CHECK(m.live==live && m.bytes==used && sender->reg[0]==reason && !sender->collections);
+    }
+    for(size_t prefix=1;;++prefix) {
+        CHECK(prefix<100); size_t before=m.host_calls; m.fail_host=before+prefix; receiver->waiting=1;
+        LbProcessStatus status=lb_exit_signal_send(sender,receiver,from,reason,LB_EXIT_EXPLICIT); m.fail_host=0;
+        if(status==LB_PROCESS_READY) { CHECK(receiver->exit_signal); lb_message_destroy(receiver->exit_signal); receiver->exit_signal=NULL; }
+        else CHECK(status==LB_PROCESS_NO_MEMORY && !receiver->exit_signal && receiver->waiting);
+        CHECK(m.live==live && m.bytes==used); lb_alloc_domain_begin_operation(domain);
+        if(status==LB_PROCESS_READY && prefix>m.host_calls-before) break;
+    }
+    size_t limit=domain->limit; domain->limit=domain->current; receiver->waiting=1;
+    CHECK(lb_exit_signal_send(sender,receiver,from,reason,LB_EXIT_EXPLICIT)==LB_PROCESS_LIMIT && !receiver->exit_signal && receiver->waiting);
+    domain->limit=limit; lb_alloc_domain_begin_operation(domain);
+    LbWorkBudget *source=lb_work_budget_create(world),*target=lb_work_budget_create(world); CHECK(source && target);
+    LbWorkProcessLease lease; CHECK(lb_work_process_prepare(source,&lease)==LB_ALLOC_OK); lb_work_process_publish(sender,&lease);
+    CHECK(lb_work_process_prepare(target,&lease)==LB_ALLOC_OK); lb_work_process_publish(receiver,&lease);
+    lb_work_domain_borrow(domain,target);
+    LbMessage *candidate; Uint units;
+    CHECK(lb_message_create(world->space,am_true,&candidate,&units)==LB_PROCESS_READY);
+    CHECK(lb_message_queue_append(&receiver->messages,candidate)==LB_PROCESS_READY && lb_work_receive_begin(receiver,candidate));
+    lb_work_domain_borrow(domain,source);
+    CHECK(lb_exit_signal_send(sender,receiver,from,reason,LB_EXIT_EXPLICIT)==LB_PROCESS_READY);
+    lb_process_destroy(sender); /* allocator poisons the original reason heap */
+    while(receiver->htop<receiver->stop-S_RESERVED) *receiver->htop++=NIL;
+    uint64_t source_before=source->remaining,target_before=target->remaining;
+    lb_work_domain_borrow(domain,receiver->work_active);
+    CHECK(lb_exit_signal_receive(receiver)==LB_PROCESS_EXCEPTION && receiver->freason==LB_EXC_EXIT);
+    CHECK(!receiver->exit_signal && !receiver->work_candidate && receiver->work_active==source && receiver->work_birth==target);
+    CHECK(source->remaining<source_before && target->remaining==target_before && receiver->collections);
+    CHECK(is_tuple(receiver->exception_value) && tuple_val(receiver->exception_value)[2]==make_small(42));
+    LbBitstringView view; CHECK(lb_bitstring_view(tuple_val(receiver->exception_value)[1],&view));
+    CHECK(view.bit_size==sizeof(bytes)*8 && !memcmp(view.data+view.bit_offset/8,bytes,sizeof(bytes)));
+    lb_work_domain_borrow(domain,NULL); lb_process_destroy(receiver); lb_work_budget_release(source); lb_work_budget_release(target);
+    lb_engine_leave(engine); lb_world_release(world);
+    CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!m.live && !m.bytes);
+    puts("CORE_EXIT_SIGNAL_OK transaction=true allocation_prefixes=true memory_limit=true exact_work=true sender_causal=true interrupted_receive=true sender_heap_released=true moving_reason=true reclaimed=true");
+}
 static void monitor_allocations(LbBytesView code)
 {
     Memory m={0}; LbEngine *engine=create(&m); LbWorld *peer; LbCall *call;
@@ -844,7 +908,7 @@ static void monitor_allocations(LbBytesView code)
     CHECK(lb_world_start(peer,text("monitor_slice"),text("copy"),text("peer"),&call)==LB_WORLD_OK);
     expect(call,LB_WORLD_OK);
     lb_engine_enter(engine); size_t live=m.live,bytes=m.bytes; lb_engine_leave(engine);
-    const char *functions[]={"copy","named","missing","dead","cancel","mfa"};
+    const char *functions[]={"copy","named","missing","dead","cancel","mfa","exit_payload"};
     size_t tested=0;
     for(size_t f=0;f<sizeof(functions)/sizeof(*functions);++f) for(size_t prefix=1;;++prefix) {
         CHECK(prefix<500); LbWorld *world; LbBytesView result;
@@ -873,7 +937,7 @@ static void monitor_allocations(LbBytesView code)
 int main(int argc,char **argv)
 {
     construction();
-    if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); registry_queries(code); cancellation_states(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
+    if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); exit_signal_ownership(code); registry_queries(code); cancellation_states(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
     if(argc>=3) { LbBytesView code=image(argv[2]); spawned_children(code); free((void *)code.data); }
     if(argc==4) { LbBytesView code=image(argv[3]); monitor_allocations(code); free((void *)code.data); }
     if(argc==5) {

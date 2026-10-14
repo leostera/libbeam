@@ -6,6 +6,7 @@
  * continuation return, and native BIF call/epilogue. No scheduler/TLS singleton.
  */
 #include "process_internal.h"
+#include "exit_signal.h"
 #include "apply.h"
 #include "binary_match.h"
 #define ErlSubBits LbSubBits
@@ -244,6 +245,7 @@ void lb_process_destroy(LbProcess *p)
     if(p->identity.owner && lb_pid_remove(p->identity.owner,&p->identity)!=LB_PID_OK) abort();
     lb_receive_marker_destroy(p);
     lb_message_queue_clear(&p->messages);
+    if(p->exit_signal) lb_message_destroy(p->exit_signal);
     lb_fun_leases_clear(p);
     lb_decimal_destroy(p->decimal);
     lb_release(p->entry_module->space->domain,p->dictionary);
@@ -366,15 +368,13 @@ LbProcessStatus lb_process_run(LbProcess *c_p,size_t budget,unsigned reductions)
     if(c_p->waiting) return LB_PROCESS_INVALID;
     if(c_p->receive_message) c_p->flags|=F_DELAY_GC;
     c_p->running=1; reg=c_p->reg; I=c_p->i; E=c_p->stop; HTOP=c_p->htop; FCALLS=reductions;
-    if(c_p->exit_requested) {
-        c_p->freason=LB_EXC_EXIT; c_p->fvalue=c_p->exception_value=am_killed;
-        c_p->status=LB_PROCESS_EXCEPTION; goto stop;
+    if(c_p->exit_signal) {
+        SWAPOUT; c_p->status=lb_exit_signal_receive(c_p); SWAPIN; goto stop;
     }
     next_op=*I;
 dispatch:
-    if(c_p->exit_requested) {
-        c_p->freason=LB_EXC_EXIT; c_p->fvalue=c_p->exception_value=am_killed;
-        c_p->status=LB_PROCESS_EXCEPTION; goto stop;
+    if(c_p->exit_signal) {
+        SWAPOUT; c_p->status=lb_exit_signal_receive(c_p); SWAPIN; goto stop;
     }
     if(!budget--) goto context_switch3;
     /* Candidate examination is sender-causal, before import/removal/matching. */

@@ -56,11 +56,12 @@ int main(int argc,char** argv) {
         std::fill(leaders.begin(),leaders.end(),0xa5); std::fill(flags.begin(),flags.end(),0xa5);
         for(std::size_t size:{0u,65u,8192u}) {
             for(const char* function:{"copy","named","dead"}) round_trip(isolate,peer,"send_slice",function,size);
-            for(const char* function:{"copy","named","local_name","missing","dead","cancel","self_monitor","mfa","mfa_peer"})
+            for(const char* function:{"copy","named","local_name","missing","dead","cancel","self_monitor","mfa","mfa_peer","exit_payload"})
                 round_trip(isolate,peer,"monitor_slice",function,size);
             round_trip(isolate,peer,"group_leader_slice","lifecycle",size);
             round_trip(isolate,peer,"process_flag_slice","copy",size);
             round_trip(isolate,peer,"process_flag_slice","lifecycle",size);
+            round_trip(isolate,peer,"process_flag_slice","signals",size);
         }
         // Both registered targets stay alive until both arm calls finish.
         // Identical names must coexist in separate namespaces, not merely
@@ -81,7 +82,7 @@ int main(int argc,char** argv) {
             CHECK(std::get<Error>(result).code==ErrorCode::exception && std::get<Error>(result).message=="guest exception");
             round_trip(isolate,peer,"monitor_slice","copy",65);
         }
-        for(const char* function:{"bad_value","bad_flag"}) {
+        for(const char* function:{"bad_value","bad_flag","bad_exit"}) {
             auto call=take(isolate.call("process_flag_slice",function,view(invalid)));
             auto result=call.wait_until(deadline()); CHECK(std::holds_alternative<Error>(result));
             CHECK(std::get<Error>(result).code==ErrorCode::exception && std::get<Error>(result).message=="guest exception");

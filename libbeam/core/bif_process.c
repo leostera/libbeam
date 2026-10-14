@@ -6,6 +6,7 @@
 #include "reference.h"
 #include "flatmap.h"
 #include "world_internal.h"
+#include "exit_signal.h"
 /* Identity is allocated on first observation, with no moving-heap allocation.
  * The directory is owned by the world/code namespace and keeps its generations
  * after the last process exits. Spawn must obtain identity before publication;
@@ -372,14 +373,18 @@ Eterm lb_bif_process_flag_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 Eterm lb_bif_exit_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)instruction; p->last_native_cost=1;
-    if(!is_internal_pid(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
-    if(args[1]!=am_kill || !p->world || !p->running) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
-    LbProcess *target=lb_pid_lookup(p->entry_module->space->pids,args[0]);
-    if(target) {
-        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
-        lb_work_cross_effect(p->work_active,target->work_birth);
-        target->exit_requested=1; target->waiting=0;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!is_internal_pid(args[0])) {
+        if(is_external_pid(args[0]) || (args[0]&_TAG_IMMED1_MASK)==_TAG_IMMED1_PORT) p->status=LB_PROCESS_REFUSED;
+        else p->freason=LB_EXC_BADARG;
+        return THE_NON_VALUE;
     }
+    if(!p->world || !p->running) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    LbProcess *target=lb_pid_lookup(p->entry_module->space->pids,args[0]);
+    if(!target) return am_true;
+    Eterm from; LbProcessStatus status=lb_process_identity(p,&from);
+    if(status==LB_PROCESS_READY) status=lb_exit_signal_send(p,target,from,args[1],LB_EXIT_EXPLICIT);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
     return am_true;
 }
 Eterm lb_bif_register_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
