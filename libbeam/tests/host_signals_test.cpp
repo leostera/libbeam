@@ -1,16 +1,45 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Leandro Ostera <leandro@ostera.io>
 #include <libbeam/engine.hpp>
+#include "test_process.hpp"
 #include <array>
+#include <cfenv>
+#include <fstream>
+#include <iterator>
 #include <cerrno>
 #include <csignal>
 #include <cstdlib>
 #include <gtest/gtest.h>
+#include <gtest/gtest-spi.h>
 #include <pthread.h>
 #include <system_error>
 #include <vector>
 
 namespace {
+std::string fixture;
+struct FloatingState { int round, flags; };
+FloatingState floating_snapshot() { return {std::fegetround(), std::fetestexcept(FE_ALL_EXCEPT)}; }
+void expect_same_floating(FloatingState expected) {
+    const auto actual = floating_snapshot();
+    EXPECT_EQ(expected.round, actual.round);
+    EXPECT_EQ(expected.flags, actual.flags);
+}
+class HostFloatingConfiguration {
+public:
+    HostFloatingConfiguration() {
+        if (std::fegetenv(&original_)) throw std::runtime_error("cannot read floating environment");
+        if (std::fesetenv(FE_DFL_ENV) || std::fesetround(FE_UPWARD) ||
+            std::feraiseexcept(FE_INVALID | FE_DIVBYZERO)) {
+            if (std::fesetenv(&original_)) std::abort();
+            throw std::runtime_error("cannot configure floating environment");
+        }
+    }
+    ~HostFloatingConfiguration() { EXPECT_EQ(std::fesetenv(&original_), 0); }
+    HostFloatingConfiguration(const HostFloatingConfiguration&) = delete;
+    HostFloatingConfiguration& operator=(const HostFloatingConfiguration&) = delete;
+private:
+    std::fenv_t original_;
+};
 constexpr std::array<int, 9> signals{SIGINT, SIGQUIT, SIGTERM, SIGUSR1, SIGUSR2, SIGTSTP, SIGPIPE, SIGCHLD, SIGFPE};
 volatile sig_atomic_t delivered = 0;
 void handler(int signal) { if (signal == SIGUSR1) delivered = delivered + 1; }
@@ -121,10 +150,33 @@ void expect_usr1_delivery(sig_atomic_t expected) {
     ASSERT_EQ(pthread_kill(pthread_self(), SIGUSR1), 0);
     EXPECT_EQ(delivered, expected);
 }
+TEST(HostSignals, ObserverDetectsSignalMaskMutation) {
+    HostSignalConfiguration configuration;
+    const auto before = snapshot();
+    auto changed = before.mask;
+    syscall_ok(sigdelset(&changed, SIGUSR2));
+    pthread_ok(pthread_sigmask(SIG_SETMASK, &changed, nullptr));
+    EXPECT_NONFATAL_FAILURE(expect_same_state(before), "signal");
+    pthread_ok(pthread_sigmask(SIG_SETMASK, &before.mask, nullptr));
+    expect_same_state(before);
+}
+TEST(HostSignals, ObserverDetectsFloatingRoundingMutation) {
+    HostFloatingConfiguration configuration;
+    const auto before = floating_snapshot();
+    ASSERT_EQ(std::fesetround(FE_DOWNWARD), 0);
+    EXPECT_NONFATAL_FAILURE(expect_same_floating(before), "round");
+    ASSERT_EQ(std::fesetround(before.round), 0);
+    expect_same_floating(before);
+}
 TEST(HostSignals, PublicEngineAndIsolatesPreserveHostState) {
+    std::ifstream file(fixture, std::ios::binary);
+    ASSERT_TRUE(file.good());
+    const libbeam::Bytes beam{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
     const auto original = snapshot();
     {
         HostSignalConfiguration configuration;
+        HostFloatingConfiguration floating_configuration;
+        const auto floating_before = floating_snapshot();
         const auto before = snapshot();
         delivered = 0;
         for (unsigned iteration = 0; iteration < 3; ++iteration) {
@@ -133,21 +185,39 @@ TEST(HostSignals, PublicEngineAndIsolatesPreserveHostState) {
             ASSERT_TRUE(std::holds_alternative<libbeam::Engine>(created));
             auto engine = std::move(std::get<libbeam::Engine>(created));
             expect_same_state(before);
+            expect_same_floating(floating_before);
             expect_usr1_delivery(static_cast<sig_atomic_t>(iteration * 2 + 1));
             {
                 auto created_isolate = engine.create_isolate();
                 ASSERT_TRUE(std::holds_alternative<libbeam::Isolate>(created_isolate));
                 auto isolate = std::move(std::get<libbeam::Isolate>(created_isolate));
                 expect_same_state(before);
+                ASSERT_FALSE(isolate.load_module({beam.data(), beam.size()}));
+                const libbeam::Bytes payload{0, 255, 42};
+                auto started = isolate.start("add_slice", "rounded", {payload.data(), payload.size()});
+                ASSERT_TRUE(std::holds_alternative<libbeam::Call>(started));
+                auto call = std::move(std::get<libbeam::Call>(started));
+                auto reply = call.wait_until(deadline());
+                ASSERT_TRUE(std::holds_alternative<libbeam::Bytes>(reply));
+                EXPECT_EQ(std::get<libbeam::Bytes>(reply), payload);
+                expect_same_state(before);
+                expect_same_floating(floating_before);
                 auto stopped = isolate.stop();
                 ASSERT_TRUE(std::holds_alternative<libbeam::Reclamation>(stopped));
                 EXPECT_FALSE(std::get<libbeam::Reclamation>(stopped).wait_until(deadline()));
             }
             EXPECT_FALSE(engine.shutdown(deadline()));
             expect_same_state(before);
+            expect_same_floating(floating_before);
             expect_usr1_delivery(static_cast<sig_atomic_t>(iteration * 2 + 2));
         }
     }
     expect_same_state(original);
 }
 }  // namespace
+int main(int argc, char** argv) {
+    testing::InitGoogleTest(&argc, argv);
+    if (argc != 2) return 2;
+    fixture = libbeam_test::runfile(argv[1]);
+    return RUN_ALL_TESTS();
+}

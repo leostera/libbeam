@@ -5,8 +5,9 @@ def _host_tools(ctx):
     erl = ctx.which("erl")
     nm = ctx.which("nm")
     elixir = ctx.which("elixir")
-    if not perl or not erl or not nm or not elixir:
-        fail("Install Perl, Erlang/OTP 28, Elixir >= 1.19 and native binutils, then rerun Bazel")
+    bazel = ctx.which("bazel")
+    if not perl or not erl or not nm or not elixir or not bazel:
+        fail("Install Bazel, Perl, Erlang/OTP 28, Elixir >= 1.19 and native binutils, then rerun Bazel")
     otp = ctx.execute([erl, "+S", "1:1", "+SDcpu", "1:1", "+SDio", "1", "+A", "0", "-noshell", "-eval", 'io:format("~s",[code:root_dir()]),halt().'])
     if otp.return_code:
         fail("Cannot locate OTP: " + otp.stderr)
@@ -19,10 +20,11 @@ def _host_tools(ctx):
     ctx.symlink(elixir_root.stdout, "elixir")
     ctx.symlink(perl, "perl")
     ctx.symlink(nm, "nm")
+    ctx.symlink(bazel, "bazel")
     ctx.file("identity.txt", "OTP=" + otp.stdout + "\n")
     ctx.file("BUILD.bazel", '''
 package(default_visibility = ["//visibility:public"])
-exports_files(["perl", "nm", "identity.txt", "otp/bin/erlc", "otp/bin/erl", "otp/bin/escript", "elixir/bin/elixir"])
+exports_files(["perl", "nm", "bazel", "identity.txt", "otp/bin/erlc", "otp/bin/erl", "otp/bin/escript", "elixir/bin/elixir"])
 filegroup(name = "otp", srcs = glob(["otp/**"]))
 filegroup(name = "elixir", srcs = glob(["elixir/**"]))
 ''')

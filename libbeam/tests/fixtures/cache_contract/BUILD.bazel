@@ -1,0 +1,14 @@
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
+package(default_visibility = ["//visibility:public"])
+filegroup(
+    name = "files",
+    srcs = ["BUILD.bazel", "MODULE.bazel", ".bazelversion", "probe.cc", "payload.txt"],
+    testonly = True,
+)
+cc_test(
+    name = "probe",
+    size = "small",
+    srcs = ["probe.cc"],
+    args = ["$(rootpath payload.txt)"],
+    data = ["payload.txt"],
+)

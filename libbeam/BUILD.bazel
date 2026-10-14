@@ -6433,20 +6433,38 @@ cc_test(
 )
 
 cc_test(
+  name = "bazel_cache_test",
+  size = "large",
+  srcs = ["tests/bazel_cache_test.cpp", "tests/test_directory.hpp", "tests/test_process.hpp"],
+  args = ["$(rootpath @libbeam_host//:bazel)"],
+  data = ["//libbeam/tests/fixtures/cache_contract:files", "@libbeam_host//:bazel"],
+  copts = ["-std=c++17"],
+  deps = ["@googletest//:gtest", "@nlohmann_json//:json"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  tags = ["local", "exclusive"],
+  env_inherit = ["HOME", "PATH"],
+  env = {"USE_BAZEL_VERSION": "9.3.0"},
+)
+
+cc_test(
   name = "host_signals_test",
   size = "small",
-  srcs = ["tests/host_signals_test.cpp"],
+  srcs = ["tests/host_signals_test.cpp", "tests/test_process.hpp"],
+  args = ["$(rootpath :add_slice_fixture)"],
+  data = ["add_slice_fixture"],
   copts = ["-std=c++17"],
-  deps = ["libbeam", "@googletest//:gtest_main"],
+  deps = ["libbeam", "@googletest//:gtest"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
 cc_test(
   name = "host_terminal_test",
   size = "small",
-  srcs = ["tests/host_terminal_test.cpp"],
+  srcs = ["tests/host_terminal_test.cpp", "tests/test_process.hpp"],
+  args = ["$(rootpath :add_slice_fixture)"],
+  data = ["add_slice_fixture"],
   copts = ["-std=c++17"],
-  deps = ["libbeam", "@googletest//:gtest_main"],
+  deps = ["libbeam", "@googletest//:gtest"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 

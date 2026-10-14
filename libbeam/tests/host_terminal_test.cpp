@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Leandro Ostera <leandro@ostera.io>
 #include <libbeam/engine.hpp>
+#include "test_process.hpp"
+#include <fstream>
+#include <iterator>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
@@ -11,6 +14,7 @@
 #include <unistd.h>
 
 namespace {
+std::string fixture;
 int checked(int result) {
     if (result < 0) throw std::system_error(errno, std::generic_category());
     return result;
@@ -73,6 +77,9 @@ bool same_state(const TerminalState& a, const TerminalState& b) {
         std::memcmp(x.c_cc, y.c_cc, sizeof(x.c_cc)) == 0;
 }
 void exercise_engine(const TerminalState& before) {
+    std::ifstream file(fixture, std::ios::binary);
+    ASSERT_TRUE(file.good());
+    const libbeam::Bytes beam{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
     auto created = libbeam::Engine::create();
     ASSERT_TRUE(std::holds_alternative<libbeam::Engine>(created));
     auto engine = std::move(std::get<libbeam::Engine>(created));
@@ -81,6 +88,15 @@ void exercise_engine(const TerminalState& before) {
         auto isolated = engine.create_isolate();
         ASSERT_TRUE(std::holds_alternative<libbeam::Isolate>(isolated));
         auto isolate = std::move(std::get<libbeam::Isolate>(isolated));
+        ASSERT_FALSE(isolate.load_module({beam.data(), beam.size()}));
+        const libbeam::Bytes payload{0, 255, 42};
+        auto started = isolate.start("add_slice", "rounded", {payload.data(), payload.size()});
+        ASSERT_TRUE(std::holds_alternative<libbeam::Call>(started));
+        auto call = std::move(std::get<libbeam::Call>(started));
+        auto reply = call.wait_until(std::chrono::steady_clock::now() + std::chrono::seconds(5));
+        ASSERT_TRUE(std::holds_alternative<libbeam::Bytes>(reply));
+        EXPECT_EQ(std::get<libbeam::Bytes>(reply), payload);
+        EXPECT_TRUE(same_state(before, snapshot()));
         auto stopped = isolate.stop();
         ASSERT_TRUE(std::holds_alternative<libbeam::Reclamation>(stopped));
         EXPECT_FALSE(std::get<libbeam::Reclamation>(stopped).wait_until(std::chrono::steady_clock::now() + std::chrono::seconds(5)));
@@ -112,3 +128,9 @@ TEST(TerminalObserver, DetectsTermiosMutation) {
     EXPECT_FALSE(same_state(before, snapshot()));
 }
 }  // namespace
+int main(int argc, char** argv) {
+    testing::InitGoogleTest(&argc, argv);
+    if (argc != 2) return 2;
+    fixture = libbeam_test::runfile(argv[1]);
+    return RUN_ALL_TESTS();
+}
