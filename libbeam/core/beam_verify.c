@@ -27,7 +27,7 @@ typedef struct {
     size_t frame,heap;
     int matching;
 } Flow;
-typedef struct { BeamOp *op; Flow in; size_t function; int reached,queued; } Node;
+typedef struct { BeamOp *op; Flow in; size_t function; int reached,queued,terminal_x_exception; } Node;
 typedef struct {
     Node *nodes; size_t *labels,*queue,count,head,tail,pending;
 } Analysis;
@@ -103,6 +103,17 @@ static LbCodeStatus propagate(Analysis *w,size_t target,size_t function,const Fl
     Node *node; size_t r; int changed=0;
     REQUIRE(target<w->count && w->nodes[target].function==function);
     node=&w->nodes[target];
+    Flow terminal;
+    if(node->terminal_x_exception) {
+        /* OTP shares X-only terminal error labels across differently sized
+         * frames. Every incoming stack must be GC-safe, but no Y access,
+         * deallocation or normal continuation is permitted after this join.
+         * Forget only these dead proof facts, never the actual runtime frame. */
+        REQUIRE(roots(flow,0));
+        terminal=*flow; terminal.frame=NO_FRAME; terminal.heap=0;
+        memset(terminal.y,0,sizeof(terminal.y)); memset(terminal.ys,0,sizeof(terminal.ys));
+        flow=&terminal;
+    }
     /* func_info is a terminal exception boundary, never normal argument reentry. */
     if(node->op->op==genop_int_func_start_5) return LB_CODE_OK;
     if(!node->reached) { node->in=*flow; node->reached=1; changed=1; }
@@ -293,6 +304,14 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         }
         nodes[i].function=function;
         if(op->op==genop_label_1) labels[op->a[0].val]=i;
+    }
+    /* Compute metadata-only terminal tails once, rather than rescanning a
+     * potentially long label chain at every dataflow edge. */
+    for(i=n;i>0;--i) {
+        Node *node=&nodes[i-1]; op=node->op;
+        node->terminal_x_exception=(op->op==genop_badmatch_1 || op->op==genop_case_end_1) && op->a[0].type==TAG_x;
+        if((op->op==genop_label_1 || op->op==genop_line_1) && i<n && nodes[i].function==node->function)
+            node->terminal_x_exception=nodes[i].terminal_x_exception;
     }
     p->error.stage="lambda target admission";
     for(i=0;i<p->lambda_count;++i) {

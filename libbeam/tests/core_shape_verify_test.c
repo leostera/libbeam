@@ -73,6 +73,30 @@ static void forwarding_returns(LbCodeSpace *space)
         verify_using_bif(space,&p,mode<=2?LB_CODE_OK:LB_CODE_FORMAT,NULL,0,id);
     }
 }
+static void terminal_frame_joins(LbCodeSpace *space)
+{
+    for(unsigned kind=0;kind<7;++kind) {
+        Program p; begin(&p); ADD(&p,allocate_2,U(2),U(2));
+        ADD(&p,move_2,N,Y(0));
+        if(kind!=3) ADD(&p,move_2,N,Y(1));
+        ADD(&p,is_nil_2,F(3),X(0));
+        if(kind==4) ADD(&p,move_2,X(0),X(2));
+        ADD(&p,trim_2,U(1),U(1)); ADD(&p,jump_1,F(3));
+        ADD(&p,label_1,U(3)); ADD(&p,line_1,U(0));
+        if(kind==2) { ADD(&p,deallocate_1,U(1)); ret(&p); }
+        else {
+            if(kind==6) ADD(&p,move_2,X(0),X(1));
+            if(kind==1) ADD(&p,case_end_1,X(0));
+            else if(kind==4) ADD(&p,badmatch_1,X(2));
+            else if(kind==5) ADD(&p,badmatch_1,Y(0));
+            else ADD(&p,badmatch_1,X(0));
+        }
+        /* Only initialized stacks joining at a metadata-only X-error tail
+         * may differ in frame size. Normal continuation, undefined operands,
+         * Y reads, and intervening instructions retain the strict proof. */
+        verify(space,&p,kind<2?LB_CODE_OK:LB_CODE_FORMAT);
+    }
+}
 static void apply_boundaries(LbCodeSpace *space)
 {
     for(unsigned kind=0;kind<6;++kind) {
@@ -206,7 +230,7 @@ int main(void)
 {
     LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); predicate_scratch(space); list_is_not_cons(space);
+    joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     puts("CORE_SHAPE_PROOF_OK failure_edges=true late_joins=true backedges=true bounds=true alias_moves=true call_clobbers=true y_facts=true hints_not_authority=true arithmetic_edges=true predicate_scratch=true list_not_cons=true trim_facts=true execution=false");
     return 0;
