@@ -9,5 +9,9 @@ run() ->
     nonode@nohost = node_slice:dynamic({erlang,node}),
     nonode@nohost = node_locations:query(ignored),
     nonode@nohost = node_locations:query_y(ignored),
+    [] = nodes(),
+    [] = node_slice:peers(ignored),
+    [] = node_slice:kept_peers(ignored),
+    [] = node_slice:dynamic({erlang,nodes}),
     <<1,2,3>> = node_slice:copy(<<1,2,3>>),
     io:format("OTP_NODE_REFERENCE_OK unnamed=true compiled_x_y=true dynamic=true~n").

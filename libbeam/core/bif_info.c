@@ -16,6 +16,16 @@ Eterm lb_bif_node_0(LbProcess *p,Eterm *args,const BeamInstr *pc)
     }
     return p->entry_module->space->node_name;
 }
+/* dist.c:nodes_0 selects visible connected peers. Owned namespaces have no
+ * distribution connections, and cannot create them through a guest binding. */
+Eterm lb_bif_nodes_0(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)args; (void)pc; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    return NIL;
+}
 Eterm lb_bif_function_exported_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     LbCodeSpace *space=p->entry_module->space; (void)pc; p->last_native_cost=0;
