@@ -3316,6 +3316,38 @@ OpCase(move2_par_yxxx):
   GotoPF(next_pf);
 }
 
+OpCase(move_src_window2_yxx):
+{
+  Eterm tmp_packed1 = I[1];
+  BeamInstr next_pf = BeamCodeAddr(I[2]);
+  Eterm* src = &yb(tmp_packed1&BEAM_TIGHT_MASK);
+  Eterm s1, s2;
+  s1 = src[0];
+  s2 = src[1];
+  xb((tmp_packed1>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK) = s1;
+  xb((tmp_packed1>>(2*BEAM_TIGHT_SHIFT))) = s2;
+  I += 2;
+  ASSERT(VALID_INSTR(next_pf));
+  GotoPF(next_pf);
+}
+
+OpCase(move_window3_xxxy):
+{
+  Eterm tmp_packed1 = I[1];
+  BeamInstr next_pf = BeamCodeAddr(I[2]);
+  Eterm xt0, xt1, xt2;
+  Eterm* y = &yb((tmp_packed1>>(3*BEAM_LOOSE_SHIFT)));
+  xt0  = xb(tmp_packed1&BEAM_LOOSE_MASK);
+  xt1  = xb((tmp_packed1>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK);
+  xt2  = xb((tmp_packed1>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK);
+  y[0] = xt0;
+  y[1] = xt1;
+  y[2] = xt2;
+  I += 2;
+  ASSERT(VALID_INSTR(next_pf));
+  GotoPF(next_pf);
+}
+
 OpCase(move_window2_xxy):
 {
   Eterm tmp_packed1 = I[1];

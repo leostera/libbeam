@@ -190,6 +190,8 @@ case op_i_trim_t: return 1;
 case op_move_trim_yxt: return 1;
 case op_move2_par_xxxy: return 1;
 case op_move2_par_yxxx: return 1;
+case op_move_src_window2_yxx: return 1;
+case op_move_window3_xxxy: return 1;
 case op_move_window2_xxy: return 1;
 case op_move_shift_xxy: return 1;
 case op_bs_init_writable: return 1;
