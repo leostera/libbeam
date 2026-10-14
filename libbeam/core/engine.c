@@ -88,6 +88,7 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
          * but its bounded integer conversion is native here under that exact MFA. */
         {BIF_SIZE,{am_erlang,am_binary_to_integer,1,lb_bif_binary_to_integer_1,BIF_KIND_HEAVY}},
         {BIF_SIZE+23u,{am_erlang,am_binary_to_integer,2,lb_bif_binary_to_integer_2,BIF_KIND_HEAVY}},
+        {BIF_SIZE+24u,{am_erlang,am_convert_time_unit,3,lb_bif_convert_time_unit_3,BIF_KIND_HEAVY}},
         {BIF_binary_to_float_1,{am_erlang,am_binary_to_float,1,lb_bif_binary_to_float_1,BIF_KIND_HEAVY}},
         {BIF_binary_to_atom_2,{am_erlang,am_binary_to_atom,2,lb_bif_binary_to_atom_2,BIF_KIND_HEAVY}},
         {BIF_binary_to_existing_atom_2,{am_erlang,am_binary_to_existing_atom,2,lb_bif_binary_to_existing_atom_2,BIF_KIND_HEAVY}},

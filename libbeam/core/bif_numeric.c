@@ -12,6 +12,7 @@
 #include "atoms.h"
 #include "big.h"
 #include "term_compare.h"
+#include "time_unit.h"
 #include "bit_copy.h"
 #include <errno.h>
 #include <fenv.h>
@@ -166,6 +167,95 @@ Eterm lb_mixed_times(LbProcess *p,Eterm a,Eterm b)
     else if(lb_is_big(result)) result=publish_words(p,memory,lb_big_size(result)+1);
     lb_release(domain,memory); return result;
 }
+static int big_is_negative(Eterm value)
+{ return (*boxed_val(value)&_TAG_HEADER_MASK)==NEG_BIG_SUBTAG; }
+typedef enum { TIME_RATE, TIME_EQUAL_ONLY, TIME_INVALID } TimeUnitKind;
+typedef struct { TimeUnitKind kind; Eterm value; } TimeUnit;
+static TimeUnit parse_time_unit(LbProcess *p,Eterm value)
+{
+    if(is_small(value)) return (TimeUnit){signed_val(value)>0?TIME_RATE:TIME_INVALID,value};
+    if(lb_is_big(value)) return (TimeUnit){big_is_negative(value)?TIME_INVALID:TIME_RATE,value};
+    if(is_atom(value)) {
+        static const struct { const char *name; size_t size; Sint rate; } rates[]={
+            {"native",6,LB_NATIVE_TIME_UNITS_PER_SECOND},{"perf_counter",12,LB_NATIVE_TIME_UNITS_PER_SECOND},
+            {"second",6,1},{"millisecond",11,1000},{"microsecond",11,1000000},{"nanosecond",10,1000000000},
+            {"seconds",7,1},{"milli_seconds",13,1000},{"micro_seconds",13,1000000},{"nano_seconds",12,1000000000}};
+        LbBeamBytes name;
+        if(lb_atoms_name(p->entry_module->space->atoms,value,&name)!=LB_ATOM_OK) return (TimeUnit){TIME_INVALID,value};
+        for(size_t i=0;i<sizeof(rates)/sizeof(*rates);++i)
+            if(name.size==rates[i].size && !memcmp(name.data,rates[i].name,name.size)) return (TimeUnit){TIME_RATE,make_small(rates[i].rate)};
+    } else if(is_float_term(value)) {
+        Uint bits=boxed_val(value)[1];
+        if((bits>>63) || !(bits&UINT64_C(0x7fffffffffffffff))) return (TimeUnit){TIME_INVALID,value};
+    }
+    /* The pinned erlang.erl tests Unit > 0, not is_integer(Unit). Its exact
+     * equal-unit shortcut accepts these positive floats/non-numeric terms.
+     * They are NOT rates: every non-identity conversion still raises badarg. */
+    return (TimeUnit){TIME_EQUAL_ONLY,value};
+}
+Eterm lb_bif_convert_time_unit_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; LbAllocDomain *domain=p->entry_module->space->domain; p->last_native_cost=0;
+    if(!lb_work_domain_charge(domain,3)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    p->last_native_cost=3;
+    if(!lb_is_integer(args[0])) return fail(p,LB_EXC_BADARG);
+    TimeUnit from=parse_time_unit(p,args[1]),to=parse_time_unit(p,args[2]);
+    if(from.kind==TIME_INVALID || to.kind==TIME_INVALID) return fail(p,LB_EXC_BADARG);
+    int equal=0; LbAllocStatus status=lb_term_equal(domain,from.value,to.value,&equal);
+    if(status!=LB_ALLOC_OK) {
+        LbAllocStatus failure=lb_alloc_domain_failure(domain);
+        return allocation_failure(p,failure==LB_ALLOC_OK?status:failure);
+    }
+    if(equal) return args[0];
+    if(from.kind!=TIME_RATE || to.kind!=TIME_RATE) return fail(p,LB_EXC_BADARG);
+    if(args[0]==make_small(0)) return args[0];
+    Eterm time_small[2],from_small[2],to_small[2],one_small[2],product_small[2],delta_small[2],numerator_small[2];
+    Eterm time=is_small(args[0])?lb_small_to_big(signed_val(args[0]),time_small):args[0];
+    Eterm divisor=is_small(from.value)?lb_small_to_big(signed_val(from.value),from_small):from.value;
+    Eterm multiplier=is_small(to.value)?lb_small_to_big(signed_val(to.value),to_small):to.value;
+    size_t a=lb_big_size(time),b=lb_big_size(multiplier),c=lb_big_size(divisor),product_digits;
+    if(!lb_size_add(a,b,&product_digits) || product_digits>LB_BIG_ARITY_MAX+1) return fail(p,LB_EXC_BADARG);
+    int negative=big_is_negative(time);
+    size_t numerator_digits=(product_digits>c?product_digits:c)+1;
+    size_t product_words=product_digits+1,delta_words=c+2,numerator_words=numerator_digits+1;
+    size_t quotient_words=numerator_digits+1,remainder_words=c+1,division_words=numerator_digits+c+1,total,bytes;
+    if(!lb_size_add(product_words+delta_words+numerator_words,quotient_words+remainder_words+division_words,&total) ||
+       !lb_size_mul(total,sizeof(Eterm),&bytes)) return allocation_failure(p,LB_ALLOC_LIMIT);
+    /* Bound schoolbook multiplication, the two negative-rounding subtractions,
+     * and normalized division before scratch allocation. No borrowed input is
+     * used after the final heap reservation. Intermediate size errors map to
+     * badarg just like the pinned wrapper's catch; infrastructure does not. */
+    uint64_t work=(uint64_t)a*b+2*product_digits+1+
+        (negative?4*(uint64_t)(numerator_digits+c)+8:0)+
+        5*(uint64_t)(numerator_digits-c+1)*c+8*(uint64_t)(numerator_digits+c)+8;
+    if(!lb_work_domain_charge(domain,work)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    p->last_native_cost+=lb_work_bulk_units(work);
+    Eterm *memory; status=lb_alloc_domain_allocate(domain,bytes,(void **)&memory);
+    if(status!=LB_ALLOC_OK) return allocation_failure(p,status);
+    Eterm *delta=memory+product_words,*numerator_storage=delta+delta_words;
+    Eterm *quotient=numerator_storage+numerator_words,*remainder=quotient+quotient_words,*scratch=remainder+remainder_words;
+    Eterm product=lb_big_times(time,multiplier,memory),numerator;
+    if(is_nil(product)) goto bad_conversion;
+    if(negative) {
+        Eterm decrement=lb_big_minus(divisor,lb_small_to_big(1,one_small),delta);
+        if(is_nil(decrement)) goto bad_conversion;
+        if(is_small(decrement)) decrement=lb_small_to_big(signed_val(decrement),delta_small);
+        if(is_small(product)) product=lb_small_to_big(signed_val(product),product_small);
+        numerator=lb_big_minus(product,decrement,numerator_storage);
+        if(is_nil(numerator)) goto bad_conversion;
+    } else numerator=product;
+    if(is_small(numerator)) numerator=lb_small_to_big(signed_val(numerator),numerator_small);
+    LbBigDivision divided;
+    if(!lb_big_div_rem(numerator,divisor,quotient,remainder,scratch,division_words,&divided)) {
+        lb_release(domain,memory); p->status=LB_PROCESS_INVALID; return THE_NON_VALUE;
+    }
+    Eterm result=divided.quotient;
+    if(lb_is_big(result)) result=publish_words(p,boxed_val(result),lb_big_size(result)+1);
+    lb_release(domain,memory); return result;
+bad_conversion:
+    lb_release(domain,memory); return fail(p,LB_EXC_BADARG);
+}
+
 Eterm lb_bif_times_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 { (void)pc; return lb_mixed_times(p,args[0],args[1]); }
 int lb_int_div_rem(LbProcess *p,Eterm a,Eterm b,Eterm *quotient,Eterm *remainder)
@@ -275,8 +365,6 @@ Eterm lb_bif_minus_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     (void)pc; return mixed_minus(p,args[0],args[1]);
 }
-static int big_is_negative(Eterm value)
-{ return (*boxed_val(value)&_TAG_HEADER_MASK)==NEG_BIG_SUBTAG; }
 static Eterm shift_integer(LbProcess *p,Eterm value,int left,size_t bits)
 {
     LbAllocDomain *domain=p->entry_module->space->domain;

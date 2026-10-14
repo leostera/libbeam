@@ -31,6 +31,11 @@ TEST(IndependentOtpReference, FixtureAssertionsPass) {
     const auto result = libbeam_test::run(erl, arguments);
     ASSERT_TRUE(result.exited(0)) << module << '\n' << result.output;
     if (mode == "monitor") EXPECT_EQ(result.standard_output, "MONITOR_TRACE_REFERENCE_OK\n");
+    if (module == "time_unit_reference") {
+        EXPECT_NE(result.standard_output.find("pinned_equal_unit_quirk=true"), std::string::npos);
+        RecordProperty("pinned_installed_time_unit_behavior", result.standard_output);
+        std::cout << result.standard_output;
+    }
 }
 }  // namespace
 

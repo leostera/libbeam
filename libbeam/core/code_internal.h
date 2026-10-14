@@ -162,6 +162,7 @@ Eterm lb_bif_module_info_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_mixed_plus(LbProcess *,Eterm,Eterm);
 Eterm lb_mixed_times(LbProcess *,Eterm,Eterm);
 Eterm lb_bif_times_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_convert_time_unit_3(LbProcess *,Eterm *,const BeamInstr *);
 int lb_int_div_rem(LbProcess *,Eterm,Eterm,Eterm *,Eterm *);
 Eterm lb_bif_intdiv_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_rem_2(LbProcess *,Eterm *,const BeamInstr *);

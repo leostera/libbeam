@@ -19,6 +19,7 @@ struct Comparison {
     std::vector<std::string> fixtures;
 };
 const std::map<std::string, Comparison> cases{
+    {"convert_time_unit", {"time_unit_reference", "vectors", "core_time_unit_test", "--reference", 2535, {"time_unit_slice"}}},
     {"phash2", {"hash_reference", "run", "core_hash_test", "--reference", 1071, {"hash_slice"}}},
     {"radix", {"radix_reference", "run", "core_radix_test", "--reference", 1085, {"radix_slice"}}},
     {"bit_writer", {"bit_writer_reference", "run", "core_bit_writer_test", "--reference", 1070, {}}},

@@ -4,15 +4,16 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "receive.h"
+#include "time_unit.h"
 #include "code_internal.h"
 #include <time.h>
 static LbProcessStatus now_ns(uint64_t *out)
 {
     struct timespec now;
     if(clock_gettime(CLOCK_MONOTONIC,&now) || now.tv_sec<0 ||
-       (uint64_t)now.tv_sec>UINT64_MAX/UINT64_C(1000000000)) return LB_PROCESS_ENVIRONMENT;
-    uint64_t seconds=(uint64_t)now.tv_sec*UINT64_C(1000000000);
-    if(now.tv_nsec<0 || now.tv_nsec>=1000000000 || (uint64_t)now.tv_nsec>UINT64_MAX-seconds)
+       (uint64_t)now.tv_sec>UINT64_MAX/LB_NATIVE_TIME_UNITS_PER_SECOND) return LB_PROCESS_ENVIRONMENT;
+    uint64_t seconds=(uint64_t)now.tv_sec*LB_NATIVE_TIME_UNITS_PER_SECOND;
+    if(now.tv_nsec<0 || (uint64_t)now.tv_nsec>=LB_NATIVE_TIME_UNITS_PER_SECOND || (uint64_t)now.tv_nsec>UINT64_MAX-seconds)
         return LB_PROCESS_ENVIRONMENT;
     *out=seconds+(uint64_t)now.tv_nsec;
     return LB_PROCESS_READY;

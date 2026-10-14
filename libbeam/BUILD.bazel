@@ -4739,6 +4739,70 @@ cc_test(
 )
 
 genrule(
+  name = "time_unit_slice_fixture",
+  srcs = ["tests/fixtures/time_unit_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/time_unit_slice_fixture/time_unit_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/time_unit_slice.erl)",
+)
+
+genrule(
+  name = "time_unit_reference_fixture",
+  srcs = ["tests/fixtures/time_unit_reference.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/time_unit_reference_fixture/time_unit_reference.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/time_unit_reference.erl)",
+)
+
+genrule(
+  name = "pinned_time_reference_fixture",
+  srcs = ["//:beam/erts/preloaded/src/erlang.erl"],
+  tools = ["@libbeam_host//:perl", "@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/time_unit_reference_fixture/pinned_time_reference.beam"],
+  cmd = "$(location @libbeam_host//:perl) -0777 -ne 'm/^(convert_time_unit\\(Time, FromUnit, ToUnit\\) ->.*?^    end\\.)/ms or die q(missing pinned function); print qq(-module(pinned_time_reference).\\n-export([convert_time_unit/3]).\\n),$$1,qq(\\nerror_with_info(Reason,Args) -> erlang:error(Reason,Args).\\n);' $(location //:beam/erts/preloaded/src/erlang.erl) > $(@D)/pinned_time_reference.erl; ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(@D)/pinned_time_reference.erl",
+)
+
+cc_test(
+  name = "core_time_unit_test",
+  size = "medium",
+  srcs = ["tests/core_time_unit_test.c"],
+  copts = ["-std=c11"],
+  args = ["$(rootpath :time_unit_slice_fixture)"],
+  data = ["time_unit_slice_fixture"],
+  deps = ["core"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "core_time_unit_work",
+  size = "medium",
+  args = ["$(rootpath :time_unit_slice_fixture)", "time_unit_slice", "bad_time", "bad_from", "bad_to"],
+  data = ["time_unit_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "time_unit_reference",
+  size = "medium",
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "convert_time_unit"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "core_time_unit_test", "time_unit_slice_fixture", "time_unit_reference_fixture", "pinned_time_reference_fixture"],
+  deps = ["reference_comparison_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+cc_test(
+  name = "time_unit_edge_reference",
+  size = "small",
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "time_unit_reference", "run", "-", "$(rootpath :time_unit_slice_fixture)", "$(rootpath :time_unit_reference_fixture)", "$(rootpath :pinned_time_reference_fixture)"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "time_unit_slice_fixture", "time_unit_reference_fixture", "pinned_time_reference_fixture"],
+  deps = ["otp_reference_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
   name = "bit_size_slice_fixture",
   srcs = ["tests/fixtures/bit_size_slice.erl"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
