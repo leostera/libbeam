@@ -295,6 +295,28 @@ OpCase(put_tuple2_yI):
   Goto(*I);ASSERT(!"Fell through 'put_tuple2' (-no_next)");
 }
 
+OpCase(test_heap_1_put_list_Iy):
+{
+  Eterm tmp_packed1 = I[1];
+  BeamInstr next_pf = BeamCodeAddr(I[2]);
+  Uint need = Ib(tmp_packed1&BEAM_WIDE_MASK);
+  if (ERTS_UNLIKELY((Uint)(E - HTOP) < (need + S_RESERVED))) {
+    SWAPOUT;
+    c_p->i = I;
+    if (!lb_process_collect_live(c_p, need, 1)) goto memory_failure;
+    FCALLS -= (Sint)c_p->last_gc_cost;
+    SWAPIN;
+  }
+  HEAP_SPACE_VERIFIED(need);
+  HTOP[0] = yb((tmp_packed1>>BEAM_WIDE_SHIFT));
+  HTOP[1] = x(0);
+  x(0) = make_list(HTOP);
+  HTOP += 2;
+  I += 2;
+  ASSERT(VALID_INSTR(next_pf));
+  GotoPF(next_pf);
+}
+
 OpCase(test_heap_It):
 {
   Eterm tmp_packed1 = I[1];

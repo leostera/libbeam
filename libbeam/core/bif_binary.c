@@ -4,6 +4,7 @@
 #include "process_internal.h"
 #include "binary_internal.h"
 #include "bit_copy.h"
+#include "iolist_size.h"
 #include <stdlib.h>
 
 typedef struct { Eterm term; unsigned allow_byte; } LbIoListItem;
@@ -193,6 +194,72 @@ badarg:
     process->freason=LB_EXC_BADARG; return THE_NON_VALUE;
 }
 
+int lb_iolist_size_add(LbIolistSize *size,size_t bytes)
+{
+    if(bytes>LB_MAX_BINARY_BYTES) return 0;
+    Uint next=size->low+(Uint)bytes;
+    if(next<size->low) { if(size->high==UINTPTR_MAX) return 0; ++size->high; }
+    size->low=next; return 1;
+}
+Eterm lb_iolist_size_result(LbProcess *p,LbIolistSize size)
+{
+    if(!size.high && size.low<=MAX_SMALL) return make_small((Sint)size.low);
+    size_t words=size.high?3:2,need,before=p->collections;
+    if(!lb_size_add(words,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_heap_reserve(p,need,MAX_REG)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(p->entry_module->space->domain);
+        allocation_failed(p,cause==LB_ALLOC_OK?LB_ALLOC_LIMIT:cause); return THE_NON_VALUE;
+    }
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    Eterm *hp=p->htop; hp[0]=_make_header(words-1,POS_BIG_SUBTAG); hp[1]=size.low;
+    if(size.high) hp[2]=size.high;
+    p->htop+=words; return make_boxed(hp);
+}
+Eterm lb_bif_iolist_size_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=1;
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    Eterm input=args[0]; LbBitstringView view;
+    if(is_nil(input)) return make_small(0);
+    if(!is_list(input)) {
+        if(!lb_bitstring_view(input,&view) || (view.bit_size&7)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+        return lb_iolist_size_result(p,(LbIolistSize){view.bit_size/8,0});
+    }
+    size_t count=0,capacity=16; LbIoListItem *items=NULL;
+    LbAllocStatus status=lb_alloc_domain_allocate(domain,capacity*sizeof(*items),(void **)&items);
+    if(status!=LB_ALLOC_OK) { allocation_failed(p,status); return THE_NON_VALUE; }
+    LbIolistSize size={0}; int valid=1;
+    items[count++]=(LbIoListItem){input,0};
+    /* Borrowed terms remain in a nonmoving parent until all pending views have
+     * been released. Counting reads metadata, not the binary's bytes. */
+    while(count) {
+        if(!lb_work_domain_charge(domain,1)) { status=LB_ALLOC_WORK_LIMIT; break; }
+        ++p->last_native_cost;
+        LbIoListItem item=items[--count]; Eterm term=item.term; size_t bytes;
+        if(is_nil(term)) continue;
+        if(is_list(term)) {
+            Eterm *cell=list_val(term);
+            status=push_item(p,&items,&count,&capacity,(LbIoListItem){cell[1],0});
+            if(status==LB_ALLOC_OK) status=push_item(p,&items,&count,&capacity,(LbIoListItem){cell[0],1});
+            if(status!=LB_ALLOC_OK) break;
+            continue;
+        }
+        if(is_small(term)) {
+            Sint byte=signed_val(term);
+            if(!item.allow_byte || byte<0 || byte>255) { valid=0; break; }
+            bytes=1;
+        } else {
+            if(!lb_bitstring_view(term,&view) || (view.bit_size&7)) { valid=0; break; }
+            bytes=view.bit_size/8;
+        }
+        if(!lb_iolist_size_add(&size,bytes)) { status=LB_ALLOC_LIMIT; break; }
+    }
+    if(lb_alloc_domain_release(domain,items)!=LB_ALLOC_OK) abort();
+    if(status!=LB_ALLOC_OK) { allocation_failed(p,status); return THE_NON_VALUE; }
+    if(!valid) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    return lb_iolist_size_result(p,size);
+}
 Eterm lb_bif_iolist_to_binary_1(LbProcess *process,Eterm *args,const BeamInstr *instruction)
 {
     LbAllocDomain *domain=process->entry_module->space->domain;

@@ -5701,6 +5701,51 @@ cc_test(
 )
 
 genrule(
+  name = "iolist_size_slice_fixture",
+  srcs = ["tests/fixtures/iolist_size_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/iolist_size_slice_fixture/iolist_size_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/iolist_size_slice.erl)",
+)
+
+genrule(
+  name = "iolist_size_reference_fixture",
+  srcs = ["tests/fixtures/iolist_size_reference.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/iolist_size_reference_fixture/iolist_size_reference.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/iolist_size_reference.erl)",
+)
+
+cc_test(
+  name = "core_iolist_size_test",
+  size = "medium",
+  srcs = ["tests/core_iolist_size_test.c"],
+  args = ["$(rootpath :iolist_size_slice_fixture)"],
+  data = ["iolist_size_slice_fixture"],
+  deps = ["core"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "core_iolist_size_work",
+  size = "medium",
+  args = ["$(rootpath :iolist_size_slice_fixture)", "iolist_size_slice", "bad_head", "bad_negative", "bad_tail", "bad_bits"],
+  data = ["iolist_size_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "iolist_size_reference",
+  size = "small",
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "iolist_size_reference", "run", "-", "$(rootpath :iolist_size_reference_fixture)", "$(rootpath :iolist_size_slice_fixture)"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "iolist_size_reference_fixture", "iolist_size_slice_fixture"],
+  deps = ["otp_reference_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
   name = "hash_slice_fixture",
   srcs = ["tests/fixtures/hash_slice.erl"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
