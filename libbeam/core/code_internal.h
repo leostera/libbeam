@@ -238,6 +238,7 @@ Eterm lb_bif_monitor_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_demonitor_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_demonitor_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_exit_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_process_flag_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_iolist_to_binary_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_binary_to_list_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_binary_to_list_3(LbProcess *,Eterm *,const BeamInstr *);

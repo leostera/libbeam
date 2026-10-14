@@ -302,6 +302,31 @@ Eterm lb_bif_demonitor_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     return p->status==LB_PROCESS_WORK_LIMIT?THE_NON_VALUE:am_true;
 badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
 }
+/* bif.c:process_flag_2. trap_exit is process-local, not inherited by spawn.
+ * Unsupported policies remain refusals until their actual consumers exist. */
+Eterm lb_bif_process_flag_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(args[0]==am_trap_exit) {
+        if(args[1]!=am_true && args[1]!=am_false) goto badarg;
+        Eterm old=(p->flags&F_TRAP_EXIT)?am_true:am_false;
+        if(args[1]==am_true) p->flags|=F_TRAP_EXIT;
+        else p->flags&=~F_TRAP_EXIT;
+        return old;
+    }
+    if(args[0]==am_error_handler || args[0]==am_priority || args[0]==am_scheduler ||
+       args[0]==am_fullsweep_after || args[0]==am_min_heap_size || args[0]==am_min_bin_vheap_size ||
+       args[0]==am_max_heap_size || args[0]==am_message_queue_data || args[0]==am_sensitive ||
+       args[0]==am_async_dist || args[0]==am_save_calls || args[0]==am_monitor_nodes)
+        goto refused;
+    if(is_tuple(args[0])) {
+        Eterm *tuple=tuple_val(args[0]);
+        if(arityval(tuple[0])==2 && tuple[1]==am_monitor_nodes) goto refused;
+    }
+ badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+ refused: p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
+}
 Eterm lb_bif_exit_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)instruction; p->last_native_cost=1;

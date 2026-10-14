@@ -18,6 +18,7 @@
 #include "work_budget.h"
 #include "process_dict.h"
 #include "capability.h"
+#define F_TRAP_EXIT (1u<<0)
 #define F_INSLPQUEUE (1u<<1)
 #define F_TIMO (1u<<2)
 #define F_DELAY_GC (1u<<13) /* pinned native matching/schedule-out flag */

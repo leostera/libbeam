@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0
  * Copyright Ericsson AB 1996-2026. All Rights Reserved.
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
- * Owned process_info_bif/ERROR_HANDLER slice. All other information selectors
+ * Owned process_info_bif atom-valued settings. All other information selectors
  * remain explicit profile refusals, not invented process statistics.
  */
 #include "process_internal.h"
@@ -16,7 +16,7 @@ static int charge(LbProcess *p,Uint units)
 }
 static int item(LbProcess *p,Eterm selector)
 {
-    if(selector==am_error_handler) return 1;
+    if(selector==am_error_handler || selector==am_trap_exit) return 1;
     /* Other atom/tuple selector families are not admitted, including unknown
      * names. Do not mislabel an unimplemented valid selector as badarg. */
     if(is_atom(selector) || is_tuple(selector)) p->status=LB_PROCESS_REFUSED;
@@ -57,7 +57,7 @@ Eterm lb_bif_process_info_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
     if(!target || (target->status!=LB_PROCESS_READY && target->status!=LB_PROCESS_YIELDED)) return am_undefined;
     /* All processes are serialized by the Engine. Read the atom setting before
      * collecting the caller; no borrowed target heap pointer survives GC. */
-    Eterm handler=target->error_handler;
+    Eterm handler=target->error_handler,trap_exit=(target->flags&F_TRAP_EXIT)?am_true:am_false;
     if(!is_atom(handler)) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
     if(!request.count) return NIL;
     size_t words,need,collections=p->collections;
@@ -67,12 +67,16 @@ Eterm lb_bif_process_info_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
     if(!lb_heap_reserve(p,need,MAX_REG)) return allocation_failure(p);
     if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
     if(request.shape==INFO_SINGLE) {
-        Eterm result=TUPLE2(p->htop,am_error_handler,handler); p->htop+=3; return result;
+        Eterm selector=args[1];
+        Eterm result=TUPLE2(p->htop,selector,selector==am_error_handler?handler:trap_exit); p->htop+=3; return result;
     }
-    Eterm result=NIL; Eterm *hp=p->htop;
+    /* Reacquire the selector list after reserve/GC, preserving requested order
+     * and duplicates. Every tail is initialized before the list is published. */
+    Eterm selectors=args[1],result=NIL; Eterm *hp=p->htop,*tail=&result;
     for(size_t i=0;i<request.count;++i) {
-        Eterm tuple=TUPLE2(hp,am_error_handler,handler); hp+=3;
-        result=CONS(hp,tuple,result); hp+=2;
+        Eterm selector=CAR(list_val(selectors)); selectors=CDR(list_val(selectors));
+        Eterm tuple=TUPLE2(hp,selector,selector==am_error_handler?handler:trap_exit); hp+=3;
+        *tail=CONS(hp,tuple,NIL); tail=&hp[1]; hp+=2;
     }
     p->htop=hp; return result;
 }

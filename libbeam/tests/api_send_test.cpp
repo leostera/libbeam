@@ -33,7 +33,7 @@ static void round_trip(Isolate& isolate,Isolate& peer,const char* module,const c
     auto again=call.wait_until(deadline()); CHECK(std::get<Error>(again).code==ErrorCode::closed);
 }
 int main(int argc,char** argv) {
-    CHECK(argc==4); Bytes code=image(argv[1]),monitors=image(argv[2]),leaders=image(argv[3]);
+    CHECK(argc==5); Bytes code=image(argv[1]),monitors=image(argv[2]),leaders=image(argv[3]),flags=image(argv[4]);
     auto engine=take(Engine::create());
     {
         auto isolate=take(engine.create_isolate()),peer=take(engine.create_isolate());
@@ -47,15 +47,20 @@ int main(int argc,char** argv) {
             error=target->load_module(view(leaders));
             if(error) std::fprintf(stderr,"load: %s\n",error->message.c_str());
             CHECK(!error);
+            error=target->load_module(view(flags));
+            if(error) std::fprintf(stderr,"load: %s\n",error->message.c_str());
+            CHECK(!error);
             auto boot=take(target->start("send_slice","identity",{})); CHECK(take(boot.wait_until(deadline())).empty());
         }
         std::fill(code.begin(),code.end(),0xa5); std::fill(monitors.begin(),monitors.end(),0xa5);
-        std::fill(leaders.begin(),leaders.end(),0xa5);
+        std::fill(leaders.begin(),leaders.end(),0xa5); std::fill(flags.begin(),flags.end(),0xa5);
         for(std::size_t size:{0u,65u,8192u}) {
             for(const char* function:{"copy","named","dead"}) round_trip(isolate,peer,"send_slice",function,size);
             for(const char* function:{"copy","named","local_name","missing","dead","cancel","self_monitor"})
                 round_trip(isolate,peer,"monitor_slice",function,size);
             round_trip(isolate,peer,"group_leader_slice","lifecycle",size);
+            round_trip(isolate,peer,"process_flag_slice","copy",size);
+            round_trip(isolate,peer,"process_flag_slice","lifecycle",size);
         }
         // Both registered targets stay alive until both arm calls finish.
         // Identical names must coexist in separate namespaces, not merely
@@ -75,6 +80,12 @@ int main(int argc,char** argv) {
             auto result=call.wait_until(deadline()); CHECK(std::holds_alternative<Error>(result));
             CHECK(std::get<Error>(result).code==ErrorCode::exception && std::get<Error>(result).message=="guest exception");
             round_trip(isolate,peer,"monitor_slice","copy",65);
+        }
+        for(const char* function:{"bad_value","bad_flag"}) {
+            auto call=take(isolate.call("process_flag_slice",function,view(invalid)));
+            auto result=call.wait_until(deadline()); CHECK(std::holds_alternative<Error>(result));
+            CHECK(std::get<Error>(result).code==ErrorCode::exception && std::get<Error>(result).message=="guest exception");
+            round_trip(isolate,peer,"process_flag_slice","copy",65);
         }
         stop(isolate);
         auto survivor=take(peer.call("send_slice","copy",view(invalid))); CHECK(take(survivor.wait_until(deadline()))==invalid);

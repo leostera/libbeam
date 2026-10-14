@@ -249,6 +249,46 @@ static void registry_queries(LbBytesView code)
         p->reg[0]=pids[0]; p->reg[1]=pids[0]; CHECK(lb_bif_group_leader_2(p,p->reg,NULL)==am_true);
         puts("CORE_GROUP_LEADER_OK real_root_pid=true dead_leader=true precharged_assignment=true no_allocations=true namespace_isolation=true");
     }
+    {
+        Uint old_flags=p->flags; p->flags|=F_TIMO;
+        for(unsigned credit=0;credit<=1;++credit) {
+            LbWorkBudget *budget=lb_work_budget_create(world[0]); CHECK(budget);
+            budget->limit=budget->remaining=credit;
+            p->reg[0]=am_trap_exit; p->reg[1]=am_true; p->status=LB_PROCESS_READY; p->freason=LB_EXC_NULL;
+            size_t calls=memory.host_calls; lb_work_domain_borrow(domain,budget);
+            Eterm result=lb_bif_process_flag_2(p,p->reg,NULL);
+            if(!credit) CHECK(is_non_value(result) && p->status==LB_PROCESS_WORK_LIMIT && !(p->flags&F_TRAP_EXIT) && p->freason==LB_EXC_NULL);
+            else CHECK(result==am_false && (p->flags&F_TRAP_EXIT) && !budget->remaining);
+            CHECK(memory.host_calls==calls && (p->flags&F_TIMO) && !(processes[1]->flags&F_TRAP_EXIT));
+            lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+            lb_work_budget_release(budget);
+        }
+        p->status=LB_PROCESS_READY; p->reg[0]=am_trap_exit; p->reg[1]=NIL;
+        CHECK(is_non_value(lb_bif_process_flag_2(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG && (p->flags&F_TRAP_EXIT));
+        p->freason=LB_EXC_NULL; p->reg[0]=am_priority; p->reg[1]=am_high;
+        CHECK(is_non_value(lb_bif_process_flag_2(p,p->reg,NULL)) && p->status==LB_PROCESS_REFUSED && p->freason==LB_EXC_NULL);
+        p->status=LB_PROCESS_READY;
+        /* Mixed selectors survive a forced moving collection, without reversing
+         * order or dropping duplicates. Only immediate settings are borrowed. */
+        Eterm selectors=NIL;
+        selectors=CONS(p->htop,am_error_handler,selectors); p->htop+=2;
+        selectors=CONS(p->htop,am_trap_exit,selectors); p->htop+=2;
+        selectors=CONS(p->htop,am_trap_exit,selectors); p->htop+=2;
+        p->reg[0]=pids[0]; p->reg[1]=selectors;
+        while(p->htop<p->stop-1) *p->htop++=NIL;
+        size_t collections=p->collections;
+        Eterm info=lb_bif_process_info_2(p,p->reg,NULL);
+        CHECK(is_list(info) && p->collections>collections);
+        const Eterm keys[]={am_trap_exit,am_trap_exit,am_error_handler};
+        for(size_t i=0;i<3;++i) {
+            CHECK(is_list(info)); Eterm tuple=CAR(list_val(info)); CHECK(is_tuple(tuple));
+            CHECK(arityval(tuple_val(tuple)[0])==2 && tuple_val(tuple)[1]==keys[i]);
+            CHECK(tuple_val(tuple)[2]==(i==2?am_error_handler:am_true)); info=CDR(list_val(info));
+        }
+        CHECK(is_nil(info)); p->reg[0]=am_trap_exit; p->reg[1]=am_false;
+        CHECK(lb_bif_process_flag_2(p,p->reg,NULL)==am_true && p->flags==(old_flags|F_TIMO)); p->flags=old_flags;
+        puts("CORE_PROCESS_FLAG_OK precharged=true no_allocation=true peer_isolation=true preserves_other_flags=true badarg=true unsupported_refused=true moving_info_selectors=true");
+    }
     for(unsigned removing=0;removing<2;++removing) for(unsigned credit=0;credit<4;++credit) {
         LbWorkBudget *budget=lb_work_budget_create(world[0]); CHECK(budget);
         budget->limit=budget->remaining=credit;
