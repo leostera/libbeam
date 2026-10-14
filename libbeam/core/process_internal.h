@@ -55,6 +55,7 @@ struct LbProcess {
     Eterm error_handler; /* atom-only process setting; defaults independently on spawn */
     Eterm group_leader; /* local PID; NIL until a root's own identity is observed */
     Eterm construction_root; /* explicit temporary root during fallible append */
+    Eterm native_time_root; /* intermediate native time term across unit conversion GC */
     LbDecimal *decimal; /* sole pending native continuation; independent scratch */
     Uint freason; /* Native encoded scalar, never a GC root. */
     Eterm fvalue,exception_value; /* Pending payload and expanded terminal value. */

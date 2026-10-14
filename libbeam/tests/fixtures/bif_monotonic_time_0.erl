@@ -8,5 +8,6 @@ entry(Input) ->
 identity(Input) -> Input.
 invoke(_F,direct,[]) -> erlang:'monotonic_time'();
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
-check(F,Mode,V) ->
-    A = invoke(F, Mode, []), B = invoke(F, Mode, []), is_integer(A) andalso is_integer(B) andalso B >= A.
+check(F,Mode,_V) ->
+    Time = invoke(F,Mode,[]),
+    case Time of N when is_integer(N) -> true; _ -> false end.

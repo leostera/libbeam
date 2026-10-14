@@ -367,6 +367,83 @@ Eterm lb_bif_spawn_monitor_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
     ++engine->reference_counter;
     Eterm result=TUPLE2(p->htop,pid,ref); p->htop+=3; return result;
 }
+/* Exact spawn_opt/2 fun profile. Option traversal and all parent-side
+ * reservations precede monitor/link preparation and runnable publication.
+ * This slice supports the ordinary, [monitor], and [link] forms; mixed links
+ * plus monitors and scheduler/heap policy options remain an explicit profile
+ * refusal, never a silently dropped option. */
+Eterm lb_bif_spawn_opt_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain;
+    p->last_native_cost=1;
+    const LbFun *fun=lb_fun(args[0]);
+    if(!fun || lb_fun_arity(fun)!=0) goto badarg;
+    Eterm tail=args[1]; int monitored=0,linked=0,unsupported=0; size_t count=0;
+    while(is_list(tail)) {
+        if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        if(++count>LB_MAX_BINARY_BYTES/sizeof(Eterm)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+        Eterm option=CAR(list_val(tail)); tail=CDR(list_val(tail)); ++p->last_native_cost;
+        if(option==am_monitor) monitored=1;
+        else if(option==am_link) linked=1;
+        else if(is_atom(option)) {
+            LbBeamBytes name;
+            if(lb_atoms_name(p->entry_module->space->atoms,option,&name)!=LB_ATOM_OK) goto badarg;
+            static const char *valid_atoms[]={"sensitive","async_dist"}; int valid=0;
+            for(size_t i=0;i<sizeof(valid_atoms)/sizeof(*valid_atoms);++i)
+                if(name.size==strlen(valid_atoms[i]) && !memcmp(name.data,valid_atoms[i],name.size)) valid=1;
+            if(!valid) goto badarg;
+            unsupported=1;
+        } else if(is_tuple(option)) {
+            Eterm *tuple=tuple_val(option);
+            if(arityval(tuple[0])!=2 || !is_atom(tuple[1])) goto badarg;
+            LbBeamBytes key; if(lb_atoms_name(p->entry_module->space->atoms,tuple[1],&key)!=LB_ATOM_OK) goto badarg;
+            static const char *valid_keys[]={"priority","fullsweep_after","min_heap_size","min_bin_vheap_size","max_heap_size","message_queue_data","scheduler"}; int valid=0;
+            for(size_t i=0;i<sizeof(valid_keys)/sizeof(*valid_keys);++i)
+                if(key.size==strlen(valid_keys[i]) && !memcmp(key.data,valid_keys[i],key.size)) valid=1;
+            if(!valid) goto badarg;
+            unsupported=1;
+        } else goto badarg;
+    }
+    if(!is_nil(tail)) goto badarg;
+    if(unsupported || (monitored&&linked)) goto refused;
+    if(!p->world || !p->running) goto refused;
+    if(!monitored && !linked) {
+        Eterm pid; LbProcessStatus status=lb_task_spawn_fun_locked(p->world,p,args[0],&pid);
+        if(status!=LB_PROCESS_READY) { p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status; return THE_NON_VALUE; }
+        return pid;
+    }
+    if(linked) {
+        LbLink *link; LbProcessStatus status=lb_link_prepare(p,&link);
+        if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+        Eterm pid; status=lb_task_spawn_fun_linked_locked(p->world,p,args[0],link,&pid);
+        if(status!=LB_PROCESS_READY) { lb_link_discard(link); p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status; return THE_NON_VALUE; }
+        return pid;
+    }
+    LbEngine *engine=p->entry_module->space->engine;
+    if(engine->reference_counter==UINT64_MAX) goto limit;
+    size_t need,before=p->collections;
+    if(!lb_size_add(LB_REF_WORDS+3,p->heap_reserved,&need)) goto limit;
+    if(!lb_heap_reserve(p,need,4)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    Eterm parent_pid; LbProcessStatus status=lb_process_identity(p,&parent_pid);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    (void)parent_pid;
+    Eterm ref=lb_reference_write(p->htop,engine->reference_counter); p->htop+=LB_REF_WORDS;
+    LbMonitor *monitor; status=lb_monitor_prepare(p,ref,&monitor);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    Eterm pid; status=lb_task_spawn_fun_monitored_locked(p->world,p,args[0],monitor,&pid);
+    if(status!=LB_PROCESS_READY) { lb_monitor_discard(monitor); p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status; return THE_NON_VALUE; }
+    ++engine->reference_counter;
+    Eterm result=TUPLE2(p->htop,pid,ref); p->htop+=3; return result;
+badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+refused: p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
+limit: p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE;
+}
 Eterm lb_bif_spawn_opt_4(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)instruction; p->last_native_cost=1;

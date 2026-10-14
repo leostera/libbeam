@@ -80,7 +80,7 @@ static LbProcessStatus create_owned(LbCodeModule *module,const BeamInstr *pc,con
     p->entry_module=module; p->heap=p->htop=memory; p->hend=p->heap+words; p->stop=p->hend-1;
     *p->stop=(Eterm)lb_host_return; p->bin_vheap_sz=LB_BINARY_VHEAP_MIN_WORDS;
     for(i=0;i<MAX_REG;++i) p->reg[i]=NIL;
-    p->fvalue=p->exception_value=p->construction_root=p->ftrace=NIL; p->freason=LB_EXC_NULL;
+    p->fvalue=p->exception_value=p->construction_root=p->native_time_root=p->ftrace=NIL; p->freason=LB_EXC_NULL;
     p->local_mfa=*mfa; p->arity=mfa->arity; p->current=&p->local_mfa;
     p->i=pc; p->status=LB_PROCESS_READY; p->error_handler=am_error_handler; p->group_leader=NIL;
     ++module->users; *out=p; return LB_PROCESS_READY;

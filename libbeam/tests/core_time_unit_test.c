@@ -44,6 +44,28 @@ static void components(LbWorld *w,Memory *m)
     LbAllocDomain *d=&w->domain; Eterm module,function; LbCodeEntry *entry;
     CHECK(lb_atoms_find(w->space->atoms,"time_unit_slice",15,&module)==LB_ATOM_OK && lb_atoms_find(w->space->atoms,"identity",8,&function)==LB_ATOM_OK);
     CHECK(lb_code_entry_acquire(w->space,module,function,1,&entry)==LB_CODE_OK); size_t baseline=d->current;
+    LbProcess *clock=create(entry,0); LbWorkBudget *clock_budget=lb_work_budget_create(w); CHECK(clock_budget);
+    clock_budget->limit=clock_budget->remaining=100000; lb_work_domain_borrow(d,clock_budget);
+    Eterm first=lb_bif_monotonic_time_0(clock,NULL,NULL),second=lb_bif_monotonic_time_0(clock,NULL,NULL);
+    CHECK(is_small(first) && is_small(second) && signed_val(first)>=0 && signed_val(second)>=signed_val(first));
+    Eterm nanosecond,native,microsecond,unit;
+    CHECK(lb_atoms_find(w->space->atoms,"nanosecond",10,&nanosecond)==LB_ATOM_OK);
+    CHECK(lb_atoms_find(w->space->atoms,"native",6,&native)==LB_ATOM_OK);
+    CHECK(lb_atoms_find(w->space->atoms,"microsecond",11,&microsecond)==LB_ATOM_OK);
+    Eterm second_unit; CHECK(lb_atoms_find(w->space->atoms,"second",6,&second_unit)==LB_ATOM_OK);
+    Eterm wall_ns=lb_bif_system_time_0(clock,NULL,NULL);
+    CHECK(lb_is_big(wall_ns) && (*boxed_val(wall_ns)&_TAG_HEADER_MASK)!=NEG_BIG_SUBTAG);
+    clock->reg[0]=nanosecond; Eterm wall_nanos=lb_bif_system_time_1(clock,clock->reg,NULL);
+    clock->reg[0]=second_unit; Eterm wall_seconds=lb_bif_system_time_1(clock,clock->reg,NULL);
+    CHECK(lb_is_big(wall_nanos) && is_small(wall_seconds) && signed_val(wall_seconds)>0 && clock->native_time_root==NIL);
+    clock->reg[0]=nanosecond; Eterm nanos=lb_bif_monotonic_time_1(clock,clock->reg,NULL);
+    clock->reg[0]=native; Eterm native_time=lb_bif_monotonic_time_1(clock,clock->reg,NULL);
+    CHECK(is_small(nanos) && is_small(native_time) && signed_val(nanos)>0 && signed_val(native_time)>=signed_val(nanos));
+    clock->reg[0]=microsecond; Eterm micros=lb_bif_monotonic_time_1(clock,clock->reg,NULL);
+    CHECK(is_small(micros) && signed_val(micros)>=signed_val(nanos)/1000);
+    unit=am_true; clock->reg[0]=unit; clock->freason=LB_EXC_NULL;
+    CHECK(is_non_value(lb_bif_monotonic_time_1(clock,clock->reg,NULL)) && clock->freason==LB_EXC_BADARG);
+    lb_work_domain_borrow(d,NULL); lb_work_budget_release(clock_budget); lb_process_destroy(clock); CHECK(d->current==baseline);
     const Sint times[]={MIN_SMALL,MIN_SMALL+1,-1001,-1,0,1,1001,MAX_SMALL},rates[]={1,3,7,1000000000,MAX_SMALL};
     for(size_t t=0;t<8;++t) for(size_t f=0;f<5;++f) for(size_t u=0;u<5;++u) {
         LbProcess *p=create(entry,0); p->reg[0]=make_small(times[t]); p->reg[1]=make_small(rates[f]); p->reg[2]=make_small(rates[u]);

@@ -8,5 +8,6 @@ entry(Input) ->
 identity(Input) -> Input.
 invoke(_F,direct,[]) -> erlang:'system_time'();
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
-check(F,Mode,V) ->
-    T = invoke(F, Mode, []), is_integer(T) andalso T > 0.
+check(F,Mode,_V) ->
+    Time = invoke(F,Mode,[]),
+    case Time of N when is_integer(N) -> true; _ -> false end.

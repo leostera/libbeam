@@ -94,6 +94,7 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
     move_root(p,&p->fvalue,&top); move_root(p,&p->exception_value,&top);
     move_root(p,&p->ftrace,&top);
     move_root(p,&p->construction_root,&top);
+    move_root(p,&p->native_time_root,&top);
     move_root(p,&p->receive_root,&top);
     for(i=0;i<dict_roots;++i) move_root(p,&p->dictionary->data[i],&top);
     for(i=0;i<stack;++i) move_root(p,&stop[i],&top); /* CP words are primary headers */
@@ -156,7 +157,7 @@ int lb_process_has_other_reference(const LbProcess *p,Eterm value,const Eterm *e
     for(i=0;i<MAX_REG;++i) if(&p->reg[i]!=except && p->reg[i]==value) return 1;
     if(p->dictionary) for(i=0;i<p->dictionary->usedSlots;++i) if(p->dictionary->data[i]==value) return 1;
     for(scan=p->stop;scan<p->hend;++scan) if(scan!=except && *scan==value) return 1;
-    if(p->fvalue==value || p->exception_value==value || p->construction_root==value || p->ftrace==value) return 1;
+    if(p->fvalue==value || p->exception_value==value || p->construction_root==value || p->native_time_root==value || p->ftrace==value) return 1;
     /* Scan stored terms, not arbitrary payload words: a float/bignum/binary
      * containing the pointer's bits is not an alias. Keep the object-family
      * list explicit so adding a new GC representation cannot hide its roots. */
