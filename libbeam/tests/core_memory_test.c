@@ -9,14 +9,25 @@
 #include <stdlib.h>
 #include <string.h>
 #define CHECK(c) do { if(!(c)) { fprintf(stderr,"CHECK %d: %s\n",__LINE__,#c); abort(); } } while(0)
-typedef struct { size_t allocations,live; } Host;
+typedef struct { size_t allocations,live,calls,fail,watched_frees; void *watched; } Host;
+typedef union { max_align_t alignment; size_t bytes; } Header;
 static void *allocate(void *context,size_t bytes)
 {
-    Host *host=context; void *p=malloc(bytes);
-    if(p) { ++host->allocations; ++host->live; } return p;
+    Host *host=context; if(++host->calls==host->fail) return NULL;
+    Header *header=malloc(sizeof(*header)+bytes); if(!header) return NULL;
+    header->bytes=bytes; ++host->allocations; ++host->live; return header+1;
 }
 static void release(void *context,void *p)
-{ Host *host=context; CHECK(host->live); --host->live; free(p); }
+{
+    Host *host=context; Header *header=(Header *)p-1; CHECK(host->live); --host->live;
+    /* The domain prepends its own allocation header; watch the containing
+     * physical allocation rather than assuming its payload is the callback. */
+    if(host->watched && (uintptr_t)host->watched>=(uintptr_t)p &&
+       (uintptr_t)host->watched-(uintptr_t)p<header->bytes) {
+        memset(p,0xa5,header->bytes); ++host->watched_frees;
+    }
+    free(header);
+}
 static LbBytesView text(const char *value) { return (LbBytesView){(const unsigned char *)value,strlen(value)}; }
 static LbWorldResourceUsage usage(LbWorld *world)
 { LbWorldResourceUsage result; CHECK(lb_world_resource_usage(world,&result)==LB_WORLD_OK); return result; }
@@ -52,6 +63,38 @@ static void check_input(LbProcess *process)
     LbBitstringView view;
     CHECK(lb_bitstring_view(process->reg[0],&view) && view.bit_size==32 && view.bit_offset==0);
     CHECK(view.data[0]==1 && view.data[3]==4);
+}
+static void explicit_gc(LbEngine *engine,Host *host,const void *bytes,size_t size)
+{
+    for(unsigned exhausted=0;exhausted<2;++exhausted) {
+        LbWorld *world; LbResourceOverrides limits={.has_work=1,.invocation_work=exhausted?1:10000000};
+        CHECK(lb_world_create_with_overrides(engine,&limits,&world)==LB_WORLD_OK);
+        load(world,bytes,size); LbProcess *p=prepared(world);
+        lb_engine_enter(engine);
+        Eterm *old=p->heap; Eterm root=p->reg[0]; p->construction_root=root; p->heap_reserved=7;
+        host->watched=old; host->watched_frees=0;
+        size_t allocations=host->allocations;
+        lb_work_domain_borrow(&world->domain,p->work_active);
+        if(!exhausted) host->fail=host->calls+1;
+        CHECK(is_non_value(lb_bif_garbage_collect_0(p,p->reg,NULL)));
+        CHECK(p->status==(exhausted?LB_PROCESS_WORK_LIMIT:LB_PROCESS_NO_MEMORY));
+        CHECK(p->heap==old && p->reg[0]==root && p->construction_root==root && !p->collections);
+        CHECK(!host->watched_frees && host->allocations==allocations && p->heap_reserved==7); check_input(p);
+        host->fail=0; lb_work_domain_borrow(&world->domain,NULL);
+        lb_work_domain_clear_failure(&world->domain); lb_alloc_domain_begin_operation(&world->domain);
+        if(!exhausted) {
+            lb_work_domain_borrow(&world->domain,p->work_active); p->status=LB_PROCESS_READY;
+            CHECK(lb_bif_garbage_collect_0(p,p->reg,NULL)==am_true);
+            CHECK(p->heap!=old && host->watched_frees==1 && p->collections==1 && p->reg[0]==NIL);
+            CHECK(p->construction_root!=root && p->heap_reserved==7);
+            CHECK((size_t)(p->stop-p->htop)>=7+S_RESERVED);
+            p->reg[0]=p->construction_root; check_input(p);
+        }
+        host->watched=NULL;
+        lb_work_domain_borrow(&world->domain,NULL); lb_engine_leave(engine);
+        destroy(world,p); stop(world);
+    }
+    puts("CORE_EXPLICIT_GC_OK moving_side_root=true dead_x_cleared=true physical_release_poisoned=true allocation_retry=true work_before_forwarding=true reservation_preserved=true");
 }
 int main(int argc,char **argv)
 {
@@ -100,7 +143,7 @@ int main(int argc,char **argv)
     limits=(LbResourceOverrides){.has_work=1,.invocation_work=gc_work};
     CHECK(lb_world_create_with_overrides(engine,&limits,&exact)==LB_WORLD_OK);
     --limits.invocation_work; CHECK(lb_world_create_with_overrides(engine,&limits,&lower)==LB_WORLD_OK);
-    load(exact,bytes,(size_t)length); load(lower,bytes,(size_t)length); free(bytes);
+    load(exact,bytes,(size_t)length); load(lower,bytes,(size_t)length);
     a=prepared(exact); b=prepared(lower); old=b->heap; root=b->reg[0]; callbacks=host.allocations;
     lb_engine_enter(engine); lb_alloc_domain_begin_operation(&lower->domain);
     lb_work_domain_borrow(&lower->domain,b->work_active);
@@ -116,6 +159,7 @@ int main(int argc,char **argv)
     lb_work_domain_borrow(&exact->domain,NULL); lb_engine_leave(engine);
     destroy(lower,b); destroy(exact,a); stop(lower); stop(exact);
     printf("CORE_WORK_GC_OK exact_units=%llu threshold=true before_forwarding=true roots_preserved=true peer_collects=true physical_release=true execution=false\n",(unsigned long long)gc_work);
+    explicit_gc(engine,&host,bytes,(size_t)length); free(bytes);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!host.live);
     printf("CORE_MEMORY_GC_OK exact_peak=%zu old_plus_new=true denial_before_forwarding=true roots_preserved=true peer_collects=true final_balance=true execution=false\n",peak);
 }

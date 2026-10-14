@@ -5666,6 +5666,42 @@ cc_library(
 )
 
 genrule(
+  name = "gc_collect_slice_fixture",
+  srcs = ["tests/fixtures/gc_collect_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/gc_collect_slice_fixture/gc_collect_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/gc_collect_slice.erl)",
+)
+
+cc_test(
+  name = "core_gc_collect_work",
+  size = "medium",
+  timeout = "moderate",
+  args = ["$(rootpath :gc_collect_slice_fixture)", "gc_collect_slice"],
+  data = ["gc_collect_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "gc_collect_reference",
+  size = "small",
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "gc_collect_reference", "run", "-", "$(rootpath :gc_collect_reference_fixture)", "$(rootpath :gc_collect_slice_fixture)"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "gc_collect_reference_fixture", "gc_collect_slice_fixture"],
+  deps = ["otp_reference_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
+  name = "gc_collect_reference_fixture",
+  srcs = ["tests/fixtures/gc_collect_reference.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/gc_collect_reference_fixture/gc_collect_reference.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/gc_collect_reference.erl)",
+)
+
+genrule(
   name = "monitor_slice_fixture",
   srcs = ["tests/fixtures/monitor_slice.erl"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],

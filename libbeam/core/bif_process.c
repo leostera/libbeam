@@ -40,6 +40,22 @@ Eterm lb_bif_send_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     Eterm result=lb_erl_send(p,args[0],args[1]);
     ++p->last_native_cost; return result;
 }
+/* Explicit collection uses the same transactional moving collector as heap
+ * pressure. A zero-arity BIF has no live X arguments; stack and side roots are
+ * traced by the collector, and failure precedes every forwarding write. */
+Eterm lb_bif_garbage_collect_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)args; (void)instruction; p->last_native_cost=1;
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!lb_process_collect_live(p,0,0)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT;
+        return THE_NON_VALUE;
+    }
+    p->last_native_cost+=p->last_gc_cost; return am_true;
+}
 Eterm lb_bif_self_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)args; (void)instruction;
