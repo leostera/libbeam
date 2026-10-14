@@ -38,6 +38,7 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_get_module_info_2,{am_erlang,am_get_module_info,2,lb_bif_module_info_2,BIF_KIND_HEAVY}},
         {BIF_splus_2,{am_erlang,am_Plus,2,lb_bif_plus_2,BIF_KIND_HEAVY}},
         {BIF_integer_to_binary_1,{am_erlang,am_integer_to_binary,1,lb_bif_integer_to_binary_1,BIF_KIND_HEAVY}},
+        {BIF_send_2,{am_erlang,am_send,2,lb_bif_send_2,BIF_KIND_HEAVY}},
         {BIF_self_0,{am_erlang,am_self,0,lb_bif_self_0,BIF_KIND_HEAVY}},
         {BIF_node_0,{am_erlang,am_node,0,lb_bif_node_0,BIF_KIND_HEAVY}},
         {BIF_nodes_0,{am_erlang,am_nodes,0,lb_bif_nodes_0,BIF_KIND_HEAVY}},

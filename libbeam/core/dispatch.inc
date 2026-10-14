@@ -3301,6 +3301,20 @@ OpCase(move3_xxxxxx):
   GotoPF(next_pf);
 }
 
+OpCase(move2_par_yxyx):
+{
+  Eterm tmp_packed1 = I[1];
+  BeamInstr next_pf = BeamCodeAddr(I[2]);
+  Eterm V1, V2;
+  V1 = yb(tmp_packed1&BEAM_LOOSE_MASK);
+  V2 = yb((tmp_packed1>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK);
+  xb((tmp_packed1>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK) = V1;
+  xb((tmp_packed1>>(3*BEAM_LOOSE_SHIFT))) = V2;
+  I += 2;
+  ASSERT(VALID_INSTR(next_pf));
+  GotoPF(next_pf);
+}
+
 OpCase(move2_par_xxxy):
 {
   Eterm tmp_packed1 = I[1];

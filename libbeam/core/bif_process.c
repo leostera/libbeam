@@ -29,6 +29,17 @@ LbProcessStatus lb_process_identity(LbProcess *p,Eterm *out)
     }
     space->pids=table; *out=p->identity.id; return LB_PROCESS_READY;
 }
+/* bif.c:send_2 delegates to the same local delivery path as the send
+ * instruction. Charge invocation before lookup, allocation or publication. */
+Eterm lb_bif_send_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    Eterm result=lb_erl_send(p,args[0],args[1]);
+    ++p->last_native_cost; return result;
+}
 Eterm lb_bif_self_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)args; (void)instruction;

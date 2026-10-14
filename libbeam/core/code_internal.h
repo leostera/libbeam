@@ -212,6 +212,7 @@ Eterm lb_bif_is_atom_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_is_binary_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_setelement_3(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_integer_to_binary_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_send_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_self_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_make_ref_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_spawn_3(LbProcess *,Eterm *,const BeamInstr *);

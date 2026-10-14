@@ -5666,6 +5666,36 @@ cc_library(
 )
 
 genrule(
+  name = "send_slice_fixture",
+  srcs = ["tests/fixtures/send_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/send_slice_fixture/send_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/send_slice.erl)",
+)
+
+cc_test(
+  name = "core_send_work",
+  size = "medium",
+  timeout = "moderate",
+  args = ["$(rootpath :send_slice_fixture)", "send_slice"],
+  data = ["send_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "api_send_execution",
+  size = "medium",
+  timeout = "moderate",
+  srcs = ["tests/api_send_test.cpp"],
+  copts = ["-std=c++17"],
+  args = ["$(rootpath :send_slice_fixture)"],
+  data = ["send_slice_fixture"],
+  deps = ["libbeam"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
   name = "binary_list_slice_fixture",
   srcs = ["tests/fixtures/binary_list_slice.erl"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
@@ -6924,6 +6954,24 @@ genrule(
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
   outs = ["fixtures/node_locations_fixture/node_locations.beam"],
   cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic  -o $(@D) $(location tests/fixtures/node_locations.S)",
+)
+
+cc_test(
+  name = "send_reference",
+  size = "small",
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "send_reference", "run", "-", "$(rootpath :send_reference_fixture)", "$(rootpath :send_slice_fixture)"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "send_reference_fixture", "send_slice_fixture"],
+  deps = ["otp_reference_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
+  name = "send_reference_fixture",
+  srcs = ["tests/fixtures/send_reference.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/send_reference_fixture/send_reference.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/send_reference.erl)",
 )
 
 cc_test(

@@ -34,15 +34,19 @@ Eterm lb_erl_send(LbProcess *sender,Eterm destination,Eterm term)
     LbCodeSpace *space=sender->entry_module->space;
     if(!sender->world || !sender->running) { sender->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
     LbProcess *receiver=is_atom(destination)?lb_registry_lookup(space,destination,&sender->last_native_cost):lb_pid_lookup(space->pids,destination);
+    if(lb_alloc_domain_failure(space->domain)==LB_ALLOC_WORK_LIMIT) {
+        sender->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
     if(!receiver) {
         if(is_atom(destination)) { sender->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
         return term;
     }
     if(receiver->messages.mq_len==INTPTR_MAX) { sender->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    Uint lookup_cost=sender->last_native_cost;
     Eterm from; LbProcessStatus status=lb_process_identity(sender,&from);
     if(status!=LB_PROCESS_READY) { sender->status=status; return THE_NON_VALUE; }
     Uint identity_cost=sender->last_native_cost,cost; LbMessage *message;
-    status=lb_message_create(space,term,&message,&cost); sender->last_native_cost=identity_cost+cost;
+    status=lb_message_create(space,term,&message,&cost); sender->last_native_cost=lookup_cost+identity_cost+cost;
     if(status!=LB_PROCESS_READY) { sender->status=status; return THE_NON_VALUE; }
     message->m[2]=from;
     if(!lb_work_domain_charge(space->domain,1)) {
