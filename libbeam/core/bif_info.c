@@ -46,6 +46,55 @@ Eterm lb_bif_function_exported_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
     }
     return am_false;
 }
+static int module_list_heap(LbProcess *p,size_t count,size_t visited)
+{
+    size_t words,need,work; LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_size_mul(count,2,&words) || !lb_size_add(words,p->heap_reserved,&need) ||
+       !lb_size_add(words,visited,&work)) { p->status=LB_PROCESS_LIMIT; return 0; }
+    if(!lb_work_domain_charge(domain,work)) { p->status=LB_PROCESS_WORK_LIMIT; return 0; }
+    p->last_native_cost+=work;
+    if(!count) return 1;
+    size_t before=p->collections;
+    if(!lb_heap_reserve(p,need,0)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            (cause==LB_ALLOC_LIMIT || cause==LB_ALLOC_OK)?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+        return 0;
+    }
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    return 1;
+}
+/* beam_bif_load.c:loaded_0. No old-code or on_load versions exist here;
+ * only fully published modules are visible. GC cannot unload namespace code. */
+Eterm lb_bif_loaded_0(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)args; (void)pc; LbCodeSpace *space=p->entry_module->space;
+    size_t count=0,visited=0; p->last_native_cost=1;
+    if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    for(const LbCodeModule *m=space->modules;m;m=m->next) {
+        if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost;
+        if(visited==SIZE_MAX) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+        ++visited; if(m->published) ++count;
+    }
+    if(!module_list_heap(p,count,visited)) return THE_NON_VALUE;
+    Eterm result=NIL; size_t written=0;
+    for(const LbCodeModule *m=space->modules;m;m=m->next) if(m->published) {
+        if(written==count) abort();
+        result=CONS(p->htop,m->name,result); p->htop+=2; ++written;
+    }
+    if(written!=count) abort();
+    return result;
+}
+/* preloaded.c installs exactly the pinned erlang wrapper image. This is the
+ * boot inventory, not a claim about all OTP preloaded modules or current loads. */
+Eterm lb_bif_pre_loaded_0(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)args; (void)pc; p->last_native_cost=0;
+    if(!module_list_heap(p,1,1)) return THE_NON_VALUE;
+    Eterm result=CONS(p->htop,am_erlang,NIL); p->htop+=2; return result;
+}
+
 /* module_loaded_1 in beam_bif_load.c queries current, fully published code,
  * not the export namespace. This runtime does not admit on_load staging. */
 Eterm lb_bif_module_loaded_1(LbProcess *p,Eterm *args,const BeamInstr *pc)

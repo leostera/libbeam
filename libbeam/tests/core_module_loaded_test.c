@@ -82,6 +82,57 @@ static void refused_on_load(LbWorld *w,LbCodeModule *host,const char *path)
     CHECK(d->current==live && d->block_count==blocks && w->space->modules==head && lb_atoms_count(w->space->atoms)==atoms);
     check(w,host,name,am_false);
 }
+static void module_names(Eterm list,const Eterm *names,size_t count)
+{
+    unsigned seen=0; CHECK(count<sizeof(seen)*8);
+    while(is_list(list)) {
+        Eterm name=CAR(list_val(list)); size_t i=0;
+        while(i<count && names[i]!=name) ++i;
+        CHECK(i<count && !(seen&(1u<<i))); seen|=1u<<i; list=CDR(list_val(list));
+    }
+    CHECK(list==NIL && seen==((1u<<count)-1));
+}
+static Eterm enumerate(LbProcess *p,int preloaded)
+{ return preloaded?lb_bif_pre_loaded_0(p,NULL,NULL):lb_bif_loaded_0(p,NULL,NULL); }
+static void enumeration(LbWorld *w,LbCodeModule *host,const Eterm *names,size_t count)
+{
+    LbAllocDomain *d=w->space->domain; size_t baseline=d->current,blocks=d->block_count;
+    for(unsigned preloaded=0;preloaded<2;++preloaded) {
+        Eterm boot=am_erlang; const Eterm *expected=preloaded?&boot:names; size_t n=preloaded?1:count;
+        for(unsigned mode=0;mode<3;++mode) {
+            LbProcess *p=create(w,host,NIL); p->heap_reserved=17;
+            if(mode) while(p->htop<p->stop-S_RESERVED-17) *p->htop++=NIL;
+            Eterm *heap=p->heap,*top=p->htop; size_t live=d->current,limit=d->limit;
+            LbSystemAllocator system=d->system;
+            if(mode==1) d->system.allocate=deny;
+            if(mode==2) d->limit=live;
+            Eterm result=enumerate(p,preloaded);
+            d->system=system; d->limit=limit;
+            if(mode) {
+                CHECK(is_non_value(result) && p->status==(mode==1?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT));
+                CHECK(p->heap==heap && p->htop==top && !p->collections && d->current==live);
+                lb_alloc_domain_begin_operation(d); p->status=LB_PROCESS_READY;
+                result=enumerate(p,preloaded); CHECK(p->collections>0);
+            }
+            CHECK(p->heap_reserved==17); module_names(result,expected,n);
+            p->reg[0]=result; CHECK(lb_process_collect_live(p,0,1)); module_names(p->reg[0],expected,n);
+            CHECK(!p->fun_leases); lb_process_destroy(p);
+            CHECK(d->current==baseline && d->block_count==blocks);
+        }
+        uint64_t required=0;
+        for(uint64_t pass=0;pass<=required+1;++pass) {
+            LbProcess *p=create(w,host,NIL); LbWorkBudget *budget=lb_work_budget_create(w); CHECK(budget);
+            uint64_t credit=pass?pass-1:budget->limit; budget->limit=budget->remaining=credit;
+            Eterm *top=p->htop; size_t live=d->current;
+            lb_work_domain_borrow(d,budget); Eterm result=enumerate(p,preloaded);
+            if(!pass) { module_names(result,expected,n); required=credit-budget->remaining; CHECK(required>1 && required<100); }
+            else if(credit<required) CHECK(is_non_value(result) && p->status==LB_PROCESS_WORK_LIMIT && p->htop==top && d->current==live);
+            else { module_names(result,expected,n); CHECK(!budget->remaining); }
+            lb_work_domain_borrow(d,NULL); lb_work_domain_clear_failure(d); lb_alloc_domain_begin_operation(d);
+            lb_process_destroy(p); lb_work_budget_release(budget); CHECK(d->current==baseline && d->block_count==blocks);
+        }
+    }
+}
 static void close_world(LbWorld *w)
 { LbReclamation *r; CHECK(lb_world_stop(w,&r)==LB_WORLD_OK && lb_reclamation_poll(r)==LB_WORLD_OK && lb_reclamation_consume(r)==LB_WORLD_OK); lb_reclamation_release(r); lb_world_release(w); }
 int main(int argc,char **argv)
@@ -90,13 +141,19 @@ int main(int argc,char **argv)
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_world_create(engine,&w)==LB_WORLD_OK && lb_world_create(engine,&peer)==LB_WORLD_OK);
     lb_engine_enter(engine); LbCodeModule *host=load(w,argv[1]),*target=load(w,argv[2]),*other=load(peer,argv[1]);
     Eterm target_name=target->name;
+    Eterm names[]={am_erlang,host->name,target_name},peer_names[]={am_erlang,other->name};
+    enumeration(w,host,names,3); enumeration(peer,other,peer_names,2);
     check(w,host,host->name,am_true); check(w,host,am_erlang,am_true); check(w,host,target_name,am_true);
     check(peer,other,atom(peer,"apply_target"),am_false);
     check(w,host,atom(w,"unloaded_module_probe"),am_false); check(w,host,atom(w,""),am_false);
     check(w,host,am_true,am_false); check(w,host,NIL,THE_NON_VALUE); check(w,host,make_small(0),THE_NON_VALUE); boxed_badargs(w,host);
+    LbProcess *snapshot=create(w,host,NIL); snapshot->reg[0]=lb_bif_loaded_0(snapshot,NULL,NULL);
+    module_names(snapshot->reg[0],names,3);
     CHECK(!target->users && lb_code_unload(target)==LB_CODE_OK); check(w,host,target_name,am_false);
+    CHECK(lb_process_collect_live(snapshot,0,1)); module_names(snapshot->reg[0],names,3); lb_process_destroy(snapshot);
+    enumeration(w,host,names,2);
     target=load(w,argv[2]); check(w,host,target_name,am_true); CHECK(!target->users);
-    refused_on_load(w,host,argv[3]);
+    refused_on_load(w,host,argv[3]); enumeration(w,host,names,3);
     lb_engine_leave(engine); close_world(peer); close_world(w); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
-    puts("CORE_MODULE_LOADED_OK actual_published_code=true preloaded=true absent=false badarg=true allocation_free=true work_prefixes=true no_leases=true unload_reload=true peer_scope=true balanced=true"); return 0;
+    puts("CORE_MODULE_LOADED_OK actual_published_code=true preloaded=true absent=false badarg=true allocation_free=true work_prefixes=true no_leases=true unload_reload=true peer_scope=true enumeration_gc=true snapshot_after_unload=true enumeration_work_memory=true balanced=true"); return 0;
 }
