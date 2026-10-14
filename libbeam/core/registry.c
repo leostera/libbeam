@@ -62,6 +62,34 @@ LbProcessStatus lb_registry_register(LbProcess *caller,Eterm name,Eterm pid)
     target->registered=r; space->registry=registry;
     return LB_PROCESS_READY;
 }
+LbProcessStatus lb_registry_names(LbProcess *p,Eterm *out)
+{
+    LbCodeSpace *space=p->entry_module->space;
+    LbRegistry *registry=space->registry;
+    size_t count=registry?registry->count:0,words,need,work=1;
+    *out=THE_NON_VALUE; p->last_native_cost=0;
+    if(!lb_size_mul(count,2,&words) || !lb_size_add(words,p->heap_reserved,&need)) return LB_PROCESS_LIMIT;
+    if(registry && (!lb_size_mul(count,3,&work) || !lb_size_add(work,1+REGISTRY_BUCKETS,&work))) return LB_PROCESS_LIMIT;
+    if(!lb_work_domain_charge(space->domain,work)) return LB_PROCESS_WORK_LIMIT;
+    p->last_native_cost=work;
+    if(!count) { *out=NIL; return LB_PROCESS_READY; }
+    size_t before=p->collections;
+    if(!lb_heap_reserve(p,need,0)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(space->domain);
+        return cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT;
+    }
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    /* GC moves guest terms, never these serialized registry associations or
+     * their atom names. No allocation/re-entry after reserving the full list. */
+    Eterm result=NIL; size_t visited=0;
+    for(size_t i=0;i<REGISTRY_BUCKETS;++i) for(LbRegisteredProcess *r=registry->bucket[i];r;r=r->next) {
+        if(visited==count) abort();
+        result=CONS(p->htop,r->name,result); p->htop+=2; ++visited;
+    }
+    if(visited!=count) abort();
+    *out=result; return LB_PROCESS_READY;
+}
 void lb_registry_remove(LbProcess *p)
 {
     LbRegisteredProcess *r=p->registered;

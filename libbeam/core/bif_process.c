@@ -176,6 +176,13 @@ static Eterm registered_name(LbProcess *p,Eterm name,int remove)
     lb_registry_remove(target);
     return am_true;
 }
+Eterm lb_bif_registered_0(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)args; (void)pc; Eterm result;
+    LbProcessStatus status=lb_registry_names(p,&result);
+    if(status!=LB_PROCESS_READY) p->status=status;
+    return result;
+}
 Eterm lb_bif_whereis_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 { (void)pc; return registered_name(p,args[0],0); }
 Eterm lb_bif_unregister_1(LbProcess *p,Eterm *args,const BeamInstr *pc)

@@ -10,5 +10,6 @@ typedef struct LbRegistry LbRegistry;
 typedef struct LbRegisteredProcess LbRegisteredProcess;
 LbProcess *lb_registry_lookup(LbCodeSpace *,Eterm,Uint *cost);
 LbProcessStatus lb_registry_register(LbProcess *,Eterm,Eterm);
+LbProcessStatus lb_registry_names(LbProcess *,Eterm *);
 void lb_registry_remove(LbProcess *);
 #endif

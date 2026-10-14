@@ -176,6 +176,15 @@ static void execution(LbBytesView code)
     for(i=0;i<sizeof(host_reply);++i) CHECK(host_reply[i]==0x6b);
     puts("CORE_WORLD_EXECUTION_OK worker=true copied_results=true peer_progress=true capacity=true stopped_reclaimed=true replacement=true owner_drop=true public_api=false");
 }
+static void three_registered_names(Eterm names)
+{
+    unsigned seen=0;
+    while(is_list(names)) {
+        Eterm name=CAR(list_val(names)); unsigned bit=name==am_true?1:name==am_false?2:name==am_ok?4:0;
+        CHECK(bit && !(seen&bit)); seen|=bit; names=CDR(list_val(names));
+    }
+    CHECK(names==NIL && seen==7);
+}
 static void registry_queries(LbBytesView code)
 {
     Memory memory={0}; LbEngine *engine=create(&memory);
@@ -213,6 +222,40 @@ static void registry_queries(LbBytesView code)
             CHECK(lb_registry_register(p,am_true,pids[0])==LB_PROCESS_READY);
         } else CHECK(lb_registry_lookup(world[0]->space,am_true,&cost)==p);
     }
+    for(unsigned credit=67;credit<=68;++credit) {
+        LbWorkBudget *budget=lb_work_budget_create(world[0]); CHECK(budget);
+        budget->limit=budget->remaining=credit; p->status=LB_PROCESS_READY; p->freason=LB_EXC_NULL;
+        Eterm *top=p->htop; size_t calls=memory.host_calls;
+        lb_work_domain_borrow(domain,budget);
+        Eterm names=lb_bif_registered_0(p,NULL,NULL);
+        if(credit==67) CHECK(is_non_value(names) && p->status==LB_PROCESS_WORK_LIMIT && p->htop==top);
+        else CHECK(is_list(names) && CAR(list_val(names))==am_true && CDR(list_val(names))==NIL && !budget->remaining);
+        CHECK(memory.host_calls==calls);
+        lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+        lb_work_budget_release(budget);
+    }
+    p->status=LB_PROCESS_READY;
+    while(p->htop<p->stop-S_RESERVED) *p->htop++=NIL;
+    Eterm *old_heap=p->heap,*old_top=p->htop; size_t collections=p->collections,live=memory.live;
+    memory.fail_host=memory.host_calls+1;
+    CHECK(is_non_value(lb_bif_registered_0(p,NULL,NULL)) && p->status==LB_PROCESS_NO_MEMORY);
+    CHECK(p->heap==old_heap && p->htop==old_top && p->collections==collections && memory.live==live);
+    memory.fail_host=0; p->status=LB_PROCESS_READY; lb_alloc_domain_begin_operation(domain);
+    Eterm names=lb_bif_registered_0(p,NULL,NULL);
+    CHECK(p->collections>collections && is_list(names) && CAR(list_val(names))==am_true && CDR(list_val(names))==NIL);
+    LbProcess *extra[2]; Eterm labels[2]={am_false,am_ok},function;
+    CHECK(lb_atoms_find(world[0]->space->atoms,"identity",8,&function)==LB_ATOM_OK);
+    for(unsigned i=0;i<2;++i) {
+        LbCodeEntry *entry; Eterm input=NIL,pid;
+        CHECK(lb_code_entry_acquire(world[0]->space,p->entry_module->name,function,1,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,&input,1,64,&extra[i])==LB_PROCESS_READY); lb_code_entry_release(entry);
+        CHECK(lb_process_identity(extra[i],&pid)==LB_PROCESS_READY);
+        CHECK(lb_registry_register(extra[i],labels[i],pid)==LB_PROCESS_READY);
+    }
+    names=lb_bif_registered_0(p,NULL,NULL); three_registered_names(names);
+    for(unsigned i=0;i<2;++i) lb_process_destroy(extra[i]);
+    p->reg[0]=names;
+    CHECK(lb_process_collect_live(p,0,1)); three_registered_names(p->reg[0]);
     p->reg[0]=make_small(7); p->freason=LB_EXC_NULL;
     CHECK(is_non_value(lb_bif_whereis_1(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
     p->freason=LB_EXC_NULL;
@@ -222,16 +265,19 @@ static void registry_queries(LbBytesView code)
     p->reg[0]=am_true;
     CHECK(lb_bif_unregister_1(p,p->reg,NULL)==am_true);
     CHECK(lb_bif_whereis_1(p,p->reg,NULL)==am_undefined);
+    CHECK(lb_bif_registered_0(p,NULL,NULL)==NIL);
     p->freason=LB_EXC_NULL;
     CHECK(is_non_value(lb_bif_unregister_1(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
     processes[1]->reg[0]=am_true;
     CHECK(lb_bif_whereis_1(processes[1],processes[1]->reg,NULL)==pids[1]);
+    names=lb_bif_registered_0(processes[1],NULL,NULL);
+    CHECK(is_list(names) && CAR(list_val(names))==am_true && CDR(list_val(names))==NIL);
     for(unsigned i=0;i<2;++i) lb_process_destroy(processes[i]);
     lb_engine_leave(engine);
     for(unsigned i=0;i<2;++i) lb_world_release(world[i]);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     CHECK(!memory.live && !memory.bytes);
-    puts("CORE_REGISTRY_QUERY_OK local_names=true absent=true invalid=true exact_work=true denial_before_removal=true allocation_free=true peer_isolation=true");
+    puts("CORE_REGISTRY_QUERY_OK local_names=true absent=true invalid=true exact_work=true denial_before_removal=true lookup_remove_allocation_free=true enumeration_gc=true snapshot_lifetime=true peer_isolation=true");
 }
 typedef enum { QUEUED, RESUMED, WAITING } CancelState;
 static void await_parked(LbCall *call,uint64_t initial_credit)
