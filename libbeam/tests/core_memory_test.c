@@ -64,6 +64,50 @@ static void check_input(LbProcess *process)
     CHECK(lb_bitstring_view(process->reg[0],&view) && view.bit_size==32 && view.bit_offset==0);
     CHECK(view.data[0]==1 && view.data[3]==4);
 }
+static void target_gc(LbEngine *engine,Host *host,const void *bytes,size_t size)
+{
+    for(unsigned exhausted=0;exhausted<2;++exhausted) {
+        LbWorld *world; LbResourceOverrides limits={.has_work=1,.invocation_work=exhausted?1:10000000};
+        CHECK(lb_world_create_with_overrides(engine,&limits,&world)==LB_WORLD_OK);
+        load(world,bytes,size); LbProcess *caller=prepared(world),*target=prepared(world);
+        lb_engine_enter(engine);
+        Eterm pid; CHECK(lb_process_identity(target,&pid)==LB_PROCESS_READY);
+        Eterm root=target->reg[0]; target->reg[MAX_REG-1]=root;
+        Eterm *old=target->heap,*caller_heap=caller->heap; caller->reg[0]=pid;
+        uint64_t target_credit=lb_work_budget_usage(target->work_active).remaining;
+        host->watched=old; host->watched_frees=0;
+        size_t allocations=host->allocations;
+        lb_work_domain_borrow(&world->domain,caller->work_active);
+        if(!exhausted) host->fail=host->calls+1;
+        CHECK(is_non_value(lb_bif_garbage_collect_1(caller,caller->reg,NULL)));
+        CHECK(caller->status==(exhausted?LB_PROCESS_WORK_LIMIT:LB_PROCESS_NO_MEMORY));
+        CHECK(target->heap==old && target->reg[0]==root && target->reg[MAX_REG-1]==root && !target->collections);
+        CHECK(target->status==LB_PROCESS_READY && !host->watched_frees && host->allocations==allocations);
+        CHECK(!lb_work_budget_usage(caller->work_active).escaped && !lb_work_budget_usage(target->work_active).escaped);
+        host->fail=0; lb_work_domain_borrow(&world->domain,NULL);
+        lb_work_domain_clear_failure(&world->domain); lb_alloc_domain_begin_operation(&world->domain);
+        if(!exhausted) {
+            lb_work_domain_borrow(&world->domain,caller->work_active); caller->status=LB_PROCESS_READY;
+            CHECK(lb_bif_garbage_collect_1(caller,caller->reg,NULL)==am_true);
+            CHECK(target->heap!=old && host->watched_frees==1 && target->collections==1);
+            CHECK(target->reg[0]!=root && target->reg[MAX_REG-1]==target->reg[0]); check_input(target);
+            CHECK(caller->heap==caller_heap && !caller->collections && caller->reg[0]==pid);
+            CHECK(lb_work_budget_usage(caller->work_active).escaped && lb_work_budget_usage(target->work_active).escaped);
+        }
+        CHECK(lb_work_budget_usage(target->work_active).remaining==target_credit);
+        host->watched=NULL; lb_work_domain_borrow(&world->domain,NULL);
+        lb_process_destroy(target);
+        if(!exhausted) {
+            lb_work_domain_borrow(&world->domain,caller->work_active);
+            CHECK(lb_bif_garbage_collect_1(caller,caller->reg,NULL)==am_false);
+            caller->reg[0]=make_small(1);
+            CHECK(is_non_value(lb_bif_garbage_collect_1(caller,caller->reg,NULL)) && caller->freason==LB_EXC_BADARG);
+            lb_work_domain_borrow(&world->domain,NULL);
+        }
+        lb_process_destroy(caller); lb_engine_leave(engine); stop(world);
+    }
+    puts("CORE_TARGET_GC_OK full_x_bank=true target_moves=true caller_does_not_move=true caller_charged=true target_credit_unchanged=true failed_collection_private=true successful_cross_effect=true allocation_retry=true dead_false=true invalid_badarg=true");
+}
 static void explicit_gc(LbEngine *engine,Host *host,const void *bytes,size_t size)
 {
     for(unsigned exhausted=0;exhausted<2;++exhausted) {
@@ -159,7 +203,8 @@ int main(int argc,char **argv)
     lb_work_domain_borrow(&exact->domain,NULL); lb_engine_leave(engine);
     destroy(lower,b); destroy(exact,a); stop(lower); stop(exact);
     printf("CORE_WORK_GC_OK exact_units=%llu threshold=true before_forwarding=true roots_preserved=true peer_collects=true physical_release=true execution=false\n",(unsigned long long)gc_work);
-    explicit_gc(engine,&host,bytes,(size_t)length); free(bytes);
+    explicit_gc(engine,&host,bytes,(size_t)length);
+    target_gc(engine,&host,bytes,(size_t)length); free(bytes);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!host.live);
     printf("CORE_MEMORY_GC_OK exact_peak=%zu old_plus_new=true denial_before_forwarding=true roots_preserved=true peer_collects=true final_balance=true execution=false\n",peak);
 }

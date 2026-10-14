@@ -49,7 +49,7 @@ static void retire(LbWorld *world)
 }
 int main(int argc,char **argv)
 {
-    FILE *file; long size; CHECK(argc==3 && (file=fopen(argv[1],"rb")) && !fseek(file,0,SEEK_END));
+    FILE *file; long size; CHECK((argc==3 || argc==4) && (file=fopen(argv[1],"rb")) && !fseek(file,0,SEEK_END));
     size=ftell(file); CHECK(size>0 && !fseek(file,0,SEEK_SET)); unsigned char *bytes=malloc((size_t)size);
     CHECK(bytes && fread(bytes,1,(size_t)size,file)==(size_t)size && !fclose(file));
     for(size_t i=0;i<sizeof(payload);++i) payload[i]=(unsigned char)(i*37);
@@ -63,6 +63,10 @@ int main(int argc,char **argv)
         world=make(engine,beam,cost-below); call=invoke(world,argv[2],"copy",1);
         result(call,below?LB_WORLD_WORK_LIMIT:LB_WORLD_OK); CHECK(remaining(call)==0); consume(call);
         call=invoke(world,argv[2],"identity",0); result(call,LB_WORLD_OK); consume(call); retire(world);
+        peer_call=invoke(peer,argv[2],"copy",0); result(peer_call,LB_WORLD_OK); consume(peer_call);
+    }
+    if(argc==4) {
+        peer_call=invoke(peer,argv[2],argv[3],0); result(peer_call,LB_WORLD_EXCEPTION); consume(peer_call);
         peer_call=invoke(peer,argv[2],"copy",0); result(peer_call,LB_WORLD_OK); consume(peer_call);
     }
     retire(peer); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); free(bytes);

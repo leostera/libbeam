@@ -5677,7 +5677,7 @@ cc_test(
   name = "core_gc_collect_work",
   size = "medium",
   timeout = "moderate",
-  args = ["$(rootpath :gc_collect_slice_fixture)", "gc_collect_slice"],
+  args = ["$(rootpath :gc_collect_slice_fixture)", "gc_collect_slice", "invalid"],
   data = ["gc_collect_slice_fixture"],
   deps = ["core_bif_work_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
