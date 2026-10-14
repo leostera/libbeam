@@ -7,6 +7,18 @@
 #include "receive_marker.h"
 #include "process_internal.h"
 
+/* Publish an already-owned message at the serialized delivery boundary.
+ * Caller accounts delivery work before entering; failed publication retains
+ * caller ownership and cannot wake the receiver or escape a causal family. */
+LbProcessStatus lb_message_deliver(LbProcess *receiver,LbMessage *message)
+{
+    if(!receiver || !message || receiver->entry_module->space!=message->space) return LB_PROCESS_INVALID;
+    LbProcessStatus status=lb_message_queue_append(&receiver->messages,message);
+    if(status!=LB_PROCESS_READY) return status;
+    lb_work_cross_effect(message->budget,receiver->work_birth);
+    receiver->waiting=0;
+    return LB_PROCESS_READY;
+}
 /* Selected native do_send local-PID branch: dead PIDs drop the message and
  * return it; live receivers own a self-contained copy before queue mutation.
  * Registered names resolve in the same namespace; missing names are badarg.
@@ -36,10 +48,8 @@ Eterm lb_erl_send(LbProcess *sender,Eterm destination,Eterm term)
     if(!lb_work_domain_charge(space->domain,1)) {
         lb_message_destroy(message); sender->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
     }
-    lb_work_cross_effect(sender->work_active,receiver->work_birth);
-    status=lb_message_queue_append(&receiver->messages,message);
+    status=lb_message_deliver(receiver,message);
     if(status!=LB_PROCESS_READY) { lb_message_destroy(message); sender->status=status; return THE_NON_VALUE; }
-    receiver->waiting=0; /* publication precedes wake; the shared worker owns both */
     return term;
 }
 LbProcessStatus lb_message_import(LbProcess *receiver,const LbMessage *message,size_t live,Eterm *out)

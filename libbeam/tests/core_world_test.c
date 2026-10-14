@@ -233,8 +233,8 @@ static void registry_queries(LbBytesView code)
     CHECK(!memory.live && !memory.bytes);
     puts("CORE_REGISTRY_QUERY_OK local_names=true absent=true invalid=true exact_work=true denial_before_removal=true allocation_free=true peer_isolation=true");
 }
-typedef enum { QUEUED, EXECUTING, WAITING } CancelState;
-static void await_cancel_state(LbCall *call,CancelState wanted,uint64_t initial_credit)
+typedef enum { QUEUED, RESUMED, WAITING } CancelState;
+static void await_parked(LbCall *call,uint64_t initial_credit)
 {
     const struct timespec delay={0,1000000};
     for(unsigned i=0;i<5000;++i) {
@@ -244,7 +244,20 @@ static void await_cancel_state(LbCall *call,CancelState wanted,uint64_t initial_
         int progressed=call->budget->remaining<initial_credit;
         lb_engine_leave(call->world->engine);
         CHECK(observation.status==LB_TASK_PENDING);
-        if(progressed && observation.waiting==(wanted==WAITING)) return;
+        if(progressed && observation.waiting) return;
+        nanosleep(&delay,NULL);
+    }
+    CHECK(0);
+}
+static void await_closed_world(LbWorld *world)
+{
+    const struct timespec delay={0,1000000};
+    for(unsigned i=0;i<5000;++i) {
+        lb_engine_enter(world->engine);
+        CHECK(world->phase==LB_WORLD_STOPPING || world->phase==LB_WORLD_RECLAIMED);
+        int done=world->phase==LB_WORLD_RECLAIMED;
+        lb_engine_leave(world->engine);
+        if(done) return;
         nanosleep(&delay,NULL);
     }
     CHECK(0);
@@ -261,7 +274,7 @@ static void cancellation_states(LbBytesView code)
     for(unsigned stopping=0;stopping<2;++stopping) {
         LbWorld *world; LbCall *root; LbReclamation *receipt=NULL;
         CHECK(lb_world_create(engine,&world)==LB_WORLD_OK && lb_world_load(world,code)==LB_WORLD_OK);
-        const char *function=state==QUEUED?"identity":state==EXECUTING?"loop":"park";
+        const char *function=state==QUEUED?"identity":state==RESUMED?"runnable":"park";
         lb_engine_enter(engine);
         CHECK(lb_world_start_locked(world,text("async_slice"),text(function),text("retained"),&root)==LB_WORLD_OK);
         uint64_t credit=root->budget->remaining;
@@ -274,19 +287,49 @@ static void cancellation_states(LbBytesView code)
         }
         lb_engine_leave(engine);
         if(state!=QUEUED) {
-            await_cancel_state(root,state,credit);
+            await_parked(root,credit);
             CHECK(lb_call_consume(root)==LB_WORLD_PENDING);
-            if(stopping) CHECK(lb_world_stop(world,&receipt)==LB_WORLD_OK);
-            else CHECK(lb_call_cancel(root)==LB_WORLD_OK);
+            if(state==RESUMED) {
+                lb_engine_enter(engine);
+                Eterm name,resume; Uint cost=0;
+                CHECK(lb_atoms_find(world->space->atoms,"lifecycle_ready",15,&name)==LB_ATOM_OK);
+                CHECK(lb_atoms_find(world->space->atoms,"resume",6,&resume)==LB_ATOM_OK);
+                LbProcess *p=lb_registry_lookup(world->space,name,&cost);
+                CHECK(p && p->waiting && p->work_active==root->budget);
+                /* A real message makes an already-executed continuation
+                 * runnable. Hold the dispatch boundary through cancellation;
+                 * never race the normal work limit against host scheduling. */
+                lb_work_domain_borrow(&world->domain,root->budget);
+                LbMessage *message; Uint delivery_cost=0;
+                CHECK(lb_message_create(world->space,resume,&message,&delivery_cost)==LB_PROCESS_READY);
+                message->m[2]=p->identity.id;
+                CHECK(lb_work_domain_charge(&world->domain,1));
+                CHECK(lb_message_deliver(p,message)==LB_PROCESS_READY);
+                lb_work_domain_borrow(&world->domain,NULL);
+                CHECK(!p->waiting && p->messages.mq_len==1 && root->status==LB_WORLD_PENDING);
+                CHECK(lb_message_deliver(p,message)==LB_PROCESS_INVALID && p->messages.mq_len==1);
+                if(stopping) CHECK(lb_world_stop_locked(world,&receipt)==LB_WORLD_OK);
+                else CHECK(lb_call_cancel_locked(root)==LB_WORLD_OK);
+                lb_engine_leave(engine);
+            } else {
+                if(stopping) CHECK(lb_world_stop(world,&receipt)==LB_WORLD_OK);
+                else CHECK(lb_call_cancel(root)==LB_WORLD_OK);
+            }
         }
         CHECK(lb_call_cancel(root)==LB_WORLD_INVALID_STATE);
-        if(!stopping) {
+        if(!stopping && state!=RESUMED) {
             CHECK(lb_world_call(world,text("async_slice"),text("identity"),text("reuse"),&call)==LB_WORLD_OK);
             CHECK(await_call(call,&value)==LB_WORLD_OK && value.size==5 && !memcmp(value.data,"reuse",5));
             expect(call,LB_WORLD_OK);
             CHECK(lb_world_stop(world,&receipt)==LB_WORLD_OK);
         }
-        reclaimed(receipt); lb_reclamation_release(receipt);
+        if(receipt) { reclaimed(receipt); lb_reclamation_release(receipt); }
+        else {
+            /* Registration escaped this family; cancellation must close the
+             * namespace rather than promise private-call reuse. */
+            CHECK(lb_world_call(world,text("async_slice"),text("identity"),empty,&call)==LB_WORLD_CLOSED && !call);
+            await_closed_world(world);
+        }
         LbWorldResourceUsage usage;
         CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && usage.closed && !world->space);
         expect(root,LB_WORLD_CANCELLED);
@@ -298,7 +341,7 @@ static void cancellation_states(LbBytesView code)
     }
     lb_world_release(peer); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     CHECK(!m.live && !m.bytes);
-    puts("CORE_WORLD_CANCEL_STATES_OK queued=true executing=true waiting=true cancel_and_stop=true rounds=48 default_limits=true peer_survives=true exact_balance=true");
+    puts("CORE_WORLD_CANCEL_STATES_OK queued=true started_runnable=true waiting=true cancel_and_stop=true rounds=48 default_limits=true peer_survives=true exact_balance=true");
 }
 static void physical_release(LbBytesView code)
 {
