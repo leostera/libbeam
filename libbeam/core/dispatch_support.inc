@@ -192,6 +192,7 @@ case op_move_trim_yxt: return 1;
 case op_move2_par_xxxy: return 1;
 case op_move2_par_yxxx: return 1;
 case op_move2_par_yxyx: return 1;
+case op_move2_par_yxxy: return 1;
 case op_move3_xxxxxx: return 1;
 case op_move_src_window2_yxx: return 1;
 case op_move_window3_xxxy: return 1;

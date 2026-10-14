@@ -50,6 +50,7 @@ struct LbProcess {
     uint64_t bin_vheap_sz; /* owned soft collection threshold, in words */
     LbProcDict *dictionary; /* independent owned metadata; data[] are moving roots */
     Eterm error_handler; /* atom-only process setting; defaults independently on spawn */
+    Eterm group_leader; /* local PID; NIL until a root's own identity is observed */
     Eterm construction_root; /* explicit temporary root during fallible append */
     LbDecimal *decimal; /* sole pending native continuation; independent scratch */
     Uint freason; /* Native encoded scalar, never a GC root. */
@@ -64,6 +65,7 @@ struct LbProcess {
     int running;
 };
 LbProcessStatus lb_process_identity(LbProcess *,Eterm *);
+LbProcessStatus lb_process_group_leader(LbProcess *,Eterm *);
 /* Charge before denial; failure must bypass guest handlers and guards. */
 Eterm lb_process_deny_capability(LbProcess *,const LbCapabilityFailure *);
 /* Prepare an unpublished local-fun/0 child with copied environment and PID.

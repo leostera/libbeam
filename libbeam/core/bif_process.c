@@ -25,9 +25,45 @@ LbProcessStatus lb_process_identity(LbProcess *p,Eterm *out)
     LbPidStatus status=lb_pid_insert(table,&p->identity,p);
     if(status!=LB_PID_OK) {
         if(!space->pids && lb_pid_table_destroy(table)!=LB_PID_OK) abort();
-        return status==LB_PID_FULL?LB_PROCESS_LIMIT:LB_PROCESS_INVALID;
+        return status==LB_PID_FULL?LB_PROCESS_LIMIT:status==LB_PID_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_INVALID;
     }
     space->pids=table; *out=p->identity.id; return LB_PROCESS_READY;
+}
+/* A host-created root leads its own group; no host I/O PID is fabricated.
+ * Guest children receive the parent's PID-valued setting before publication. */
+LbProcessStatus lb_process_group_leader(LbProcess *p,Eterm *out)
+{
+    if(!p || !out) return LB_PROCESS_INVALID;
+    if(is_nil(p->group_leader)) {
+        Eterm pid; LbProcessStatus status=lb_process_identity(p,&pid);
+        if(status!=LB_PROCESS_READY) return status;
+        p->group_leader=pid;
+    }
+    assert(is_internal_pid(p->group_leader));
+    *out=p->group_leader; return LB_PROCESS_READY;
+}
+Eterm lb_bif_group_leader_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)args; (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    Eterm leader; LbProcessStatus status=lb_process_group_leader(p,&leader);
+    if(status==LB_PROCESS_READY) return leader;
+    p->status=status; return THE_NON_VALUE;
+}
+Eterm lb_bif_group_leader_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=2;
+    LbCodeSpace *space=p->entry_module->space;
+    if(!lb_work_domain_charge(space->domain,2)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!is_pid(args[0]) || !is_pid(args[1])) goto badarg;
+    if(!is_internal_pid(args[0]) || !is_internal_pid(args[1])) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    LbProcess *target=lb_pid_lookup(space->pids,args[1]);
+    if(!target) goto badarg;
+    /* The leader itself may already be dead; setting its PID does not retain
+     * that process. Only the target must exist at this serialized boundary. */
+    target->group_leader=args[0];
+    lb_work_cross_effect(p->work_active,target->work_birth); return am_true;
+ badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
 }
 /* bif.c:send_2 delegates to the same local delivery path as the send
  * instruction. Charge invocation before lookup, allocation or publication. */

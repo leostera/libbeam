@@ -5666,6 +5666,42 @@ cc_library(
 )
 
 genrule(
+  name = "group_leader_slice_fixture",
+  srcs = ["tests/fixtures/group_leader_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/group_leader_slice_fixture/group_leader_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/group_leader_slice.erl)",
+)
+
+cc_test(
+  name = "core_group_leader_work",
+  size = "medium",
+  timeout = "moderate",
+  args = ["$(rootpath :group_leader_slice_fixture)", "group_leader_slice", "invalid", "invalid_target", "dead_target"],
+  data = ["group_leader_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "group_leader_reference",
+  size = "small",
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "group_leader_reference", "run", "-", "$(rootpath :group_leader_reference_fixture)", "$(rootpath :group_leader_slice_fixture)"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "group_leader_reference_fixture", "group_leader_slice_fixture"],
+  deps = ["otp_reference_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+  env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},
+)
+
+genrule(
+  name = "group_leader_reference_fixture",
+  srcs = ["tests/fixtures/group_leader_reference.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/group_leader_reference_fixture/group_leader_reference.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/group_leader_reference.erl)",
+)
+
+genrule(
   name = "gc_collect_slice_fixture",
   srcs = ["tests/fixtures/gc_collect_slice.erl"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
@@ -5743,8 +5779,8 @@ cc_test(
   timeout = "moderate",
   srcs = ["tests/api_send_test.cpp"],
   copts = ["-std=c++17"],
-  args = ["$(rootpath :send_slice_fixture)", "$(rootpath :monitor_slice_fixture)"],
-  data = ["send_slice_fixture", "monitor_slice_fixture"],
+  args = ["$(rootpath :send_slice_fixture)", "$(rootpath :monitor_slice_fixture)", "$(rootpath :group_leader_slice_fixture)"],
+  data = ["send_slice_fixture", "monitor_slice_fixture", "group_leader_slice_fixture"],
   deps = ["libbeam"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )

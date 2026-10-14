@@ -225,6 +225,30 @@ static void registry_queries(LbBytesView code)
         }
         lb_process_destroy(candidate); CHECK(lb_pid_table_destroy(table)==LB_PID_OK);
     }
+    {
+        LbProcess *temporary; LbCodeEntry *entry; Eterm function,input=NIL,dead;
+        CHECK(lb_atoms_find(world[0]->space->atoms,"identity",8,&function)==LB_ATOM_OK);
+        CHECK(lb_code_entry_acquire(world[0]->space,p->entry_module->name,function,1,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,&input,1,64,&temporary)==LB_PROCESS_READY); lb_code_entry_release(entry);
+        CHECK(lb_process_identity(temporary,&dead)==LB_PROCESS_READY); lb_process_destroy(temporary);
+        CHECK(dead!=pids[0] && lb_bif_group_leader_0(p,p->reg,NULL)==pids[0]);
+        CHECK(lb_bif_group_leader_0(processes[1],processes[1]->reg,NULL)==pids[1]);
+        for(unsigned credit=0;credit<=2;++credit) {
+            LbWorkBudget *budget=lb_work_budget_create(world[0]); CHECK(budget);
+            budget->limit=budget->remaining=credit;
+            p->reg[0]=dead; p->reg[1]=pids[0]; p->status=LB_PROCESS_READY; p->freason=LB_EXC_NULL;
+            size_t calls=memory.host_calls; lb_work_domain_borrow(domain,budget);
+            Eterm result=lb_bif_group_leader_2(p,p->reg,NULL);
+            if(credit<2) CHECK(is_non_value(result) && p->status==LB_PROCESS_WORK_LIMIT && p->group_leader==pids[0]);
+            else CHECK(result==am_true && p->group_leader==dead && !budget->remaining);
+            CHECK(memory.host_calls==calls && processes[1]->group_leader==pids[1]);
+            lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+            lb_work_budget_release(budget);
+        }
+        p->status=LB_PROCESS_READY; CHECK(lb_bif_group_leader_0(p,p->reg,NULL)==dead);
+        p->reg[0]=pids[0]; p->reg[1]=pids[0]; CHECK(lb_bif_group_leader_2(p,p->reg,NULL)==am_true);
+        puts("CORE_GROUP_LEADER_OK real_root_pid=true dead_leader=true precharged_assignment=true no_allocations=true namespace_isolation=true");
+    }
     for(unsigned removing=0;removing<2;++removing) for(unsigned credit=0;credit<4;++credit) {
         LbWorkBudget *budget=lb_work_budget_create(world[0]); CHECK(budget);
         budget->limit=budget->remaining=credit;

@@ -81,7 +81,7 @@ static LbProcessStatus create_owned(LbCodeModule *module,const BeamInstr *pc,con
     for(i=0;i<MAX_REG;++i) p->reg[i]=NIL;
     p->fvalue=p->exception_value=p->construction_root=p->ftrace=NIL; p->freason=LB_EXC_NULL;
     p->local_mfa=*mfa; p->arity=mfa->arity; p->current=&p->local_mfa;
-    p->i=pc; p->status=LB_PROCESS_READY; p->error_handler=am_error_handler;
+    p->i=pc; p->status=LB_PROCESS_READY; p->error_handler=am_error_handler; p->group_leader=NIL;
     ++module->users; *out=p; return LB_PROCESS_READY;
 }
 static int private_mfa(const LbCodeModule *module,const BeamInstr *pc,LbMFA *mfa)

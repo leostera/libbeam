@@ -33,7 +33,7 @@ static void round_trip(Isolate& isolate,Isolate& peer,const char* module,const c
     auto again=call.wait_until(deadline()); CHECK(std::get<Error>(again).code==ErrorCode::closed);
 }
 int main(int argc,char** argv) {
-    CHECK(argc==3); Bytes code=image(argv[1]),monitors=image(argv[2]);
+    CHECK(argc==4); Bytes code=image(argv[1]),monitors=image(argv[2]),leaders=image(argv[3]);
     auto engine=take(Engine::create());
     {
         auto isolate=take(engine.create_isolate()),peer=take(engine.create_isolate());
@@ -44,13 +44,18 @@ int main(int argc,char** argv) {
             error=target->load_module(view(monitors));
             if(error) std::fprintf(stderr,"load: %s\n",error->message.c_str());
             CHECK(!error);
+            error=target->load_module(view(leaders));
+            if(error) std::fprintf(stderr,"load: %s\n",error->message.c_str());
+            CHECK(!error);
             auto boot=take(target->start("send_slice","identity",{})); CHECK(take(boot.wait_until(deadline())).empty());
         }
         std::fill(code.begin(),code.end(),0xa5); std::fill(monitors.begin(),monitors.end(),0xa5);
+        std::fill(leaders.begin(),leaders.end(),0xa5);
         for(std::size_t size:{0u,65u,8192u}) {
             for(const char* function:{"copy","named","dead"}) round_trip(isolate,peer,"send_slice",function,size);
             for(const char* function:{"copy","named","local_name","missing","dead","cancel","self_monitor"})
                 round_trip(isolate,peer,"monitor_slice",function,size);
+            round_trip(isolate,peer,"group_leader_slice","lifecycle",size);
         }
         // Both registered targets stay alive until both arm calls finish.
         // Identical names must coexist in separate namespaces, not merely
@@ -76,5 +81,5 @@ int main(int argc,char** argv) {
         stop(peer);
     }
     CHECK(!engine.shutdown(deadline()));
-    std::puts("API_SEND_OK self=true registered=true dead_pid=true invalid=true copied_input=true single_consumption=true two_isolates=true monitor_lifecycle=true named_scope=true demonitor=true peer_survival=true reclaimed=true");
+    std::puts("API_SEND_OK self=true registered=true dead_pid=true invalid=true copied_input=true single_consumption=true two_isolates=true monitor_lifecycle=true named_scope=true demonitor=true group_leader_inheritance=true group_leader_reassignment=true peer_survival=true reclaimed=true");
 }
