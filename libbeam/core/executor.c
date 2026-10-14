@@ -74,15 +74,18 @@ static LbTask *runnable(LbEngine *engine)
     } while(task!=first);
     return NULL;
 }
-static int finish_task(LbTask *task,LbTaskStatus status)
+typedef enum { NO_FAILURE, MEMORY_FAILURE, WORK_FAILURE, ALLOCATION_FAILURE } TaskFailure;
+static TaskFailure finish_task(LbTask *task,LbTaskStatus status)
 {
     LbCall *call=task->completion;
-    int limited=status==LB_TASK_MEMORY_LIMIT?1:(status==LB_TASK_WORK_LIMIT?2:0);
+    TaskFailure limited=status==LB_TASK_MEMORY_LIMIT?MEMORY_FAILURE:
+        status==LB_TASK_WORK_LIMIT?WORK_FAILURE:status==LB_TASK_NO_MEMORY?ALLOCATION_FAILURE:NO_FAILURE;
     if(status!=LB_TASK_CANCELLED && status!=LB_TASK_MEMORY_LIMIT &&
        status!=LB_TASK_WORK_LIMIT && status!=LB_TASK_CAPABILITY_DENIED) {
         lb_monitor_exit(task->process,1);
-        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_LIMIT) { status=LB_TASK_MEMORY_LIMIT; limited=1; }
-        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_WORK_LIMIT) { status=LB_TASK_WORK_LIMIT; limited=2; }
+        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_LIMIT) { status=LB_TASK_MEMORY_LIMIT; limited=MEMORY_FAILURE; }
+        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_WORK_LIMIT) { status=LB_TASK_WORK_LIMIT; limited=WORK_FAILURE; }
+        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_NO_MEMORY) { status=LB_TASK_NO_MEMORY; limited=ALLOCATION_FAILURE; }
     }
     if(status==LB_TASK_WORK_LIMIT && call && task->domain->failed_work && call->budget!=task->domain->failed_work)
         status=LB_TASK_CANCELLED;
@@ -93,12 +96,14 @@ static int finish_task(LbTask *task,LbTaskStatus status)
     task->status=status;
     if(call) {
         lb_call_complete(call,task->process,status);
-        if(call->status==LB_WORLD_MEMORY_LIMIT) { task->status=LB_TASK_MEMORY_LIMIT; limited=1; }
-        if(call->status==LB_WORLD_WORK_LIMIT) { task->status=LB_TASK_WORK_LIMIT; limited=2; }
+        if(call->status==LB_WORLD_MEMORY_LIMIT) { task->status=LB_TASK_MEMORY_LIMIT; limited=MEMORY_FAILURE; }
+        if(call->status==LB_WORLD_WORK_LIMIT) { task->status=LB_TASK_WORK_LIMIT; limited=WORK_FAILURE; }
+        if(call->status==LB_WORLD_NO_MEMORY) { task->status=LB_TASK_NO_MEMORY; limited=ALLOCATION_FAILURE; }
         // A foreign causal owner can turn this root's completion into CANCELLED,
         // but its original failure must still trigger family/world containment.
-        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_LIMIT) limited=1;
-        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_WORK_LIMIT) limited=2;
+        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_LIMIT) limited=MEMORY_FAILURE;
+        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_WORK_LIMIT) limited=WORK_FAILURE;
+        if(lb_alloc_domain_failure(task->domain)==LB_ALLOC_NO_MEMORY) limited=ALLOCATION_FAILURE;
         lb_work_domain_borrow(task->domain,NULL);
         lb_process_destroy(task->process); task->process=NULL;
         if(!call->owner_live) {
@@ -120,7 +125,11 @@ void lb_task_cancel_family_locked(LbWorkBudget *budget,LbTaskStatus originating_
     LbWorld *world=budget->world;
     if(budget->call && budget->call->status==LB_WORLD_PENDING)
         finish_task(budget->call->task,originating_status);
-    if(budget->escaped) lb_world_close_for_limit_locked(world);
+    /* A transient host allocation failure aborts its family, including an
+     * unmonitored child, while preserving the existing namespace retry policy.
+     * Configured limits, denial and explicit cancellation still close escaped
+     * namespaces. Monitored dependants receive infrastructure failure, not DOWN. */
+    if(budget->escaped && originating_status!=LB_TASK_NO_MEMORY) lb_world_close_for_limit_locked(world);
     else {
         LbTask *task=world->engine->tasks,*next;
         while(task) {
@@ -136,11 +145,11 @@ static void step(LbTask *task)
 {
     /* Scheduling bounds are separate from stable causal invocation credit. */
     LbWorld *world=task->world; LbAllocDomain *domain=task->domain;
-    int limited=0,denied=0;
+    TaskFailure limited=NO_FAILURE; int denied=0;
     lb_alloc_domain_begin_operation(domain);
     lb_work_domain_borrow(domain,task->process->work_active);
     LbProcessStatus result=lb_process_run(task->process,1024,128);
-    if(lb_alloc_domain_failure(domain)==LB_ALLOC_LIMIT) {
+    if(lb_alloc_domain_failure(domain)==LB_ALLOC_LIMIT || lb_alloc_domain_failure(domain)==LB_ALLOC_NO_MEMORY) {
         task->process->status=LB_PROCESS_NO_MEMORY; result=LB_PROCESS_NO_MEMORY;
     }
     if(lb_alloc_domain_failure(domain)==LB_ALLOC_WORK_LIMIT) {
@@ -173,7 +182,9 @@ static void step(LbTask *task)
     lb_work_domain_borrow(domain,NULL);
     lb_work_domain_clear_failure(domain);
     if(limited) {
-        if(owner) lb_task_cancel_family_locked(owner,limited==2?LB_TASK_WORK_LIMIT:LB_TASK_MEMORY_LIMIT);
+        LbTaskStatus cause=limited==WORK_FAILURE?LB_TASK_WORK_LIMIT:
+            limited==ALLOCATION_FAILURE?LB_TASK_NO_MEMORY:LB_TASK_MEMORY_LIMIT;
+        if(owner) lb_task_cancel_family_locked(owner,cause);
         else if(world) lb_world_close_for_limit_locked(world);
     } else if(denied) {
         if(owner) lb_task_cancel_family_locked(owner,LB_TASK_CAPABILITY_DENIED);

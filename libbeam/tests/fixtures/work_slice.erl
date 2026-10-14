@@ -13,7 +13,11 @@ private_wait(Binary) ->
     spawn(fun() -> loop(Binary) end),
     waiting(Binary).
 background(Binary) ->
-    spawn(fun() -> receive after 5 -> loop(Binary) end end),
+    Parent = self(),
+    spawn(fun() ->
+        Ref = monitor(process, Parent),
+        receive {'DOWN', Ref, process, Parent, _} -> loop(Binary) end
+    end),
     <<"ready">>.
 escaped_wait(Binary) ->
     Pid = spawn(fun() -> loop(Binary) end),

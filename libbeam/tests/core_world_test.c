@@ -204,6 +204,27 @@ static void registry_queries(LbBytesView code)
     }
     lb_engine_enter(engine);
     LbProcess *p=processes[0]; LbAllocDomain *domain=&world[0]->domain;
+    {
+        /* Bare PTAB component: a failed prefix must leave the first identity
+         * available; a free first slot costs one visit, not full capacity. */
+        LbPidTable *table; LbProcess *candidate; LbCodeEntry *entry; Eterm function,input=NIL;
+        CHECK(lb_pid_table_create(world[0]->space,8,&table)==LB_PID_OK);
+        CHECK(lb_atoms_find(world[0]->space->atoms,"identity",8,&function)==LB_ATOM_OK);
+        CHECK(lb_code_entry_acquire(world[0]->space,p->entry_module->name,function,1,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,&input,1,64,&candidate)==LB_PROCESS_READY); lb_code_entry_release(entry);
+        for(unsigned credit=0;credit<=1;++credit) {
+            LbWorkBudget *budget=lb_work_budget_create(world[0]); CHECK(budget);
+            budget->limit=budget->remaining=credit; size_t calls=memory.host_calls;
+            lb_work_domain_borrow(domain,budget);
+            LbPidStatus status=lb_pid_insert(table,&candidate->identity,candidate);
+            if(!credit) CHECK(status==LB_PID_NO_MEMORY && !candidate->identity.owner && !lb_pid_count(table) && lb_alloc_domain_failure(domain)==LB_ALLOC_WORK_LIMIT);
+            else CHECK(status==LB_PID_OK && candidate->identity.id==_TAG_IMMED1_PID && !budget->remaining && lb_pid_count(table)==1);
+            CHECK(memory.host_calls==calls);
+            lb_work_domain_borrow(domain,NULL); lb_work_domain_clear_failure(domain); lb_alloc_domain_begin_operation(domain);
+            lb_work_budget_release(budget);
+        }
+        lb_process_destroy(candidate); CHECK(lb_pid_table_destroy(table)==LB_PID_OK);
+    }
     for(unsigned removing=0;removing<2;++removing) for(unsigned credit=0;credit<4;++credit) {
         LbWorkBudget *budget=lb_work_budget_create(world[0]); CHECK(budget);
         budget->limit=budget->remaining=credit;
@@ -689,14 +710,48 @@ static void stateful_probes(LbBytesView a_code,LbBytesView b_code)
     CHECK(!m.live && !m.bytes);
     printf("CORE_WORLD_STATEFUL_OK boot_failure_prefixes=%zu churn=32 correlated_calls=4096 duplicate_boot_errors=32 queued_stop=true detached_reply=true peer_survives=true exact_final_balance=true\n",prefix);
 }
+static void monitor_allocations(LbBytesView code)
+{
+    Memory m={0}; LbEngine *engine=create(&m); LbWorld *peer; LbCall *call;
+    CHECK(lb_world_create(engine,&peer)==LB_WORLD_OK && lb_world_load(peer,code)==LB_WORLD_OK);
+    CHECK(lb_world_start(peer,text("monitor_slice"),text("copy"),text("peer"),&call)==LB_WORLD_OK);
+    expect(call,LB_WORLD_OK);
+    lb_engine_enter(engine); size_t live=m.live,bytes=m.bytes; lb_engine_leave(engine);
+    const char *functions[]={"copy","named","missing","dead","cancel"};
+    size_t tested=0;
+    for(size_t f=0;f<sizeof(functions)/sizeof(*functions);++f) for(size_t prefix=1;;++prefix) {
+        CHECK(prefix<500); LbWorld *world; LbBytesView result;
+        CHECK(lb_world_create(engine,&world)==LB_WORLD_OK && lb_world_load(world,code)==LB_WORLD_OK);
+        lb_engine_enter(engine); size_t before=m.worker_calls; m.fail_worker=before+prefix; lb_engine_leave(engine);
+        CHECK(lb_world_start(world,text("monitor_slice"),text(functions[f]),text("monitor"),&call)==LB_WORLD_OK);
+        LbWorldStatus status=await_call(call,&result);
+        if(status!=LB_WORLD_OK && status!=LB_WORLD_NO_MEMORY)
+            fprintf(stderr,"monitor %s prefix=%zu status=%d\n",functions[f],prefix,status);
+        CHECK(status==LB_WORLD_OK || status==LB_WORLD_NO_MEMORY);
+        if(status==LB_WORLD_OK) CHECK(result.size==7 && !memcmp(result.data,"monitor",7));
+        lb_engine_enter(engine); size_t allocations=m.worker_calls-before; m.fail_worker=0; lb_engine_leave(engine);
+        expect(call,status);
+        LbReclamation *receipt; CHECK(lb_world_stop(world,&receipt)==LB_WORLD_OK); reclaimed(receipt);
+        CHECK(!world->space); lb_reclamation_release(receipt); lb_world_release(world);
+        CHECK(lb_world_call(peer,text("monitor_slice"),text("copy"),text("peer"),&call)==LB_WORLD_OK);
+        CHECK(await_call(call,&result)==LB_WORLD_OK && result.size==4 && !memcmp(result.data,"peer",4));
+        expect(call,LB_WORLD_OK);
+        balanced(engine,&m,live,bytes); ++tested;
+        if(status==LB_WORLD_OK && prefix>allocations) break;
+    }
+    lb_world_release(peer); CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
+    CHECK(!m.live && !m.bytes);
+    printf("CORE_MONITOR_ALLOCATIONS_OK worker_prefixes=%zu real_delivery=true live_named_dead_missing=true demonitor=true peer_survives=true exact_balance=true\n",tested);
+}
 int main(int argc,char **argv)
 {
     construction();
     if(argc>=2) { LbBytesView code=image(argv[1]); admission_failures(code); execution(code); registry_queries(code); cancellation_states(code); physical_release(code); pending_owner_drop(code); free((void *)code.data); }
     if(argc>=3) { LbBytesView code=image(argv[2]); spawned_children(code); free((void *)code.data); }
+    if(argc==4) { LbBytesView code=image(argv[3]); monitor_allocations(code); free((void *)code.data); }
     if(argc==5) {
         LbBytesView a=image(argv[3]),b=image(argv[4]); stateful_probes(a,b);
         free((void *)a.data); free((void *)b.data);
     }
-    CHECK(argc==1 || argc==2 || argc==3 || argc==5); return 0;
+    CHECK(argc>=1 && argc<=5); return 0;
 }

@@ -48,6 +48,87 @@ Eterm lb_bif_self_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     if(status==LB_PROCESS_READY) return result;
     p->status=status; return THE_NON_VALUE;
 }
+/* Ordinary local process monitor: validate before effects, stage the ref and
+ * either a pair of monitor halves or an owned immediate noproc notification.
+ * The reference counter and heap top commit only after fallible work ends. */
+Eterm lb_bif_monitor_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; LbCodeSpace *space=p->entry_module->space; LbEngine *engine=space->engine;
+    LbAllocDomain *domain=space->domain; Eterm target=args[1],name=NIL;
+    p->last_native_cost=1;
+    if(args!=p->reg) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(domain,1)) goto work;
+    if(args[0]!=am_process) {
+        if(args[0]==am_port) {
+            if(is_atom(target) || (target&_TAG_IMMED1_MASK)==_TAG_IMMED1_PORT ||
+               (is_boxed(target) && (*boxed_val(target)&_TAG_HEADER_MASK)==EXTERNAL_PORT_SUBTAG)) goto refused;
+            if(is_tuple(target)) {
+                Eterm *tuple=tuple_val(target);
+                if(arityval(tuple[0])==2 && is_atom(tuple[1]) && is_atom(tuple[2]) && tuple[2]==space->node_name) goto refused;
+            }
+        }
+        if(args[0]==am_time_offset && target==am_clock_service) goto refused;
+        goto badarg;
+    }
+    if(is_tuple(target)) {
+        Eterm *tuple=tuple_val(target);
+        if(arityval(tuple[0])!=2 || !is_atom(tuple[1]) || !is_atom(tuple[2])) goto badarg;
+        if(tuple[2]!=space->node_name) goto refused;
+        target=tuple[1];
+    }
+    if(is_atom(target)) name=target;
+    else if(!is_internal_pid(target)) { if(is_pid(target)) goto refused; goto badarg; }
+    if(!p->world || !p->running) goto refused;
+    LbProcess *other=is_atom(name)?lb_registry_lookup(space,name,&p->last_native_cost):lb_pid_lookup(space->pids,target);
+    if(lb_alloc_domain_failure(domain)==LB_ALLOC_WORK_LIMIT) goto work;
+    if(engine->reference_counter==UINT64_MAX) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    size_t need,before=p->collections;
+    if(!lb_size_add(LB_REF_WORDS,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(domain,LB_REF_WORDS)) goto work;
+    p->last_native_cost+=LB_REF_WORDS;
+    if(!lb_heap_reserve(p,need,2)) goto memory;
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    Eterm ref=lb_reference_write(p->htop,engine->reference_counter);
+    if(other && other!=p) {
+        if(!lb_work_domain_charge(domain,2)) goto work;
+        Uint prior=p->last_native_cost; Eterm pid;
+        LbProcessStatus status=lb_process_identity(p,&pid); p->last_native_cost+=prior+2;
+        if(status!=LB_PROCESS_READY) { if(status==LB_PROCESS_NO_MEMORY) goto memory; p->status=status; return THE_NON_VALUE; }
+        LbMonitor *monitor;
+        if(lb_monitor_prepare(p,ref,&monitor)!=LB_PROCESS_READY) goto memory;
+        monitor->target_name=name;
+        lb_monitor_publish(monitor,other);
+    } else if(!other) {
+        Eterm named[3]={make_arityval(2),name,space->node_name};
+        Eterm object=is_atom(name)?make_boxed(named):target;
+        Eterm tuple[6]={make_arityval(5),am_DOWN,ref,am_process,object,am_noproc};
+        LbMessage *message; Uint cost=0;
+        LbProcessStatus status=lb_message_create(space,make_boxed(tuple),&message,&cost); p->last_native_cost+=cost;
+        if(status!=LB_PROCESS_READY) { if(status==LB_PROCESS_NO_MEMORY) goto memory; p->status=status; return THE_NON_VALUE; }
+        if(!lb_work_domain_charge(domain,1)) { lb_message_destroy(message); goto work; }
+        ++p->last_native_cost;
+        status=lb_message_deliver(p,message);
+        if(status!=LB_PROCESS_READY) { lb_message_destroy(message); p->status=status; return THE_NON_VALUE; }
+    }
+    p->htop+=LB_REF_WORDS; ++engine->reference_counter; return ref;
+badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+refused: p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
+work: p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+memory: {
+    LbAllocStatus cause=lb_alloc_domain_failure(domain);
+    p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+        (cause==LB_ALLOC_LIMIT || cause==LB_ALLOC_OK)?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+    return THE_NON_VALUE;
+}
+}
+Eterm lb_bif_demonitor_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!lb_reference(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    lb_monitor_demonitor(p,args[0],0);
+    return p->status==LB_PROCESS_WORK_LIMIT?THE_NON_VALUE:am_true;
+}
 /* Native spawn_3/erl_create_process boundary: atoms and a proper argument
  * list are required. This executable slice owns the erlang:apply(F,[]) startup
  * for local fun/0 only; other valid MFAs/apply shapes refuse infrastructure
@@ -131,6 +212,7 @@ memory: p->status=LB_PROCESS_NO_MEMORY; return THE_NON_VALUE;
 Eterm lb_bif_demonitor_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
     if(!is_boxed(args[0]) || boxed_val(args[0])[0]!=LB_REF_HEADER) goto badarg;
     Eterm options=args[1]; int flush=0;
     while(is_list(options)) {
@@ -142,7 +224,8 @@ Eterm lb_bif_demonitor_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
         else goto badarg;
     }
     if(!is_nil(options)) goto badarg;
-    lb_monitor_demonitor(p,args[0],flush); return am_true;
+    lb_monitor_demonitor(p,args[0],flush);
+    return p->status==LB_PROCESS_WORK_LIMIT?THE_NON_VALUE:am_true;
 badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
 }
 Eterm lb_bif_exit_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)

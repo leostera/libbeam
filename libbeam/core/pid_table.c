@@ -76,14 +76,17 @@ LbPidStatus lb_pid_insert(LbPidTable *t,LbPidEntry *entry,LbProcess *process)
     if(!t || !entry || !process || entry!=&process->identity ||
        process->entry_module->space!=t->space || entry->owner || is_internal_pid(entry->id)) return LB_PID_INVALID;
     if(t->count==t->capacity-t->retired) return LB_PID_FULL;
-    // Pay the worst-case ring search before advancing any identity counter.
-    if(!lb_work_domain_charge(t->domain,t->capacity)) return LB_PID_NO_MEMORY;
+    /* Charge each visited slot, not the entire capacity on a fast insertion.
+     * Keep the cursor private until success: exhaustion cannot skip identities
+     * or mutate the ring, even after traversing retired/occupied positions. */
+    uint32_t cursor=t->allocated_index;
     for(size_t tried=0;tried<t->capacity;++tried) {
-        size_t index=slot_index(t,++t->allocated_index);
+        if(!lb_work_domain_charge(t->domain,1)) return LB_PID_NO_MEMORY;
+        size_t index=slot_index(t,++cursor);
         Uint data=t->free_ids[index];
         if(data==ID_DATA_MASK) continue;
         size_t slot=slot_index(t,data); if(t->slots[slot]) abort();
-        t->free_ids[index]=ID_DATA_MASK;
+        t->allocated_index=cursor; t->free_ids[index]=ID_DATA_MASK;
         *entry=(LbPidEntry){t,process,make_id(t,data)};
         t->slots[slot]=entry; ++t->count; return LB_PID_OK;
     }

@@ -30,6 +30,7 @@ case op_badmatch_x: return 1;
 case op_case_end_x: return 1;
 case op_i_allocate_zero_tt: return 1;
 case op_i_allocate_heap_zero_tIt: return 1;
+case op_allocate_init_tty: return 1;
 case op_allocate_tt: return 1;
 case op_allocate_heap_tIt: return 1;
 case op_i_call_ext_e: return 1;

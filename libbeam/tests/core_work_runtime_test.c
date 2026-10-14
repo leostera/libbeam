@@ -165,8 +165,10 @@ int main(int argc,char **argv)
     call=invoke(world,"private_wait",0); CHECK(poll(call,&out)==LB_WORLD_WORK_LIMIT); consume(call);
     CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && !usage.closed);
     call=invoke(world,"background",0);
-    // The root reply survives later exhaustion of its old background allowance.
-    for(unsigned i=0;i<25;++i) tick(); result(call,"ready"); consume(call);
+    // The child's real parent monitor orders its loop after root completion.
+    // Observe exhaustion, rather than assuming a wall-clock delay is enough.
+    for(unsigned i=0;i<10000 && remaining(call);++i) tick();
+    CHECK(!remaining(call)); result(call,"ready"); consume(call);
     CHECK(lb_world_resource_usage(world,&usage)==LB_WORLD_OK && !usage.closed);
     /* This witness targets explicit cancellation after registration, not work
      * exhaustion. Give its own finite allowance enough startup headroom as the

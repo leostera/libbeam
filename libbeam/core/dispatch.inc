@@ -483,6 +483,29 @@ OpCase(i_allocate_heap_zero_tIt):
   GotoPF(next_pf);
 }
 
+OpCase(allocate_init_tty):
+{
+  Eterm tmp_packed1 = I[1];
+  BeamInstr next_pf = BeamCodeAddr(I[2]);
+  unsigned needed = tb(tmp_packed1&BEAM_TIGHT_MASK) + 1;
+  if(!lb_work_domain_charge(c_p->entry_module->space->domain,lb_work_bulk_units(needed))) goto work_failure;
+  if (ERTS_UNLIKELY((Uint)(E - HTOP) < (needed + S_RESERVED))) {
+    SWAPOUT;
+    c_p->i = I;
+    if (!lb_process_collect_live(c_p, needed, tb((tmp_packed1>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK))) goto memory_failure;
+    FCALLS -= (Sint)c_p->last_gc_cost;
+    SWAPIN;
+  }
+  HEAP_SPACE_VERIFIED(0);
+  E -= needed;
+  *E = NIL;
+  for (unsigned lb_y=1; lb_y<needed; ++lb_y) E[lb_y]=NIL;
+  make_blank(yb((tmp_packed1>>(2*BEAM_TIGHT_SHIFT))));
+  I += 2;
+  ASSERT(VALID_INSTR(next_pf));
+  GotoPF(next_pf);
+}
+
 OpCase(allocate_tt):
 {
   Eterm tmp_packed1 = I[1];

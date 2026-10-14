@@ -50,7 +50,7 @@ LbProcessStatus lb_monitor_prepare(LbProcess *origin,Eterm ref,LbMonitor **out)
     m->origin.offset=offsetof(LbMonitor,origin); m->u.target.offset=offsetof(LbMonitor,u.target);
     m->origin.key_offset=offsetof(LbMonitor,ref)-offsetof(LbMonitor,origin);
     m->u.target.key_offset=offsetof(LbMonitor,ref)-offsetof(LbMonitor,u.target);
-    m->u.target.flags=TARGET; m->refc=0; m->origin_process=origin;
+    m->u.target.flags=TARGET; m->refc=0; m->origin_process=origin; m->target_name=NIL;
     memcpy(m->heap,boxed_val(ref),sizeof(m->heap)); m->ref=make_boxed(m->heap);
     *out=m; return LB_PROCESS_READY;
 }
@@ -62,7 +62,9 @@ void lb_monitor_discard(LbMonitor *m)
 }
 void lb_monitor_publish(LbMonitor *m,LbProcess *target)
 {
-    if(m->refc || !target->identity.owner || target->entry_module->space!=m->origin_process->entry_module->space) abort();
+    if(m->refc || !target->identity.owner || !m->origin_process->identity.owner ||
+       (!is_nil(m->target_name) && !is_atom(m->target_name)) ||
+       target->entry_module->space!=m->origin_process->entry_module->space) abort();
     lb_work_cross_effect(m->origin_process->work_active,target->work_birth);
     m->target_process=target; m->origin.other.item=target->identity.id;
     m->u.target.other.item=m->origin_process->identity.id;
@@ -129,7 +131,9 @@ void lb_monitor_exit(LbProcess *p,int notify)
                 status=captured; reason=error_reason;
             } else if(p->status!=LB_PROCESS_DONE) status=p->status==LB_PROCESS_EXCEPTION?LB_PROCESS_REFUSED:p->status;
             if(status==LB_PROCESS_READY) {
-                Eterm tuple[6]={make_arityval(5),am_DOWN,m->ref,am_process,p->identity.id,reason};
+                Eterm named[3]={make_arityval(2),m->target_name,p->entry_module->space->node_name};
+                Eterm object=is_atom(m->target_name)?make_boxed(named):p->identity.id;
+                Eterm tuple[6]={make_arityval(5),am_DOWN,m->ref,am_process,object,reason};
                 LbMessage *message; Uint cost;
                 status=lb_message_create(p->entry_module->space,make_boxed(tuple),&message,&cost);
                 if(status==LB_PROCESS_READY) {

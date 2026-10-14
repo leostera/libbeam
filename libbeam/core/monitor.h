@@ -26,6 +26,7 @@ typedef struct LbMonitor {
     Eterm heap[LB_REF_WORDS];
     /* Owner pointers are borrowed only while their corresponding half links. */
     LbProcess *origin_process,*target_process;
+    Eterm target_name; /* NIL or an immutable namespace atom; never a moving root */
 } LbMonitor;
 _Static_assert(sizeof(LbMonitorNode)==6*sizeof(Eterm),"native monitor node");
 LbProcessStatus lb_monitor_prepare(LbProcess *,Eterm,LbMonitor **);
