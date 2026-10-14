@@ -1089,6 +1089,31 @@ Eterm lb_bif_is_atom_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     p->last_native_cost=1;
     return is_atom(args[0])?am_true:am_false;
 }
+typedef enum { BOOLEAN_AND, BOOLEAN_OR, BOOLEAN_XOR } BooleanOperation;
+static Eterm boolean_binary(LbProcess *p,Eterm *args,BooleanOperation operation)
+{
+    p->last_native_cost=0;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    p->last_native_cost=1;
+    /* Strict operators validate both operands, even false and X / true or X. */
+    if((args[0]!=am_true && args[0]!=am_false) || (args[1]!=am_true && args[1]!=am_false)) return fail(p,LB_EXC_BADARG);
+    int left=args[0]==am_true,right=args[1]==am_true,result;
+    switch(operation) {
+    case BOOLEAN_AND: result=left && right; break;
+    case BOOLEAN_OR: result=left || right; break;
+    case BOOLEAN_XOR: result=left!=right; break;
+    default: abort();
+    }
+    return result?am_true:am_false;
+}
+Eterm lb_bif_and_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return boolean_binary(p,args,BOOLEAN_AND); }
+Eterm lb_bif_or_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return boolean_binary(p,args,BOOLEAN_OR); }
+Eterm lb_bif_xor_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return boolean_binary(p,args,BOOLEAN_XOR); }
 Eterm lb_bif_not_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     (void)pc; p->last_native_cost=0;

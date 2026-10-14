@@ -5958,12 +5958,37 @@ cc_test(
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
+genrule(
+  name = "boolean_slice_fixture",
+  srcs = ["tests/fixtures/boolean_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/boolean_slice_fixture/boolean_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/boolean_slice.erl)",
+)
+
+genrule(
+  name = "boolean_guard_slice_fixture",
+  srcs = ["tests/fixtures/boolean_guard_slice.S"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/boolean_guard_slice_fixture/boolean_guard_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/boolean_guard_slice.S)",
+)
+
+cc_test(
+  name = "core_boolean_work",
+  size = "medium",
+  args = ["$(rootpath :boolean_slice_fixture)", "boolean_slice", "bad_and", "bad_or", "bad_xor"],
+  data = ["boolean_slice_fixture"],
+  deps = ["core_bif_work_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
 cc_test(
   name = "core_not_execution",
   size = "medium",
   timeout = "moderate",
-  args = ["$(rootpath :not_slice_fixture)", "$(rootpath :not_guard_slice_fixture)"],
-  data = ["not_slice_fixture", "not_guard_slice_fixture"],
+  args = ["$(rootpath :not_slice_fixture)", "$(rootpath :not_guard_slice_fixture)", "$(rootpath :boolean_slice_fixture)", "$(rootpath :boolean_guard_slice_fixture)"],
+  data = ["not_slice_fixture", "not_guard_slice_fixture", "boolean_slice_fixture", "boolean_guard_slice_fixture"],
   deps = ["core_not_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
@@ -7264,8 +7289,8 @@ genrule(
 cc_test(
   name = "not_reference",
   size = "small",
-  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "not_reference", "run", "-", "$(rootpath :not_slice_fixture)", "$(rootpath :not_guard_slice_fixture)", "$(rootpath :not_reference_fixture)"],
-  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "not_slice_fixture", "not_guard_slice_fixture", "not_reference_fixture"],
+  args = ["$(rootpath @libbeam_host//:otp/bin/erl)", "not_reference", "run", "-", "$(rootpath :not_slice_fixture)", "$(rootpath :not_guard_slice_fixture)", "$(rootpath :not_reference_fixture)", "$(rootpath :boolean_slice_fixture)", "$(rootpath :boolean_guard_slice_fixture)"],
+  data = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erl", "not_slice_fixture", "not_guard_slice_fixture", "not_reference_fixture", "boolean_slice_fixture", "boolean_guard_slice_fixture"],
   deps = ["otp_reference_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
   env = {"ERL_FLAGS": "+S 1:1 +SDcpu 1:1 +SDio 1 +A 0"},

@@ -266,7 +266,7 @@ static int plain_bif_allowed(const LbEngine *engine,const BifEntry *native,size_
 #include "type_predicates.def"
 #undef LB_TYPE_PREDICATE
         BIF_tuple_size_1,BIF_node_1};
-    static const unsigned binary[]={BIF_is_function_2,BIF_max_2,BIF_min_2,BIF_is_map_key_2,BIF_seqeq_2};
+    static const unsigned binary[]={BIF_is_function_2,BIF_max_2,BIF_min_2,BIF_is_map_key_2,BIF_seqeq_2,BIF_and_2,BIF_or_2,BIF_xor_2};
     if(!native || native->kind!=BIF_KIND_GUARD) return 0;
     const unsigned *ids; size_t count;
     if(arity==1) { ids=unary; count=sizeof(unary)/sizeof(*unary); }

@@ -1,0 +1,51 @@
+%% SPDX-License-Identifier: Apache-2.0
+%% Copyright 2026 Leandro Ostera <leandro@ostera.io>
+%% Actual strict guard BIFs, including X/Y source and destination combinations.
+{module,boolean_guard_slice}.
+{exports,[{conjunction,2},{disjunction,2},{exclusive,2}]}.
+{attributes,[]}.
+{labels,10}.
+{function,conjunction,2,2}.
+  {label,1}.
+  {func_info,{atom,boolean_guard_slice},{atom,conjunction},2}.
+  {label,2}.
+  {allocate,2,2}.
+  {init_yregs,{list,[{y,0}]}}.
+  {move,{x,0},{y,1}}.
+  {bif,'and',{f,3},[{y,1},{x,1}],{y,0}}.
+  {move,{y,0},{x,0}}.
+  {deallocate,2}.
+  return.
+  {label,3}.
+  {move,{atom,invalid},{x,0}}.
+  {deallocate,2}.
+  return.
+{function,disjunction,2,5}.
+  {label,4}.
+  {func_info,{atom,boolean_guard_slice},{atom,disjunction},2}.
+  {label,5}.
+  {allocate,2,2}.
+  {init_yregs,{list,[{y,0}]}}.
+  {move,{x,1},{y,1}}.
+  {bif,'or',{f,6},[{x,0},{y,1}],{y,0}}.
+  {move,{y,0},{x,0}}.
+  {deallocate,2}.
+  return.
+  {label,6}.
+  {move,{atom,invalid},{x,0}}.
+  {deallocate,2}.
+  return.
+{function,exclusive,2,8}.
+  {label,7}.
+  {func_info,{atom,boolean_guard_slice},{atom,exclusive},2}.
+  {label,8}.
+  {allocate,2,2}.
+  {move,{x,0},{y,0}}.
+  {move,{x,1},{y,1}}.
+  {bif,'xor',{f,9},[{y,0},{y,1}],{x,0}}.
+  {deallocate,2}.
+  return.
+  {label,9}.
+  {move,{atom,invalid},{x,0}}.
+  {deallocate,2}.
+  return.
