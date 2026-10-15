@@ -22,22 +22,25 @@ limitations under the License.
 
 # libbeam
 
-An experimental project to turn BEAM into an embeddable engine that creates fresh,
-independently owned, reduced-profile Erlang execution worlds on demand. A C++ host
-would manage isolate lifecycle; ordinary Erlang programs would not need isolate-
-management APIs. Tenants supply BEAM bytecode only: no native extensions, ambient
-filesystem/network access or full conventional OTP-node environment is promised.
-We are now building libbeam additively from selected BEAM components, rather than
-stripping a whole OTP runtime down. Preserving `erl` or full OTP behavior is
-not a goal. Legacy failures matter only when they reveal a problem in required
-runtime behavior or supported language semantics.
+Embed a bounded BEAM execution engine in a C++ host: share one immutable `Engine`,
+create isolated `Isolate`s, load verified BEAM module groups, and exchange bounded
+binary requests and responses. Each Isolate owns its module namespace, process and
+application state, atoms, accounting, and reclamation lifecycle. The runtime is a
+selected BEAM profile—not a full OTP node—and grants no ambient filesystem,
+network, port, distribution, host-control, or native-library authority.
 
-**The public C++ Engine now passes create → shutdown → create over the actual
-additive C execution substrate. Public Isolates, copied calls and physical reclamation
-execute a limited BEAM profile on the Engine worker, with copying GC and owned
-code/binary retirement. The unchanged bounded-profile stateful two-Isolate proof
-passes native tests. Whole Midgard application execution remains unfinished.
-This is not a security boundary for untrusted workloads.**
+**Status: experimental and not yet v0.1 accepted.** The C core and thin C++ API
+have executable lifecycle, isolation, resource, GC, and selected instruction/BIF
+tests. The unchanged 381-module HelloWorker bundle is not yet admitted: module
+`crypto` has an `on_load` callback that calls the explicitly denied
+`erlang:load_nif/2`. The runtime refuses rather than reporting false initialization.
+Consequently HelloWorker behavior and the complete default acceptance suite remain
+blocked; the current default, Release, and UBSan runs each have 477 passing tests
+and one failure at this refusal. See the [v0.1 contract](docs/libbeam-v0.1-contract.md),
+[worktree inventory](docs/libbeam-v0.1-inventory.md), and the
+[localhost-only bridge example](libbeam/examples/hello_worker_http/README.md) for
+the exact boundary and latest evidence. This is not a security boundary for
+untrusted workloads.
 
 ## Layout
 
