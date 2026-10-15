@@ -91,10 +91,16 @@ LbWorldStatus lb_world_resource_usage(LbWorld *world,LbWorldResourceUsage *out)
 LbWorldStatus lb_world_load_batch_report(LbWorld *world,const LbBytesView *modules,size_t count,
                                                LbWorldLoadReport *report)
 {
+    return lb_world_load_batch_report_with_policy(world,modules,count,LB_WORLD_ON_LOAD_REJECT,report);
+}
+LbWorldStatus lb_world_load_batch_report_with_policy(LbWorld *world,const LbBytesView *modules,size_t count,
+                                               LbWorldOnLoadPolicy policy,LbWorldLoadReport *report)
+{
     LbWorldStatus status; LbCodeInput single,*inputs=NULL; void *memory=NULL; size_t i,bytes;
     LbBeamError error;
     if(report) *report=(LbWorldLoadReport){.stage="arguments"};
-    if(!world || !modules || !count) return LB_WORLD_INVALID;
+    if(!world || !modules || !count ||
+       (policy!=LB_WORLD_ON_LOAD_REJECT && policy!=LB_WORLD_ON_LOAD_DEFER_DENIED_NIF)) return LB_WORLD_INVALID;
     if(count>LB_CODE_BATCH_MODULE_LIMIT) return LB_WORLD_LIMIT;
     for(i=0;i<count;++i) if(!modules[i].data || !modules[i].size) return LB_WORLD_INVALID;
     lb_engine_enter(world->engine);
@@ -114,7 +120,10 @@ LbWorldStatus lb_world_load_batch_report(LbWorld *world,const LbBytesView *modul
             inputs=memory;
             for(i=0;i<count;++i) inputs[i]=(LbCodeInput){modules[i].data,modules[i].size};
         }
-        status=memory_status(world,code_status(lb_code_load_batch(world->space,inputs,count,&error,report)));
+        LbCodeOnLoadPolicy code_policy=policy==LB_WORLD_ON_LOAD_DEFER_DENIED_NIF?
+            LB_CODE_ON_LOAD_DEFER_DENIED_NIF:LB_CODE_ON_LOAD_REJECT;
+        status=memory_status(world,code_status(lb_code_load_batch_with_policy(
+            world->space,inputs,count,code_policy,&error,report)));
         if(memory && lb_alloc_domain_release(&world->domain,memory)!=LB_ALLOC_OK) abort();
     }
 done:

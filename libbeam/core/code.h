@@ -15,6 +15,7 @@ typedef struct { const unsigned char *data; size_t size; } LbCodeInput;
 typedef enum { LB_CODE_OK, LB_CODE_INVALID, LB_CODE_FORMAT, LB_CODE_UNSUPPORTED,
                LB_CODE_NO_MEMORY, LB_CODE_LIMIT, LB_CODE_BUSY, LB_CODE_NOT_FOUND,
                LB_CODE_EXISTS, LB_CODE_UNRESOLVED, LB_CODE_CLOSED } LbCodeStatus;
+typedef enum { LB_CODE_ON_LOAD_REJECT, LB_CODE_ON_LOAD_DEFER_DENIED_NIF } LbCodeOnLoadPolicy;
 /* Serialized C ownership boundary. No implicit OTP services or lazy module load.
  * All functions/imports must pass the single admitted interpreter profile.
  * Load is atomic, including atom identities and namespace backing. No hot reload.
@@ -32,6 +33,8 @@ LbCodeStatus lb_code_load(LbCodeSpace *, const void *, size_t, LbCodeModule **, 
  * are copied into the world-owned preparation arena. Dependencies may
  * refer forward or form cycles within this exact-name batch. */
 LbCodeStatus lb_code_load_batch(LbCodeSpace *, const LbCodeInput *, size_t, LbBeamError *, LbLoadReport *);
+LbCodeStatus lb_code_load_batch_with_policy(LbCodeSpace *, const LbCodeInput *, size_t,
+                                            LbCodeOnLoadPolicy, LbBeamError *, LbLoadReport *);
 LbCodeStatus lb_code_unload(LbCodeModule *); /* refuses frames/entries/importers */
 /* Whole-space retirement handles mutually importing module groups atomically. */
 LbCodeStatus lb_code_unload_all(LbCodeSpace *);

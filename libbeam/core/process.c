@@ -40,6 +40,7 @@ static int tuple_field_range(Eterm tuple,Uint byte_offset,Uint count)
 #include "alias.h"
 #include "receive.h"
 #include <math.h>
+#include <time.h>
 #include <fenv.h>
 #define is_not_ref(term) (!lb_is_reference(term))
 #define is_not_float(term) (!(is_boxed(term) && *boxed_val(term)==_make_header(1,FLOAT_SUBTAG)))
@@ -98,6 +99,7 @@ static LbProcessStatus create_owned(LbCodeModule *module,const BeamInstr *pc,con
 }
 static int private_mfa(const LbCodeModule *module,const BeamInstr *pc,LbMFA *mfa)
 {
+    if(!lb_code_module_ready(module) || !module->words) return 0;
     for(size_t i=0;i<lb_code_module_function_count(module);++i) {
         if(!lb_work_domain_charge(module->space->domain,1)) return 0;
         const BeamInstr *info=(const BeamInstr *)module->words[i];
@@ -291,7 +293,7 @@ static int pc_valid(LbProcess *p,const BeamInstr *pc)
     for(i=0;i<LB_NATIVE_COUNT;++i) if(pc==p->entry_module->space->natives[i].dispatch.addresses[0]) return 1;
     if(address%sizeof(BeamInstr)) return 0;
     for(m=p->entry_module->space->modules;m;m=m->next)
-        if(address>=(Uint)m->words && address<(Uint)(m->words+m->word_count)) return 1;
+        if(m->words && address>=(Uint)m->words && address<(Uint)(m->words+m->word_count)) return 1;
     return 0;
 }
 static const LbMFA *entry_mfa(LbProcess *p,const BeamInstr *pc)

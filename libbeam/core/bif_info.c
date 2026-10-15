@@ -438,8 +438,8 @@ Eterm lb_bif_function_exported_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
     for(const Export *entry=space->exports;entry;entry=entry->next) {
         if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
         ++p->last_native_cost;
-        if(entry->info.mfa.module==args[0] && entry->info.mfa.function==args[1] && entry->info.mfa.arity==arity)
-            return am_true;
+        if(entry->info.mfa.module==args[0] && entry->info.mfa.function==args[1] && entry->info.mfa.arity==arity &&
+           (!entry->owner || lb_code_module_ready(entry->owner))) return am_true;
     }
     return am_false;
 }
@@ -472,11 +472,11 @@ Eterm lb_bif_loaded_0(LbProcess *p,Eterm *args,const BeamInstr *pc)
         if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
         ++p->last_native_cost;
         if(visited==SIZE_MAX) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
-        ++visited; if(m->published) ++count;
+        ++visited; if(m->published && lb_code_module_ready(m)) ++count;
     }
     if(!module_list_heap(p,count,visited)) return THE_NON_VALUE;
     Eterm result=NIL; size_t written=0;
-    for(const LbCodeModule *m=space->modules;m;m=m->next) if(m->published) {
+    for(const LbCodeModule *m=space->modules;m;m=m->next) if(m->published && lb_code_module_ready(m)) {
         if(written==count) abort();
         result=CONS(p->htop,m->name,result); p->htop+=2; ++written;
     }
@@ -503,7 +503,7 @@ Eterm lb_bif_module_loaded_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     for(const LbCodeModule *module=space->modules;module;module=module->next) {
         if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
         ++p->last_native_cost;
-        if(module->name==args[0] && module->published) return am_true;
+        if(module->name==args[0] && module->published && lb_code_module_ready(module)) return am_true;
     }
     return am_false;
 }
@@ -526,7 +526,7 @@ Eterm lb_bif_load_module_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
     for(const LbCodeModule *module=space->modules;module;module=module->next) {
         if(!lb_work_domain_charge(space->domain,1)) goto work_failure;
         ++p->last_native_cost;
-        if(module->name==args[0] && module->published) { published=1; break; }
+        if(module->name==args[0] && module->published && lb_code_module_ready(module)) { published=1; break; }
     }
     if(!published) {
         /* Entry and lookup are already charged. Do not allocate, parse BEAM,
@@ -556,7 +556,7 @@ static LbCodeModule *find_module(LbProcess *p,Eterm name)
     if(!is_atom(name)) return NULL;
     for(m=p->entry_module->space->modules;m;m=m->next) {
         if(!lb_work_domain_charge(m->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return NULL; }
-        if(m->name==name) return m;
+        if(m->name==name && lb_code_module_ready(m)) return m;
     }
     return NULL;
 }

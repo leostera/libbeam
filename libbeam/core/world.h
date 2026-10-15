@@ -12,6 +12,7 @@ extern "C" {
 typedef struct LbWorld LbWorld;
 typedef struct LbCall LbCall;
 typedef struct LbReclamation LbReclamation;
+typedef enum { LB_WORLD_ON_LOAD_REJECT, LB_WORLD_ON_LOAD_DEFER_DENIED_NIF } LbWorldOnLoadPolicy;
 typedef enum {
     LB_WORLD_OK, LB_WORLD_PENDING, LB_WORLD_INVALID, LB_WORLD_INVALID_STATE,
     LB_WORLD_CLOSED, LB_WORLD_FULL, LB_WORLD_LIMIT, LB_WORLD_NO_MEMORY,
@@ -39,6 +40,8 @@ typedef LbLoadReport LbWorldLoadReport;
 LbWorldStatus lb_world_load_report(LbWorld *,LbBytesView,LbWorldLoadReport *);
 /* Eagerly admits one exact-name application/module group in one transaction. */
 LbWorldStatus lb_world_load_batch_report(LbWorld *,const LbBytesView *,size_t,LbWorldLoadReport *);
+LbWorldStatus lb_world_load_batch_report_with_policy(LbWorld *,const LbBytesView *,size_t,
+                                                     LbWorldOnLoadPolicy,LbWorldLoadReport *);
 LbWorldStatus lb_world_load(LbWorld *,LbBytesView);
 LbWorldStatus lb_world_start(LbWorld *,LbBytesView module,LbBytesView function,LbBytesView input,LbCall **);
 LbWorldStatus lb_world_call(LbWorld *,LbBytesView module,LbBytesView function,LbBytesView input,LbCall **);

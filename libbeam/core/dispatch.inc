@@ -348,6 +348,25 @@ OpCase(fstore_ld):
   memcpy(HTOP+1,&FLOAT_REG(source),sizeof(double)); *target=make_boxed(HTOP); HTOP+=2;
   BeamInstr next=I[2]; I+=2; GotoPF(next);
 }
+OpCase(i_perf_counter): {
+  struct timespec sample;
+  if(clock_gettime(CLOCK_MONOTONIC,&sample)!=0 || sample.tv_sec<0 || sample.tv_nsec<0 || sample.tv_nsec>=1000000000L) {
+    c_p->freason=LB_EXC_SYSTEM_LIMIT; goto find_func_info;
+  }
+  if((uint64_t)sample.tv_sec>UINT64_MAX/UINT64_C(1000000000)) {
+    c_p->freason=LB_EXC_SYSTEM_LIMIT; goto find_func_info;
+  }
+  uint64_t counter=(uint64_t)sample.tv_sec*UINT64_C(1000000000)+(uint64_t)sample.tv_nsec;
+  if(counter<=(uint64_t)MAX_SMALL) x(0)=make_small((Sint)counter);
+  else {
+    Uint digit_bits=sizeof(Uint)*CHAR_BIT;
+    Uint digits=digit_bits>=64 || (counter>>digit_bits)==0?1:2,words=digits+1;
+    HEAP_SPACE_VERIFIED(words); Eterm *big=HTOP; big[0]=_make_header(digits,POS_BIG_SUBTAG);
+    big[1]=(Uint)counter; if(digits==2) big[2]=(Uint)(counter>>digit_bits);
+    HTOP+=words; x(0)=make_boxed(big);
+  }
+  I+=1; ASSERT(VALID_INSTR(*I)); Goto(*I);
+}
 OpCase(i_fadd_lll):
 {
   Eterm packed=I[1]; Uint left=packed&BEAM_TIGHT_MASK;
@@ -3179,6 +3198,16 @@ OpCase(i_get_tuple_element_xPx):
   I += 3;
   ASSERT(VALID_INSTR(next_pf));
   GotoPF(next_pf);
+}
+
+OpCase(set_tuple_element_sSP):
+{
+  Eterm element; GetSource(I[1],element); Eterm tuple=Sb(I[2]);
+  Uint offset=I[3]; BeamInstr next_pf=BeamCodeAddr(I[4]);
+  if(!is_tuple(tuple) || offset<sizeof(Eterm) || offset%sizeof(Eterm) ||
+     offset/sizeof(Eterm)>arityval(*tuple_val(tuple))) goto malformed_code;
+  tuple_val(tuple)[offset/sizeof(Eterm)]=element; I+=4;
+  ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
 }
 
 OpCase(i_get_tuple_element_xPy):
@@ -7476,6 +7505,110 @@ OpCase(i_bs_test_unit8_fx): packed=I[1]; context=xb(packed>>BEAM_WIDE_SHIFT); go
     if(fail) { ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I); }
     c_p->freason=LB_EXC_BADARG; goto find_func_info;
   }
+}
+
+{
+  Eterm context,destination; Sint fail;
+  OpCase(i_bs_get_float2_xftstd): context=xb(I[1]); goto i_bs_get_float2__execute;
+  OpCase(i_bs_get_float2_yftstd): context=yb(I[1]);
+  i_bs_get_float2__execute: {
+    Eterm packed=I[3],size_term; Uint live=tb(packed&BEAM_TIGHT_MASK);
+    Uint flags=tb((packed>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK);
+    destination=db(packed>>(2*BEAM_TIGHT_SHIFT)); fail=(Sint)I[2]; GetSource(I[4],size_term);
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) goto malformed_code;
+    LbSubBits *sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end || live>MAX_REG || !is_small(size_term) ||
+       signed_val(size_term)<0 || signed_val(size_term)>64) goto i_bs_get_float2__fail;
+    Uint unit_flags=tb(I[5]),unit=unit_flags>>3,width=(Uint)signed_val(size_term);
+    flags=unit_flags&7;
+    if(!unit || (flags&~BSF_LITTLE) || width>64/unit) goto i_bs_get_float2__fail;
+    width*=unit;
+    if(width!=0 && width!=16 && width!=32 && width!=64) goto i_bs_get_float2__fail;
+    if(width>sub->end-sub->start) goto i_bs_get_float2__fail;
+    Uint raw=0; const byte *base=erl_sub_bits_get_base(sub);
+    if(flags&BSF_LITTLE) {
+      for(Uint offset=0;offset<width;offset+=8) {
+        Uint octet=0;
+        for(Uint bit=0;bit<8;++bit) { Uint at=sub->start+offset+bit; octet=(octet<<1)|((base[at/8]>>(7-(at&7)))&1); }
+        raw|=octet<<offset;
+      }
+    } else {
+      for(Uint bit=0;bit<width;++bit) { Uint at=sub->start+bit; raw=(raw<<1)|((base[at/8]>>(7-(at&7)))&1); }
+    }
+    double number=0.0;
+    if(width==16) {
+      Uint sign=(raw>>15)&1,exponent=(raw>>10)&31,mantissa=raw&1023; float value;
+      if(exponent==31) goto i_bs_get_float2__fail;
+      value=exponent?ldexpf((float)(1024+mantissa),(Sint)exponent-25):ldexpf((float)mantissa,-24);
+      number=sign?-(double)value:(double)value;
+    } else if(width==32) {
+      uint32_t bits=(uint32_t)raw; float value; memcpy(&value,&bits,sizeof(value)); number=(double)value;
+    } else if(width==64) memcpy(&number,&raw,sizeof(number));
+    if(!isfinite(number)) goto i_bs_get_float2__fail;
+    Eterm *target=REG_TARGET_PTR(destination); HEAP_SPACE_VERIFIED(2);
+    HTOP[0]=_make_header(1,FLOAT_SUBTAG); memcpy(HTOP+1,&number,sizeof(number));
+    *target=make_boxed(HTOP); HTOP+=2; sub->start+=width; I+=6; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+  i_bs_get_float2__fail: I+=fail; ASSERT(VALID_INSTR(*I)); Goto(*I);
+}
+
+{
+  Eterm context,destination; Eterm *destination_ptr; Sint fail; Uint flags;
+  OpCase(i_bs_get_utf16_xftd): context=xb(I[1]); goto i_bs_get_utf16__execute;
+  OpCase(i_bs_get_utf16_yftd): context=yb(I[1]);
+  i_bs_get_utf16__execute: {
+    Eterm packed=I[3]; destination=db(packed>>BEAM_LOOSE_SHIFT);
+    destination_ptr=REG_TARGET_PTR(destination); flags=tb(packed&BEAM_LOOSE_MASK); fail=(Sint)I[2];
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) goto malformed_code;
+    LbSubBits *sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end) goto malformed_code;
+    Uint remaining=(Uint)(sub->end-sub->start),needed=16,position=sub->start,value=0;
+    if(flags&~BSF_LITTLE) goto malformed_code;
+    if(remaining>=16) {
+      const byte *base=erl_sub_bits_get_base(sub);
+      if(flags&BSF_LITTLE) {
+        Uint first=0,second=0;
+        for(Uint i=0;i<8;++i) { Uint bit=position+i; first=(first<<1)|((base[bit/8]>>(7-(bit&7)))&1); }
+        for(Uint i=0;i<8;++i) { Uint bit=position+8+i; second=(second<<1)|((base[bit/8]>>(7-(bit&7)))&1); }
+        value=first|(second<<8);
+      } else {
+        for(Uint i=0;i<16;++i) { Uint bit=position+i; value=(value<<1)|((base[bit/8]>>(7-(bit&7)))&1); }
+      }
+      if(value>=0xD800 && value<=0xDBFF) {
+        Uint low=0;
+        if(remaining<32) goto i_bs_get_utf16__fail;
+        if(flags&BSF_LITTLE) {
+          Uint first=0,second=0;
+          for(Uint i=0;i<8;++i) { Uint bit=position+16+i; first=(first<<1)|((base[bit/8]>>(7-(bit&7)))&1); }
+          for(Uint i=0;i<8;++i) { Uint bit=position+24+i; second=(second<<1)|((base[bit/8]>>(7-(bit&7)))&1); }
+          low=first|(second<<8);
+        } else {
+          for(Uint i=0;i<16;++i) { Uint bit=position+16+i; low=(low<<1)|((base[bit/8]>>(7-(bit&7)))&1); }
+        }
+        if(low<0xDC00 || low>0xDFFF) goto i_bs_get_utf16__fail;
+        value=0x10000+((value-0xD800)<<10)+(low-0xDC00); needed=32;
+      } else if(value>=0xDC00 && value<=0xDFFF) goto i_bs_get_utf16__fail;
+      *destination_ptr=make_small((Sint)value); sub->start+=needed; I+=4; ASSERT(VALID_INSTR(*I)); Goto(*I);
+    }
+  }
+  i_bs_get_utf16__fail:
+  I+=fail; ASSERT(VALID_INSTR(*I)); Goto(*I);
+}
+
+OpCase(i_bs_validate_unicode_retract_jsS): {
+  Eterm packed=I[1],value; GetSource(I[2],value);
+  if(!is_small(value) || value>make_small(0x10FFFFUL) ||
+     (make_small(0xD800UL)<=value && value<=make_small(0xDFFFUL))) {
+    Eterm context=Sb((packed>>BEAM_WIDE_SHIFT));
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    LbSubBits *sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start<32 || sub->start>sub->end) goto malformed_code;
+    sub->start-=32; c_p->freason=LB_EXC_BADARG;
+    Sint fail=(Sint)jb(packed&BEAM_WIDE_MASK);
+    if(fail) { I+=fail; ASSERT(VALID_INSTR(*I)); Goto(*I); }
+    goto find_func_info;
+  }
+  I+=3; ASSERT(VALID_INSTR(*I)); Goto(*I);
 }
 
 {

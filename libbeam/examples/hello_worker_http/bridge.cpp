@@ -437,7 +437,8 @@ int main(int argc, char** argv) {
         std::vector<libbeam::ByteView> beams;
         for (const auto& [name, bytes] : modules)
             beams.push_back({reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size()});
-        if (auto error = isolate->load_modules(beams)) {
+        if (auto error = isolate->load_modules(beams,libbeam::ModuleLoadOptions{
+                .on_load=libbeam::OnLoadPolicy::defer_denied_nif})) {
             if (auto usage = isolate->resource_usage();
                 auto* record = std::get_if<libbeam::ResourceUsage>(&usage))
                 std::cerr << "Admission usage memory_current=" << record->memory_current

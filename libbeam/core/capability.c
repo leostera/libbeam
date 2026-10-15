@@ -14,6 +14,13 @@
 #include "capability_denials.def"
 #undef LB_DENIAL
 
+Eterm lb_bif_deny_uninitialized_module(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    static const LbCapabilityFailure failure={LB_CAPABILITY_NATIVE_LIBRARY,"erlang","load_nif",2,
+        "erlang:load_nif/2 denied: NATIVE_LIBRARY"};
+    (void)args; (void)pc;
+    return lb_process_deny_capability(p,&failure);
+}
 Eterm lb_process_deny_capability(LbProcess *p,const LbCapabilityFailure *failure)
 {
     assert(p && failure && failure->module && failure->function && failure->message);

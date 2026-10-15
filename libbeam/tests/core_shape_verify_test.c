@@ -75,7 +75,7 @@ static void forwarding_returns(LbCodeSpace *space)
 }
 static void terminal_frame_joins(LbCodeSpace *space)
 {
-    for(unsigned kind=0;kind<7;++kind) {
+    for(unsigned kind=0;kind<8;++kind) {
         Program p; begin(&p); ADD(&p,allocate_2,U(2),U(2));
         ADD(&p,move_2,N,Y(0));
         if(kind!=3) ADD(&p,move_2,N,Y(1));
@@ -86,15 +86,16 @@ static void terminal_frame_joins(LbCodeSpace *space)
         if(kind==2) { ADD(&p,deallocate_1,U(1)); ret(&p); }
         else {
             if(kind==6) ADD(&p,move_2,X(0),X(1));
-            if(kind==1) ADD(&p,case_end_1,X(0));
+            if(kind==7) { ADD(&p,move_2,Y(0),X(0)); ret(&p); }
+            else if(kind==1) ADD(&p,case_end_1,X(0));
             else if(kind==4) ADD(&p,badmatch_1,X(2));
             else if(kind==5) ADD(&p,badmatch_1,Y(0));
             else ADD(&p,badmatch_1,X(0));
         }
-        /* Only initialized stacks joining at a metadata-only X-error tail
-         * may differ in frame size. Normal continuation, undefined operands,
-         * Y reads, and intervening instructions retain the strict proof. */
-        verify(space,&p,kind<2?LB_CODE_OK:LB_CODE_FORMAT);
+        /* A terminal badmatch may read one initialized Y slot shared by
+         * differently sized frames. Normal Y reads, deallocation, undefined
+         * operands, and all normal continuations retain strict frame proof. */
+        verify(space,&p,(kind<2 || kind==5)?LB_CODE_OK:LB_CODE_FORMAT);
     }
 }
 static void apply_boundaries(LbCodeSpace *space)
@@ -271,11 +272,69 @@ static void proven_match_start(LbCodeSpace *space)
         verify_literals(space,&p,mode==3?LB_CODE_FORMAT:LB_CODE_OK,literals,2); /* Input shape is checked at runtime. */
     }
 }
+static void interprocedural_match_context_restart(LbCodeSpace *space)
+{
+    Eterm empty[2]={_make_header(1,HEAP_BITS_SUBTAG),0},literals[]={make_boxed(empty)};
+    for(unsigned mode=0;mode<2;++mode) {
+        Program p={0}; LbBeamProgram program={0}; LoaderState st={0}; LbCodeStatus status;
+        LbCodeModule module={0};
+        /* The first caller seeds the callee's parameter fact with a context.
+         * Its self-call receives an unclassified result, so only an immediate
+         * no-fail match start can prove the value is safely revalidated. */
+        ADD(&p,int_func_start_5,U(1),U(0),A(0),A(10),U(1)); ADD(&p,label_1,U(2));
+        ADD(&p,allocate_2,U(0),U(1)); ADD(&p,move_2,((BeamOpArg){TAG_q,0}),X(0));
+        ADD(&p,bs_start_match4_4,((BeamOpArg){TAG_a,am_no_fail}),U(1),X(0),X(1));
+        ADD(&p,move_2,X(1),X(0)); ADD(&p,call_2,U(1),F(6));
+        ADD(&p,deallocate_1,U(0)); ret(&p);
+        ADD(&p,int_func_start_5,U(5),U(0),A(0),A(11),U(1)); ADD(&p,label_1,U(6));
+        if(mode) {
+            ADD(&p,bs_get_position_3,X(0),X(1),U(1));
+            ADD(&p,bs_get_tail_3,X(0),X(0),U(1));
+        } else {
+            ADD(&p,bs_start_match4_4,((BeamOpArg){TAG_a,am_no_fail}),U(1),X(0),X(1));
+            ADD(&p,bs_get_tail_3,X(1),X(0),U(1));
+        }
+        ADD(&p,allocate_2,U(0),U(1));
+        ADD(&p,call_2,U(1),F(9)); ADD(&p,deallocate_1,U(0)); ADD(&p,call_only_2,U(1),F(6));
+        ADD(&p,int_func_start_5,U(8),U(0),A(0),A(12),U(1)); ADD(&p,label_1,U(9));
+        ADD(&p,move_2,X(0),X(0)); ret(&p);
+        program.ops=p.ops; program.atoms=space->atoms; program.literals=literals; program.literal_count=1;
+        st.program=&program; st.space=space; st.label_count=10; st.module_code=&module;
+        status=lb_verify_program(&st);
+        LbCodeStatus expected=mode?LB_CODE_FORMAT:LB_CODE_OK;
+        if(status!=expected) fprintf(stderr,"match-context restart status=%d expected=%d stage=%s offset=%zu\n",
+                                     status,expected,program.error.stage,program.error.offset);
+        CHECK(status==expected);
+        if(mode) CHECK(!strcmp(program.error.stage,"match-context callsite argument shape is unknown"));
+    }
+}
+static void if_end_frame_join(LbCodeSpace *space)
+{
+    Program p; begin(&p);
+    ADD(&p,is_nil_2,F(3),X(0));
+    ADD(&p,allocate_2,U(1),U(1)); ADD(&p,move_2,X(0),Y(0));
+    ADD(&p,is_nil_2,F(3),X(0)); ADD(&p,deallocate_1,U(1)); ret(&p);
+    ADD(&p,label_1,U(3)); ADD(&p,line_1,U(0)); ADD(&p,if_end_0);
+    verify(space,&p,LB_CODE_OK);
+}
+static void set_tuple_element_proof(LbCodeSpace *space)
+{
+    for(unsigned mode=0;mode<3;++mode) {
+        Program p; begin(&p); ADD(&p,allocate_2,U(1),U(2));
+        ADD(&p,move_2,X(0),Y(0)); ADD(&p,move_2,Y(0),X(2));
+        ADD(&p,move_2,((BeamOpArg){TAG_i,2}),X(0));
+        ADD(&p,call_ext_2,U(3),U(0));
+        if(mode==1) ADD(&p,move_2,X(0),X(1));
+        ADD(&p,set_tuple_element_3,Y(0),((BeamOpArg){TAG_x,mode==1?1:0}),U(mode==2?2:0));
+        ADD(&p,deallocate_1,U(1)); ret(&p);
+        verify_using_bif(space,&p,mode?LB_CODE_FORMAT:LB_CODE_OK,NULL,0,BIF_setelement_3);
+    }
+}
 int main(void)
 {
     LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    tested_tuple_copy(space); proven_match_start(space); joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); exception_handler_calls(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
+    tested_tuple_copy(space); proven_match_start(space); interprocedural_match_context_restart(space); if_end_frame_join(space); set_tuple_element_proof(space); joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); exception_handler_calls(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     puts("CORE_SHAPE_PROOF_OK failure_edges=true late_joins=true backedges=true bounds=true alias_moves=true call_clobbers=true y_facts=true hints_not_authority=true arithmetic_edges=true predicate_scratch=true list_not_cons=true trim_facts=true execution=false");
     return 0;

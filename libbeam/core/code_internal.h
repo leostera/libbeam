@@ -75,6 +75,7 @@ struct LbCodeSpace {
     int loading,has_fun_literals;
 };
 struct LbFunEntry;
+typedef enum { LB_MODULE_ACTIVE, LB_MODULE_ON_LOAD_DENIED_NIF } LbModuleActivation;
 struct LbCodeModule {
     LbCodeSpace *space;
     LbBeamProgram *program;
@@ -93,6 +94,7 @@ struct LbCodeModule {
     LbLiteralFunUse *literal_fun_uses;
     Eterm attributes, compile;
     int published;
+    LbModuleActivation activation;
 };
 struct LbCodeEntry { LbCodeModule *module; Export *entry; };
 typedef struct LoaderState_ {
@@ -125,6 +127,7 @@ LbCodeStatus lb_compile_code(LbCodeModule *);
 LbCodeStatus lb_code_prepare_module(LbCodeModule *,LoaderState *);
 LbCodeStatus lb_code_resolve_imports(LoaderState *,LbCodeModule *const *,size_t);
 LbCodeStatus lb_code_compile_prepared(LoaderState *);
+int lb_code_module_ready(const LbCodeModule *);
 LbCodeStatus lb_code_space_create_in_domain(LbEngine *,LbAllocDomain *,LbCodeSpace **);
 LbCodeStatus lb_verify_program(LoaderState *);
 int lb_instruction_supported(unsigned);
@@ -183,6 +186,7 @@ Eterm lb_bif_node_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_nodes_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_nodes_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_nodes_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_deny_uninitialized_module(LbProcess *,Eterm *,const BeamInstr *);
 #define LB_DENIAL(id, name, arity, category) Eterm lb_bif_deny_##name##_##arity(LbProcess *,Eterm *,const BeamInstr *);
 #include "capability_denials.def"
 #undef LB_DENIAL

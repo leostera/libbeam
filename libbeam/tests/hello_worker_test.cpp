@@ -219,7 +219,8 @@ protected:
         const auto data = bundle();
         std::vector<libbeam::ByteView> modules;
         for (const auto& [name, beam] : data.modules) modules.push_back(view(beam));
-        return target.load_modules(modules);
+        return target.load_modules(modules,libbeam::ModuleLoadOptions{
+            .on_load=libbeam::OnLoadPolicy::defer_denied_nif});
     }
     std::string invoke(std::string_view bytes) {
         auto call = take(started ? isolate->call(entry_module, "__midgard_call__", view(bytes))

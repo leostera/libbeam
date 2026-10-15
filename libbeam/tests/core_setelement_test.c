@@ -123,6 +123,20 @@ int main(int argc,char **argv)
     CHECK(lb_atoms_find(world->space->atoms,"new",3,&expected)==LB_ATOM_OK);
     CHECK(is_tuple(result) && arityval(*tuple_val(result))==3 && tuple_val(result)[2]==expected);
     lb_process_destroy(p);
+    {
+        Eterm args[]={NIL,NIL,NIL},original;
+        p=create(world->space,module,"update_twice",args,3);
+        original=TUPLE3(p->htop,make_small(1),make_small(2),make_small(3)); p->htop+=4;
+        p->reg[0]=original; p->reg[1]=make_small(10); p->reg[2]=make_small(20);
+        CHECK(run(p)==LB_PROCESS_DONE);
+        result=lb_process_result(p);
+        CHECK(is_tuple(result) && result!=original && arityval(*tuple_val(result))==3);
+        CHECK(tuple_val(result)[1]==make_small(10) && tuple_val(result)[2]==make_small(20) &&
+              tuple_val(result)[3]==make_small(3));
+        CHECK(tuple_val(original)[1]==make_small(1) && tuple_val(original)[2]==make_small(2) &&
+              tuple_val(original)[3]==make_small(3));
+        lb_process_destroy(p);
+    }
     for(size_t index=1;index<=3;index+=2) {
         p=input(world->space,module); p->reg[0]=make_small(index);
         CHECK(run(p)==LB_PROCESS_DONE);

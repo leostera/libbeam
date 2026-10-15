@@ -270,10 +270,10 @@ static int lb_transform_is_float(Eterm value)
 #endif
 static int transform_get_integer2(LoaderState *st,BeamOp *source)
 {
-    BeamOpArg *a=source->a; BeamOp *target; Uint flags,unit,combined;
+    BeamOpArg *a=source->a; BeamOp *target,*size_move=NULL; Uint flags,unit,combined;
     if(source->arity!=7 || a[0].type!=TAG_f ||
        (a[1].type!=TAG_x && a[1].type!=TAG_y) || a[2].type!=TAG_u ||
-       (a[3].type!=TAG_x && a[3].type!=TAG_y) || a[4].type!=TAG_u || a[4].val<=0 ||
+       (a[3].type!=TAG_x && a[3].type!=TAG_y && a[3].type!=TAG_i) || a[4].type!=TAG_u || a[4].val<=0 ||
        a[5].type!=TAG_u || (a[6].type!=TAG_x && a[6].type!=TAG_y)) return TE_UNSUPPORTED;
     flags=(Uint)a[5].val; unit=(Uint)a[4].val;
     if(flags&BSF_NATIVE) {
@@ -290,7 +290,15 @@ static int transform_get_integer2(LoaderState *st,BeamOp *source)
     target->op=genop_i_bs_get_integer_6; target->arity=6; target->offset=source->offset;
     target->a[0]=a[1]; target->a[1]=a[0]; target->a[2]=a[2];
     target->a[3]=(BeamOpArg){TAG_u,(Sint)combined}; target->a[4]=a[3]; target->a[5]=a[6];
-    target->next=source->next; st->genop=target; lb_load_free_op(st,source); return TE_OK;
+    if(a[3].type==TAG_i) {
+        size_move=lb_load_new_op(st);
+        if(!size_move) { lb_load_free_op(st,target); return TE_NO_MEMORY; }
+        size_move->op=genop_move_2; size_move->arity=2; size_move->offset=source->offset;
+        size_move->a[0]=a[3]; size_move->a[1]=(BeamOpArg){TAG_x,MAX_REG-1};
+        target->a[4]=(BeamOpArg){TAG_x,MAX_REG-1}; size_move->next=target; target->next=source->next;
+        st->genop=size_move;
+    } else { target->next=source->next; st->genop=target; }
+    lb_load_free_op(st,source); return TE_OK;
 }
 static int transform_get_binary2(LoaderState *st,BeamOp *source)
 {
@@ -342,6 +350,60 @@ static int transform_update_record(LoaderState *st,BeamOp *source)
 int lb_transform(LoaderState *st)
 {
     BeamOp *unary=st->genop;
+    if(unary->op==genop_bs_get_float2_7) {
+        BeamOpArg fail,context,live,size,unit_flags,destination; Uint flags,unit;
+        if(unary->arity!=7 ||
+           !(unary->a[0].type==TAG_f || (unary->a[0].type==TAG_p && !unary->a[0].val)) ||
+           (unary->a[1].type!=TAG_x && unary->a[1].type!=TAG_y) ||
+           unary->a[2].type!=TAG_u || (unary->a[3].type!=TAG_x && unary->a[3].type!=TAG_y &&
+           unary->a[3].type!=TAG_i && unary->a[3].type!=TAG_q) || unary->a[4].type!=TAG_u || !unary->a[4].val || unary->a[5].type!=TAG_u ||
+           (unary->a[6].type!=TAG_x && unary->a[6].type!=TAG_y)) {
+            st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+        }
+        fail=unary->a[0]; if(fail.type==TAG_p) fail.type=TAG_f;
+        context=unary->a[1]; live=unary->a[2]; size=unary->a[3]; unit=(Uint)unary->a[4].val;
+        flags=(Uint)unary->a[5].val;
+        if(flags&BSF_NATIVE) {
+            flags&=~BSF_NATIVE;
+#if defined(WORDS_BIGENDIAN)
+            flags&=~BSF_LITTLE;
+#else
+            flags|=BSF_LITTLE;
+#endif
+        }
+        if((flags&~BSF_LITTLE) || unit>(UINT32_MAX>>3)) return TE_UNSUPPORTED;
+        unit_flags=(BeamOpArg){TAG_u,(Sint)((unit<<3)|flags)}; destination=unary->a[6];
+        unary->op=genop_i_bs_get_float2_6; unary->arity=6;
+        unary->a[0]=context; unary->a[1]=fail; unary->a[2]=live;
+        unary->a[3]=size; unary->a[4]=unit_flags; unary->a[5]=destination;
+        return TE_OK;
+    }
+    if(unary->op==genop_bs_get_utf16_5 || unary->op==genop_bs_skip_utf16_4) {
+        BeamOpArg fail,context,flags,destination; int skip=unary->op==genop_bs_skip_utf16_4;
+        if(unary->arity!=(skip?4:5) ||
+           !(unary->a[0].type==TAG_f || (unary->a[0].type==TAG_p && !unary->a[0].val)) ||
+           (unary->a[1].type!=TAG_x && unary->a[1].type!=TAG_y) ||
+           unary->a[2].type!=TAG_u ||
+           unary->a[3].type!=TAG_u ||
+           (!skip && unary->a[4].type!=TAG_x && unary->a[4].type!=TAG_y)) {
+            st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+        }
+        fail=unary->a[0]; if(fail.type==TAG_p) fail.type=TAG_f;
+        context=unary->a[1]; flags=unary->a[3];
+        if((Uint)flags.val&BSF_NATIVE) {
+            flags.val&=~BSF_NATIVE;
+#if defined(WORDS_BIGENDIAN)
+            flags.val&=~BSF_LITTLE;
+#else
+            flags.val|=BSF_LITTLE;
+#endif
+        }
+        if((Uint)flags.val&~BSF_LITTLE) return TE_UNSUPPORTED;
+        destination=skip?(BeamOpArg){TAG_x,MAX_REG-1}:unary->a[4];
+        unary->op=genop_i_bs_get_utf16_4; unary->arity=4;
+        unary->a[0]=context; unary->a[1]=fail; unary->a[2]=flags; unary->a[3]=destination;
+        return TE_OK;
+    }
     if(unary->op==genop_bs_skip_utf8_4) {
         BeamOpArg fail,context;
         if(unary->arity!=4 ||

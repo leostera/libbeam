@@ -9,6 +9,7 @@
 #include "md5.h"
 #include "pid_table.h"
 #include "fun.h"
+static int module_imports_denied_nif(const LbCodeModule *module);
 static LbCodeStatus from_beam(LbBeamStatus s)
 {
     switch(s) {
@@ -282,6 +283,21 @@ LbCodeStatus lb_code_compile_prepared(LoaderState *prepared)
     LbCodeStatus status;
     size_t rewrites=0,i;
     status=lb_verify_program(st); if(status!=LB_CODE_OK) return status;
+    if(module->activation==LB_MODULE_ON_LOAD_DENIED_NIF) {
+        size_t words;
+        if(!module_imports_denied_nif(module) || !module->export_count ||
+           !lb_size_mul(module->export_count,2,&words)) return LB_CODE_FORMAT;
+        module->words=lb_palloc(st->program,words,sizeof(*module->words));
+        if(!module->words) return st->program->error.status==LB_BEAM_LIMIT?LB_CODE_LIMIT:LB_CODE_NO_MEMORY;
+        module->word_count=words;
+        for(i=0;i<module->export_count;++i) {
+            LbBifFn denied=lb_bif_deny_uninitialized_module;
+            module->words[2*i]=op_call_bif_W;
+            memcpy(&module->words[2*i+1],&denied,sizeof(denied));
+            module->exports[i].dispatch.addresses[0]=module->words+2*i;
+        }
+        return LB_CODE_OK;
+    }
     st->genop=st->program->ops;
     while(st->genop) {
         BeamOp *op=st->genop;
@@ -304,6 +320,7 @@ LbCodeStatus lb_code_compile_prepared(LoaderState *prepared)
         st->specific_op=(int)selection.opcode;
         st->program->error.stage=opc[selection.opcode].name;
         if(selection.opcode!=op_label_L && selection.opcode!=op_line_I && selection.opcode!=op_nif_start &&
+           selection.opcode!=op_i_nif_padding &&
            selection.opcode!=op_i_func_info_IaaI && selection.opcode!=op_int_code_end &&
            !lb_instruction_supported(selection.opcode)) return LB_CODE_UNSUPPORTED;
         for(i=0;i<op->arity && i<sizeof(selection.r_mask)*CHAR_BIT;++i)
@@ -472,6 +489,20 @@ static void batch_error(LbBeamError *error,LbLoadReport *report,LbCodeStatus sta
             report_unsupported_bif(program,report);
     }
 }
+static BeamOp *on_load_marker(LbBeamProgram *program)
+{
+    for(BeamOp *op=program->ops;op;op=op->next)
+        if(op->op<NUM_GENERIC_OPS && strcmp(gen_opc[op->op].name,"on_load")==0) return op;
+    return NULL;
+}
+static int module_imports_denied_nif(const LbCodeModule *module)
+{
+    for(size_t i=0;i<module->import_count;++i) {
+        const LbMFA *mfa=&module->imports[i]->info.mfa;
+        if(mfa->module==am_erlang && mfa->function==am_load_nif && mfa->arity==2) return 1;
+    }
+    return 0;
+}
 static void batch_cleanup(LbCodeSpace *space,LbCodeModule **modules,LbBeamProgram **programs,
                           size_t count)
 {
@@ -495,6 +526,11 @@ static void batch_cleanup(LbCodeSpace *space,LbCodeModule **modules,LbBeamProgra
 LbCodeStatus lb_code_load_batch(LbCodeSpace *space,const LbCodeInput *inputs,size_t count,
                                 LbBeamError *error,LbLoadReport *report)
 {
+    return lb_code_load_batch_with_policy(space,inputs,count,LB_CODE_ON_LOAD_REJECT,error,report);
+}
+LbCodeStatus lb_code_load_batch_with_policy(LbCodeSpace *space,const LbCodeInput *inputs,size_t count,
+                                LbCodeOnLoadPolicy policy,LbBeamError *error,LbLoadReport *report)
+{
     LbCodeModule **modules=NULL,*peer;
     LbBeamProgram **programs=NULL;
     LoaderState *states=NULL;
@@ -505,7 +541,8 @@ LbCodeStatus lb_code_load_batch(LbCodeSpace *space,const LbCodeInput *inputs,siz
     void *memory;
     if(error) *error=local_error;
     if(report) { memset(report,0,sizeof(*report)); report->stage="arguments"; }
-    if(!space || !inputs || !count) return LB_CODE_INVALID;
+    if(!space || !inputs || !count ||
+       (policy!=LB_CODE_ON_LOAD_REJECT && policy!=LB_CODE_ON_LOAD_DEFER_DENIED_NIF)) return LB_CODE_INVALID;
     if(count>LB_CODE_BATCH_MODULE_LIMIT) {
         if(error) *error=(LbBeamError){LB_BEAM_LIMIT,0,"batch module limit"};
         if(report) report->stage="batch module limit";
@@ -572,6 +609,17 @@ LbCodeStatus lb_code_load_batch(LbCodeSpace *space,const LbCodeInput *inputs,siz
         }
         modules[i]=memory; memset(modules[i],0,sizeof(*modules[i]));
         modules[i]->space=space; modules[i]->program=programs[i];
+        BeamOp *marker=on_load_marker(programs[i]);
+        if(marker) {
+            if(policy==LB_CODE_ON_LOAD_REJECT) {
+                result=LB_CODE_UNSUPPORTED; failed_program=programs[i];
+                programs[i]->error.stage="on_load";
+                programs[i]->error.offset=marker->offset;
+                batch_error(error,report,result,failed_program,i,programs[0]->transaction);
+                goto rollback;
+            }
+            modules[i]->activation=LB_MODULE_ON_LOAD_DENIED_NIF;
+        }
     }
     result=from_beam(lb_program_bind_batch(programs,count));
     if(result!=LB_CODE_OK) { failed_program=programs[0]; batch_error(error,report,result,failed_program,SIZE_MAX,programs[0]->transaction); goto rollback; }
@@ -603,6 +651,13 @@ LbCodeStatus lb_code_load_batch(LbCodeSpace *space,const LbCodeInput *inputs,siz
     for(i=0;i<count;++i) {
         result=lb_code_resolve_imports(&states[i],modules,count);
         if(result!=LB_CODE_OK) { failed_program=programs[i]; batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback; }
+    }
+    for(i=0;i<count;++i) if(modules[i]->activation==LB_MODULE_ON_LOAD_DENIED_NIF &&
+                              !module_imports_denied_nif(modules[i])) {
+        result=LB_CODE_UNSUPPORTED; failed_program=programs[i];
+        programs[i]->error.stage="on_load policy requires erlang:load_nif/2";
+        batch_error(error,report,result,failed_program,i,programs[0]->transaction);
+        goto rollback;
     }
     result=validate_batch_importers(space,modules,count);
     if(result!=LB_CODE_OK) {
@@ -703,6 +758,8 @@ void lb_code_entry_release(LbCodeEntry *entry)
     lb_release(d,entry);
     if(!module->users) abort(); --module->users;
 }
+int lb_code_module_ready(const LbCodeModule *module)
+{ return module && module->activation==LB_MODULE_ACTIVE; }
 const Uint *lb_code_entry_address(const LbCodeEntry *entry) { return entry?entry->entry->dispatch.addresses[0]:NULL; }
 const Uint *lb_code_module_words(const LbCodeModule *module,size_t *count)
 {

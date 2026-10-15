@@ -15,8 +15,8 @@
 
 int main(void)
 {
-    CHECK(!lb_instruction_supported(op_set_tuple_element_sSP));
+    CHECK(lb_instruction_supported(op_set_tuple_element_sSP));
     CHECK(lb_instruction_supported(op_i_bs_match_string_xfWW));
-    puts("OPCODE_PROFILE_OK set_tuple_element=explicitly_excluded match_string=supported");
+    puts("OPCODE_PROFILE_OK set_tuple_element=supported match_string=supported");
     return 0;
 }

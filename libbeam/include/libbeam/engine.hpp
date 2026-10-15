@@ -47,6 +47,13 @@ struct ResourceOverrides {
     std::optional<std::size_t> memory_limit_bytes;
     std::optional<std::uint64_t> invocation_work_limit;
 };
+enum class OnLoadPolicy { reject, defer_denied_nif };
+struct ModuleLoadOptions {
+    // Explicit compatibility mode: publish a module with an on_load marker
+    // only when it imports denied erlang:load_nif/2. Such a module remains
+    // unavailable; calls to any of its exports terminate as capability denied.
+    OnLoadPolicy on_load = OnLoadPolicy::reject;
+};
 struct ResourceUsage {
     ResourceLimits limits;
     std::size_t memory_current, memory_peak;
@@ -109,7 +116,9 @@ public:
     Status load_module(ByteView);
     // Admit an exact-name eager dependency graph atomically. Modules may import
     // peers loaded later in this same group, including mutual dependencies.
-    Status load_modules(const std::vector<ByteView>&);
+    // defer_denied_nif is opt-in and does not execute or report successful
+    // initialization: matching modules remain unavailable after publication.
+    Status load_modules(const std::vector<ByteView>&, ModuleLoadOptions = {});
     Result<ResourceUsage> resource_usage(); // Read-only; retained closed controls are observable.
 
     // Atomically enters running state and admits the initial binary arity-one

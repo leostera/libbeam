@@ -19,6 +19,7 @@
 #define APPEND_CONTEXT_SHAPE (APPEND_SHAPE|MATCH_CONTEXT_SHAPE)
 #define POSSIBLE_TUPLE_ARITY APPEND_SHAPE
 #define KNOWN_NON_TUPLE UINT32_C(1)
+#define ATOM_SHAPE UINT32_C(4)
 #define MATCH_CONTEXT_SHAPE UINT32_C(0x10000000)
 #define POSSIBLE_MATCH_CONTEXT UINT32_C(0x20000000)
 #define MAP_SHAPE UINT32_C(0x40000000)
@@ -38,7 +39,7 @@ enum CompactShapeKind {
     COMPACT_APPEND, COMPACT_NON_TUPLE, COMPACT_MATCH_CONTEXT,
     COMPACT_POSSIBLE_MATCH_CONTEXT, COMPACT_CONSUMED, COMPACT_MAP,
     COMPACT_BITSTRING, COMPACT_APPEND_CONTEXT, COMPACT_COPYABLE_APPEND,
-    COMPACT_LIST_OR_NIL, COMPACT_NIL, COMPACT_EXCEPTION_COMPONENT
+    COMPACT_LIST_OR_NIL, COMPACT_NIL, COMPACT_EXCEPTION_COMPONENT, COMPACT_ATOM
 };
 #define REQUIRE(test) do { if(!(test)) return LB_CODE_FORMAT; } while(0)
 _Static_assert(MAX_ARITYVAL==ARITY_MASK,"Shape facts cover native tuple arities");
@@ -53,6 +54,7 @@ static uint16_t compact_shape(uint32_t shape)
 {
     unsigned kind; Uint arity=shape&ARITY_MASK;
     if(shape==EXCEPTION_CLASS_SHAPE || shape==EXCEPTION_TRACE_SHAPE) kind=COMPACT_EXCEPTION_COMPONENT;
+    else if(shape==ATOM_SHAPE) kind=COMPACT_ATOM;
     else if(shape&TUPLE_SHAPE) kind=(shape&POSSIBLE_TUPLE_ARITY)?COMPACT_POSSIBLE_TUPLE:COMPACT_TUPLE;
     else if(shape==LIST_SHAPE) kind=COMPACT_LIST;
     else if(shape==LIST_OR_NIL_SHAPE) kind=COMPACT_LIST_OR_NIL;
@@ -89,6 +91,7 @@ static uint32_t expanded_shape(uint16_t compact)
     case COMPACT_BITSTRING:return BITSTRING_SHAPE;
     case COMPACT_APPEND_CONTEXT:return APPEND_CONTEXT_SHAPE;
     case COMPACT_EXCEPTION_COMPONENT:return arity==1?EXCEPTION_CLASS_SHAPE:arity==2?EXCEPTION_TRACE_SHAPE:0;
+    case COMPACT_ATOM:return ATOM_SHAPE;
     default:return 0;
     }
 }
@@ -105,7 +108,7 @@ static uint32_t expanded_y_shape(uint8_t compact)
                                 (compact&COMPACT_Y_ARITY_MASK));
     return expanded_shape(widened);
 }
-typedef struct { BeamOp *op; Flow in; size_t function; int reached,queued,terminal_x_exception; } Node;
+typedef struct { BeamOp *op; Flow in; size_t function; int reached,queued,terminal_x_exception,terminal_y_exception; Uint terminal_y_register; } Node;
 typedef struct {
     Node *nodes; size_t *labels,*queue,*parameter_offsets,*parameter_arities,*function_starts;
     uint32_t *return_shapes,*parameter_shapes,*parameter_candidates;
@@ -115,6 +118,7 @@ typedef struct {
 } Analysis;
 static int function_params_inferable(const LoaderState *,const BeamOp *);
 static int parameter_restarts_match(const Analysis *,size_t,size_t);
+static int parameter_starts_match_nofail(const Analysis *,size_t,size_t);
 static int function_parameter(const Analysis *,size_t,BeamOpArg);
 static void refine(Flow *,BeamOpArg,uint32_t);
 static int defined(const uint64_t *set,size_t index) { return (int)((set[index/64]>>(index%64))&1); }
@@ -140,9 +144,11 @@ static uint32_t shape(LoaderState *st,const Flow *f,BeamOpArg arg)
     if(arg.type==TAG_x) return expanded_shape(f->xs[reg]);
     if(arg.type==TAG_y) return expanded_y_shape(f->ys[reg]);
     if(arg.type==TAG_n) return NIL_SHAPE;
-    if(arg.type==TAG_a || arg.type==TAG_i) return KNOWN_NON_TUPLE;
+    if(arg.type==TAG_a) return ATOM_SHAPE;
+    if(arg.type==TAG_i) return KNOWN_NON_TUPLE;
     if(arg.type==TAG_q && lb_beam_program_literal(st->program,st->space->atoms,arg.val,&term)==LB_BEAM_OK) {
         if(is_tuple(term)) return TUPLE_SHAPE | (uint32_t)arityval(*tuple_val(term));
+        if(is_atom(term)) return ATOM_SHAPE;
         if(term==NIL) return NIL_SHAPE;
         if(is_list(term)) return LIST_SHAPE;
         if(lb_is_flatmap(term)) return MAP_SHAPE;
@@ -230,7 +236,7 @@ static void trim_live(Flow *f,size_t live)
 static int definitely_non_tuple(uint32_t shape)
 {
     return !(shape&TUPLE_SHAPE) &&
-        (shape==KNOWN_NON_TUPLE || shape==LIST_SHAPE || shape==LIST_OR_NIL_SHAPE ||
+        (shape==KNOWN_NON_TUPLE || shape==ATOM_SHAPE || shape==LIST_SHAPE || shape==LIST_OR_NIL_SHAPE ||
          shape==NIL_SHAPE || shape==APPEND_SHAPE || shape==COPYABLE_APPEND_SHAPE ||
          shape==MAP_SHAPE || shape==BITSTRING_SHAPE);
 }
@@ -258,7 +264,16 @@ static LbCodeStatus propagate(Analysis *w,size_t target,size_t function,const Fl
     REQUIRE(target<w->count && w->nodes[target].function==function);
     node=&w->nodes[target];
     Flow terminal;
-    if(node->terminal_x_exception) {
+    if(node->terminal_y_exception) {
+        Uint reg=node->terminal_y_register;
+        REQUIRE(flow->frame!=NO_FRAME && reg<flow->frame && roots(flow,0) && defined(flow->y,reg) &&
+                expanded_y_shape(flow->ys[reg])!=CONSUMED_VALUE);
+        terminal=*flow; terminal.frame=(size_t)reg+1; terminal.frame_allocation=NO_FRAME; terminal.heap=0;
+        for(r=(size_t)reg+1;r<MAX_REG;++r) {
+            terminal.y[r/64]&=~(UINT64_C(1)<<(r%64)); terminal.ys[r]=0;
+        }
+        flow=&terminal;
+    } else if(node->terminal_x_exception) {
         /* OTP shares X-only terminal error labels across differently sized
          * frames. Every incoming stack must be GC-safe, but no Y access,
          * deallocation or normal continuation is permitted after this join.
@@ -429,8 +444,19 @@ static int native_call_always_raises(const BifEntry *native,const Flow *flow)
          expanded_shape(flow->xs[0])==EXCEPTION_CLASS_SHAPE &&
          expanded_shape(flow->xs[2])==EXCEPTION_TRACE_SHAPE);
 }
-static int straight_line_local_always_raises(LoaderState *st,const Analysis *w,size_t target)
+static int raw_raise_has_literal_class(const Node *nodes,size_t index)
 {
+    while(index && nodes[index-1].op->op==genop_line_1) --index;
+    if(!index) return 0;
+    const BeamOp *move=nodes[index-1].op;
+    return move->op==genop_move_2 && move->a[0].type==TAG_a &&
+        move->a[1].type==TAG_x && move->a[1].val==0 &&
+        ((Eterm)move->a[0].val==am_error || (Eterm)move->a[0].val==am_exit ||
+         (Eterm)move->a[0].val==am_throw);
+}
+static int straight_line_local_always_raises_depth(LoaderState *st,const Analysis *w,size_t target,unsigned depth)
+{
+    if(depth>=16 || target>=w->count) return 0;
     size_t function=w->nodes[target].function;
     for(size_t i=target;i<w->count && w->nodes[i].function==function;++i) {
         const BeamOp *op=w->nodes[i].op;
@@ -440,6 +466,14 @@ static int straight_line_local_always_raises(LoaderState *st,const Analysis *w,s
         case genop_get_tuple_element_3: case genop_trim_2:
         case genop_call_2: case genop_call_ext_2:
             break;
+        case genop_call_only_2: case genop_call_last_3: {
+            if(op->arity<2 || op->a[1].type!=TAG_f || op->a[1].val<=0 ||
+               (Uint)op->a[1].val>=st->label_count) return 0;
+            size_t callee=w->labels[op->a[1].val];
+            if(callee==SIZE_MAX || callee==0 || callee>=w->count ||
+               w->nodes[callee-1].op->op!=genop_int_func_start_5) return 0;
+            return straight_line_local_always_raises_depth(st,w,callee,depth+1);
+        }
         case genop_call_ext_only_2: case genop_call_ext_last_3:
             return op->a[1].type==TAG_u && (Uint)op->a[1].val<st->beam.imports.count &&
                 native_always_raises(st->bif_imports[op->a[1].val]);
@@ -449,6 +483,8 @@ static int straight_line_local_always_raises(LoaderState *st,const Analysis *w,s
     }
     return 0;
 }
+static int straight_line_local_always_raises(LoaderState *st,const Analysis *w,size_t target)
+{ return straight_line_local_always_raises_depth(st,w,target,0); }
 static uint32_t native_return_shape(LoaderState *st,size_t import)
 {
     if(import>=st->beam.imports.count || !st->bif_imports) return 0;
@@ -507,6 +543,34 @@ static int position_check_after(const Node *nodes,size_t count,size_t index,Beam
     }
     return 0;
 }
+static int immediate_setelement_result(const LoaderState *st,const Node *nodes,size_t index)
+{
+    size_t previous=index;
+    while(previous && nodes[previous-1].op->op==genop_line_1) --previous;
+    if(!previous) return 0;
+    const BeamOp *op=nodes[previous-1].op;
+    if(op->op!=genop_call_ext_2 || op->a[0].type!=TAG_u || op->a[0].val!=3 ||
+       op->a[1].type!=TAG_u || (Uint)op->a[1].val>=st->beam.imports.count || !st->bif_imports)
+        return 0;
+    return st->bif_imports[op->a[1].val]==&st->space->engine->bifs[BIF_setelement_3];
+}
+static uint32_t setelement_result_shape(LoaderState *st,const Flow *flow,const Node *nodes,size_t index)
+{
+    uint32_t tuple_shape=shape(st,flow,(BeamOpArg){TAG_x,1});
+    uint32_t minimum=tuple_shape&ARITY_MASK; Sint position=0; size_t previous=index;
+    while(previous && nodes[previous-1].op->op==genop_line_1) --previous;
+    if(previous) {
+        const BeamOp *move=nodes[previous-1].op;
+        if(move->op==genop_move_2 && move->a[0].type==TAG_i &&
+           move->a[1].type==TAG_x && move->a[1].val==0) position=move->a[0].val;
+    }
+    if((tuple_shape&TUPLE_SHAPE) && !(tuple_shape&POSSIBLE_TUPLE_ARITY)) return tuple_shape;
+    if(position<1 || (Uint)position>MAX_ARITYVAL) {
+        return tuple_shape&TUPLE_SHAPE?TUPLE_SHAPE|POSSIBLE_TUPLE_ARITY|minimum:0;
+    }
+    if((Uint)position>minimum) minimum=(Uint)position;
+    return TUPLE_SHAPE|POSSIBLE_TUPLE_ARITY|minimum;
+}
 static int plain_bif_allowed(const LbEngine *engine,const BifEntry *native,size_t arity)
 {
     static const unsigned unary[]={BIF_is_function_1,BIF_map_size_1,BIF_is_integer_1,BIF_hd_1,BIF_tl_1,BIF_is_list_1,BIF_not_1,BIF_is_atom_1,BIF_is_binary_1,
@@ -533,7 +597,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         p->error.stage="operation arity"; p->error.offset=op->offset;
         REQUIRE(op->op<NUM_GENERIC_OPS);
         switch(op->op) {
-        case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_label_1:case genop_line_1:case genop_nif_start_0:
+        case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_i_nif_padding_0:case genop_label_1:case genop_line_1:case genop_nif_start_0:
+        case genop_on_load_0:break;
         case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_update_record_5:case genop_return_0:case genop_send_0:
         case genop_loop_rec_2:case genop_loop_rec_end_1:case genop_remove_message_0:
         case genop_wait_1:case genop_wait_timeout_2:case genop_timeout_0:
@@ -548,9 +613,9 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_is_binary_2:case genop_is_list_2:case genop_is_integer_2:case genop_is_map_2:case genop_is_function_2:case genop_is_function2_3:
         case genop_is_float_2:case genop_is_number_2:case genop_is_port_2:case genop_is_boolean_2:case genop_is_bitstr_2:
         case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:case genop_select_val_3:
-        case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_get_list_3:
+        case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_set_tuple_element_3:case genop_get_list_3:
         case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif1_5:case genop_gc_bif2_6:
-        case genop_bs_match_3:case genop_bs_match_string_4:case genop_bs_get_utf8_5:case genop_bs_skip_utf8_4:case genop_bs_skip_bits2_5:case genop_bs_get_binary2_7:case genop_bs_get_integer2_7:case genop_bs_start_match3_4:case genop_bs_start_match4_4:case genop_bs_get_position_3:case genop_bs_set_position_2:case genop_bs_get_tail_3:case genop_gc_bif3_7:case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_make_fun3_3:
+        case genop_bs_match_3:case genop_bs_match_string_4:case genop_bs_get_utf8_5:case genop_bs_skip_utf8_4:case genop_bs_get_float2_7:case genop_bs_get_utf16_5:case genop_bs_skip_utf16_4:case genop_bs_get_utf32_5:case genop_bs_skip_utf32_4:case genop_bs_skip_bits2_5:case genop_bs_get_binary2_7:case genop_bs_get_integer2_7:case genop_bs_start_match3_4:case genop_bs_start_match4_4:case genop_bs_get_position_3:case genop_bs_set_position_2:case genop_bs_get_tail_3:case genop_gc_bif3_7:case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_make_fun3_3:
         case genop_new_map_3:case genop_put_map_assoc_5:case genop_put_map_exact_5:
         case genop_get_map_elements_3:case genop_has_map_fields_3:
         case genop_fconv_2:case genop_fmove_2:case genop_fload_2:case genop_fstore_2:case genop_fadd_4:case genop_fsub_4:case genop_i_fsub_3:case genop_fnegate_3:case genop_fmul_4:case genop_i_fmul_3:case genop_fdiv_4:case genop_i_fdiv_3:
@@ -587,10 +652,16 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
      * potentially long label chain at every dataflow edge. */
     for(i=n;i>0;--i) {
         Node *node=&nodes[i-1]; op=node->op;
-        node->terminal_x_exception=(op->op==genop_badmatch_1 || op->op==genop_case_end_1 ||
-                                    op->op==genop_badrecord_1) && op->a[0].type==TAG_x;
-        if((op->op==genop_label_1 || op->op==genop_line_1) && i<n && nodes[i].function==node->function)
+        node->terminal_x_exception=op->op==genop_if_end_0 ||
+            ((op->op==genop_badmatch_1 || op->op==genop_case_end_1 ||
+              op->op==genop_badrecord_1) && op->a[0].type==TAG_x);
+        node->terminal_y_exception=op->op==genop_badmatch_1 && op->a[0].type==TAG_y;
+        node->terminal_y_register=node->terminal_y_exception?(Uint)op->a[0].val:0;
+        if((op->op==genop_label_1 || op->op==genop_line_1) && i<n && nodes[i].function==node->function) {
             node->terminal_x_exception=nodes[i].terminal_x_exception;
+            node->terminal_y_exception=nodes[i].terminal_y_exception;
+            node->terminal_y_register=nodes[i].terminal_y_register;
+        }
     }
     p->error.stage="lambda target admission";
     for(i=0;i<p->lambda_count;++i) {
@@ -611,7 +682,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         if(++steps>16777216) { p->error.stage="flow analysis step limit"; return LB_CODE_LIMIT; }
         op=nodes[index].op; a=op->a; p->error.stage=gen_opc[op->op].name; p->error.offset=op->offset;
         switch(op->op) {
-        case genop_int_func_start_5:case genop_label_1:case genop_line_1:case genop_nif_start_0:break;
+        case genop_int_func_start_5:case genop_label_1:case genop_line_1:case genop_nif_start_0:case genop_on_load_0:break;
+        case genop_i_nif_padding_0:terminal=1;break;
         case genop_fconv_2:
             REQUIRE(source(st,&f,a[0]) && float_register(a[1])); break;
         case genop_fmove_2:
@@ -711,6 +783,20 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_put_list_3:
             REQUIRE(f.heap>=2 && source(st,&f,a[0]) && source(st,&f,a[1]));
             REQUIRE(destination(&f,a[2],LIST_SHAPE)); f.heap-=2; break;
+        case genop_set_tuple_element_3: {
+            uint32_t tuple_shape;
+            p->error.stage="set_tuple_element element admission";
+            REQUIRE(source(st,&f,a[0]));
+            p->error.stage="set_tuple_element fresh tuple proof";
+            REQUIRE(a[1].type==TAG_x && a[1].val==0 && immediate_setelement_result(st,nodes,index));
+            tuple_shape=shape(st,&f,a[1]);
+            p->error.stage="set_tuple_element tuple shape admission";
+            REQUIRE(tuple_shape&TUPLE_SHAPE);
+            p->error.stage="set_tuple_element position admission";
+            /* The opcode offset is zero-based from the first tuple element. */
+            REQUIRE(a[2].type==TAG_u && (Uint)a[2].val<(tuple_shape&ARITY_MASK));
+            break;
+        }
         case genop_get_tuple_element_3:
             REQUIRE(source(st,&f,a[0]) && a[1].type==TAG_u);
             REQUIRE(a[0].type!=TAG_x || ((Uint)a[0].val&REG_MASK)!=MAX_REG-1);
@@ -902,7 +988,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             trim_live(&f,(Uint)a[2].val);
             REQUIRE(destination(&f,a[4],0)); break;
         }
-        case genop_bs_skip_utf8_4: {
+        case genop_bs_skip_utf8_4:case genop_bs_skip_utf32_4: {
             int has_fail=label(st,a[0]);
             REQUIRE((has_fail || (a[0].type==TAG_p && !a[0].val)) &&
                     match_context_source(w,st,&f,a[1],nodes[index].function));
@@ -914,7 +1000,50 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 failed=f; failure=&failed;
             }
             trim_live(&f,(Uint)a[2].val);
-            REQUIRE(destination(&f,(BeamOpArg){TAG_x,MAX_REG-1},0)); break;
+            REQUIRE(!defined(f.x,MAX_REG-1) || expanded_shape(f.xs[MAX_REG-1])==CONSUMED_VALUE);
+            REQUIRE(destination(&f,(BeamOpArg){TAG_x,MAX_REG-1},KNOWN_NON_TUPLE));
+            define(f.x,MAX_REG-1); f.xs[MAX_REG-1]=compact_shape(CONSUMED_VALUE); break;
+        }
+        case genop_bs_get_float2_7: {
+            REQUIRE(label(st,a[0]) && match_context_source(w,st,&f,a[1],nodes[index].function) &&
+                    a[2].type==TAG_u && (Uint)a[2].val<=MAX_REG && roots(&f,(Uint)a[2].val) &&
+                    source(st,&f,a[3]) && a[4].type==TAG_u && a[4].val>0 && a[5].type==TAG_u &&
+                    (a[6].type==TAG_x || a[6].type==TAG_y));
+            if(a[1].type==TAG_x) REQUIRE(((Uint)a[1].val&REG_MASK)<(Uint)a[2].val);
+            alternate=labels[a[0].val]; REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+            failed=f; failure=&failed; trim_live(&f,(Uint)a[2].val);
+            REQUIRE(destination(&f,a[6],KNOWN_NON_TUPLE)); break;
+        }
+        case genop_bs_get_utf16_5:case genop_bs_skip_utf16_4: {
+            int skip=op->op==genop_bs_skip_utf16_4,has_fail=label(st,a[0]);
+            REQUIRE((has_fail || (a[0].type==TAG_p && !a[0].val)) &&
+                    match_context_source(w,st,&f,a[1],nodes[index].function));
+            REQUIRE(a[2].type==TAG_u && a[3].type==TAG_u &&
+                    (skip || (a[4].type==TAG_x || a[4].type==TAG_y)));
+            if(has_fail) {
+                alternate=labels[a[0].val]; REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+                failed=f; failure=&failed;
+            }
+            REQUIRE(destination(&f,skip?(BeamOpArg){TAG_x,MAX_REG-1}:a[4],KNOWN_NON_TUPLE)); break;
+        }
+        case genop_bs_get_utf32_5: {
+            int has_fail=label(st,a[0]);
+            REQUIRE((has_fail || (a[0].type==TAG_p && !a[0].val)) &&
+                    match_context_source(w,st,&f,a[1],nodes[index].function));
+            REQUIRE(a[2].type==TAG_u && (Uint)a[2].val<=MAX_REG && roots(&f,(Uint)a[2].val) &&
+                    a[3].type==TAG_u && (a[4].type==TAG_x || a[4].type==TAG_y));
+            REQUIRE(a[1].type!=TAG_x || ((Uint)a[1].val&REG_MASK)<(Uint)a[2].val);
+            if(has_fail) {
+                alternate=labels[a[0].val]; REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+                failed=f; failure=&failed;
+            }
+            trim_live(&f,(Uint)a[2].val);
+            REQUIRE(!defined(f.x,MAX_REG-1) || expanded_shape(f.xs[MAX_REG-1])==CONSUMED_VALUE);
+            REQUIRE(destination(&f,a[4],KNOWN_NON_TUPLE));
+            if(a[4].type!=TAG_x || ((Uint)a[4].val&REG_MASK)!=MAX_REG-1) {
+                define(f.x,MAX_REG-1); f.xs[MAX_REG-1]=compact_shape(CONSUMED_VALUE);
+            }
+            break;
         }
         case genop_bs_skip_bits2_5: {
             REQUIRE(label(st,a[0]) && match_context_source(w,st,&f,a[1],nodes[index].function) &&
@@ -939,7 +1068,13 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 failed=f; failure=&failed;
             }
             trim_live(&f,(Uint)a[2].val);
-            REQUIRE(destination(&f,a[6],0)); f.heap=0; break;
+            if(a[3].type==TAG_i)
+                REQUIRE(!defined(f.x,MAX_REG-1) || expanded_shape(f.xs[MAX_REG-1])==CONSUMED_VALUE);
+            REQUIRE(destination(&f,a[6],0));
+            if(a[3].type==TAG_i && !(a[6].type==TAG_x && ((Uint)a[6].val&REG_MASK)==MAX_REG-1)) {
+                define(f.x,MAX_REG-1); f.xs[MAX_REG-1]=compact_shape(CONSUMED_VALUE);
+            }
+            f.heap=0; break;
         }
         case genop_bs_get_binary2_7: {
             REQUIRE(label(st,a[0]) && match_context_source(w,st,&f,a[1],nodes[index].function));
@@ -964,6 +1099,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
             failed=f; failure=&failed;
             Uint available=0,packed=0;
+            int context_overwritten=0;
             for(unsigned pos=3;pos<op->arity;) {
                 p->error.stage="bs_match command admission";
                 REQUIRE(a[pos].type==TAG_a);
@@ -986,18 +1122,22 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                     REQUIRE(op->arity-pos>=6 && a[pos+1].type==TAG_u && roots(&f,(Uint)a[pos+1].val));
                     p->error.stage="bs_match integer flags admission";
                     REQUIRE(bs_match_flags_valid(st,a[pos+2]));
-                    p->error.stage="bs_match integer unit admission";
-                    REQUIRE(a[pos+3].type==TAG_u && a[pos+4].type==TAG_u && a[pos+4].val==1);
-                    Uint bits=(Uint)a[pos+3].val;
+                    p->error.stage="bs_match integer size/unit admission";
+                    REQUIRE(a[pos+3].type==TAG_u && a[pos+4].type==TAG_u &&
+                            a[pos+3].val>0 && a[pos+4].val>0 &&
+                            (Uint)a[pos+3].val<=(Uint)-1/(Uint)a[pos+4].val);
+                    Uint bits=(Uint)a[pos+3].val*(Uint)a[pos+4].val;
                     p->error.stage="bs_match integer size admission";
                     /* Wide fields become bignums after the generator's heap reservation. */
-                    REQUIRE(bits>0 && bits<=65536 && bits<=available);
+                    REQUIRE(bits<=65536 && bits<=available);
                     if(a[pos+5].type==a[1].type && a[pos+5].val==a[1].val) {
                         p->error.stage="bs_match integer context-alias admission";
                         REQUIRE(pos+6==op->arity);
                     }
                     p->error.stage="bs_match integer destination admission";
-                    REQUIRE(destination(&f,a[pos+5],0)); available-=bits; pos+=6;
+                    REQUIRE(destination(&f,a[pos+5],0));
+                    context_overwritten|=same_register(a[pos+5],a[1]);
+                    available-=bits; pos+=6;
                 } else if(command==am_Eq) {
                     p->error.stage="bs_match equality layout admission";
                     REQUIRE(op->arity-pos>=4 && bs_match_empty_flags_valid(st,a[pos+1]) &&
@@ -1023,6 +1163,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                     if(a[pos+5].type==a[1].type && a[pos+5].val==a[1].val)
                         REQUIRE(pos+6==op->arity);
                     REQUIRE(destination(&f,a[pos+5],BITSTRING_SHAPE));
+                    context_overwritten|=same_register(a[pos+5],a[1]);
                     available-=bits; pos+=6;
                 } else if(command==am_get_tail) {
                     p->error.stage="bs_match get_tail admission";
@@ -1032,9 +1173,12 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                     REQUIRE(a[1].type!=TAG_x || ((Uint)a[1].val&REG_MASK)<live);
                     if(a[pos+3].type==a[1].type && a[pos+3].val==a[1].val) REQUIRE(pos+4==op->arity);
                     trim_live(&f,live);
-                    REQUIRE(destination(&f,a[pos+3],BITSTRING_SHAPE)); f.heap=0; pos+=4;
+                    REQUIRE(destination(&f,a[pos+3],BITSTRING_SHAPE));
+                    context_overwritten|=same_register(a[pos+3],a[1]);
+                    f.heap=0; pos+=4;
                 } else return LB_CODE_UNSUPPORTED; /* other complete generator paths have no execution authority */
             }
+            if(!context_overwritten) refine(&f,a[1],MATCH_CONTEXT_SHAPE);
             break;
         }
         case genop_bs_start_match4_4:
@@ -1117,10 +1261,10 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             REQUIRE(destination(&f,(BeamOpArg){TAG_x,0},expanded_shape(f.xs[1]))); break;
         case genop_return_0:REQUIRE(!f.matching && f.frame==NO_FRAME && source(st,&f,(BeamOpArg){TAG_x,0})); terminal=1;break;
         case genop_call_fun_1:case genop_call_fun2_3:
-            REQUIRE(!f.matching); r=op->op==genop_call_fun_1?0:1;
+            r=op->op==genop_call_fun_1?0:1;
             REQUIRE(a[r].type==TAG_u && (Uint)a[r].val<=MAX_ARG && f.frame!=NO_FRAME);
             live=(Uint)a[r].val; REQUIRE(arguments(&f,live));
-            REQUIRE(source(st,&f,op->op==genop_call_fun_1?(BeamOpArg){TAG_x,(Sint)live}:a[2]));
+            REQUIRE(root_source(st,&f,op->op==genop_call_fun_1?(BeamOpArg){TAG_x,(Sint)live}:a[2]));
             forget_append_facts(&f,!append_passed_to_call(&f,live));
             memset(f.x,0,sizeof(f.x)); memset(f.xs,0,sizeof(f.xs)); define(f.x,0); f.heap=0; break;
         case genop_apply_1:case genop_apply_last_2:
@@ -1159,7 +1303,11 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 imp=(Uint)a[1].val;
                 p->error.stage="external call arity admission";
                 REQUIRE(live==st->beam.imports.entries[imp].arity);
-                if(op->op==genop_call_ext_2) returned=native_return_shape(st,imp);
+                if(op->op==genop_call_ext_2) {
+                    returned=native_return_shape(st,imp);
+                    if(st->bif_imports[imp]==&st->space->engine->bifs[BIF_setelement_3])
+                        returned=setelement_result_shape(st,&f,nodes,index);
+                }
             }
             if(local) REQUIRE(local_arguments(&f,live));
             else {
@@ -1185,9 +1333,26 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                     if(w->parameter_shapes[slot]!=MATCH_CONTEXT_SHAPE) continue;
                     uint32_t actual=expanded_shape(f.xs[arg]);
                     const char *stage=p->error.stage;
-                    p->error.stage="interprocedural match-context callsite proof";
-                    REQUIRE(actual==MATCH_CONTEXT_SHAPE || actual==APPEND_CONTEXT_SHAPE ||
-                            (actual==BITSTRING_SHAPE && parameter_restarts_match(w,callee,arg)));
+                    /* Unknown terms may cross this edge only when the callee
+                     * immediately validates them with a no-fail match start;
+                     * a failed type check remains a guest exception. */
+                    int proven=actual==MATCH_CONTEXT_SHAPE || actual==APPEND_CONTEXT_SHAPE ||
+                        (actual==BITSTRING_SHAPE && parameter_restarts_match(w,callee,arg)) ||
+                        (actual==0 && parameter_starts_match_nofail(w,callee,arg));
+                    if(!proven) {
+                        static const char *const failures[]={
+                            "match-context callsite proof argument 0", "match-context callsite proof argument 1",
+                            "match-context callsite proof argument 2", "match-context callsite proof argument 3",
+                            "match-context callsite proof argument 4", "match-context callsite proof argument 5",
+                            "match-context callsite proof argument 6", "match-context callsite proof argument 7"
+                        };
+                        p->error.stage=actual==BITSTRING_SHAPE?
+                            (arg<sizeof(failures)/sizeof(failures[0])?failures[arg]:
+                             "match-context callsite proof argument beyond 7"):
+                            (actual==0?"match-context callsite argument shape is unknown":
+                             "match-context callsite argument has incompatible shape");
+                        return LB_CODE_FORMAT;
+                    }
                     p->error.stage=stage;
                 }
             }
@@ -1297,7 +1462,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                 refine_tuple_copies(&f,nodes,index,a[1],(s&TUPLE_SHAPE)?s&~POSSIBLE_TUPLE_ARITY:TUPLE_SHAPE);
             } else if(op->op==genop_is_binary_2 || op->op==genop_is_bitstr_2)
                 refine(&f,a[1],BITSTRING_SHAPE);
-            else if(op->op==genop_is_atom_2 || op->op==genop_is_integer_2 ||
+            else if(op->op==genop_is_atom_2) refine(&f,a[1],ATOM_SHAPE);
+            else if(op->op==genop_is_integer_2 ||
                       op->op==genop_is_float_2 || op->op==genop_is_number_2 ||
                       op->op==genop_is_pid_2 ||
                       op->op==genop_is_reference_2 || op->op==genop_is_port_2 ||
@@ -1356,7 +1522,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_jump_1:REQUIRE(label(st,a[0])); next=labels[a[0].val]; break;
         case genop_raw_raise_0:
             for(r=0;r<3;++r) REQUIRE(source(st,&f,(BeamOpArg){TAG_x,(Sint)r}));
-            if(shape(st,&f,(BeamOpArg){TAG_x,0})==EXCEPTION_CLASS_SHAPE &&
+            if((shape(st,&f,(BeamOpArg){TAG_x,0})==EXCEPTION_CLASS_SHAPE ||
+                shape(st,&f,(BeamOpArg){TAG_x,0})==ATOM_SHAPE || raw_raise_has_literal_class(nodes,index)) &&
                shape(st,&f,(BeamOpArg){TAG_x,2})==EXCEPTION_TRACE_SHAPE) terminal=1;
             else refine(&f,(BeamOpArg){TAG_x,0},KNOWN_NON_TUPLE);
             break;
@@ -1407,14 +1574,97 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
     }
     return LB_CODE_OK;
 }
+static int parameter_restarts_match_depth(const Analysis *,size_t,size_t,unsigned);
 static int parameter_restarts_match(const Analysis *w,size_t function,size_t parameter)
+{ return parameter_restarts_match_depth(w,function,parameter,0); }
+/* Verification sees upstream bs_start_match4 before its transform. Accept the
+ * unknown-input case only if that checked operation is the first body opcode. */
+static int parameter_starts_match_nofail(const Analysis *w,size_t function,size_t parameter)
 {
     size_t start=w->function_starts[function];
     for(size_t i=start+1;i<w->count && w->nodes[i].function==function;++i) {
         const BeamOp *op=w->nodes[i].op;
         if(op->op==genop_label_1 || op->op==genop_line_1) continue;
-        return (op->op==genop_bs_start_match3_4 || op->op==genop_bs_start_match4_4) &&
-               op->a[2].type==TAG_x && (Uint)op->a[2].val==parameter;
+        return op->op==genop_bs_start_match4_4 && op->a[0].type==TAG_a &&
+            op->a[0].val==am_no_fail && op->a[1].type==TAG_u &&
+            op->a[2].type==TAG_x && (Uint)op->a[2].val==parameter;
+    }
+    return 0;
+}
+static int parameter_restarts_match_depth(const Analysis *w,size_t function,size_t parameter,unsigned depth)
+{
+    size_t start=w->function_starts[function]; int restarted=0,unsafe_use=0;
+    int x_origin[MAX_REG],y_origin[MAX_REG];
+    if(depth>64 || parameter>=MAX_REG) return 0;
+    for(size_t reg=0;reg<MAX_REG;++reg) { x_origin[reg]=-1; y_origin[reg]=-1; }
+    x_origin[parameter]=(int)parameter;
+    for(size_t i=start+1;i<w->count && w->nodes[i].function==function;++i) {
+        const BeamOp *op=w->nodes[i].op; BeamOpArg ctx;
+        if(op->op==genop_label_1 || op->op==genop_line_1) continue;
+        if(op->op==genop_move_2) {
+            BeamOpArg src=op->a[0],dst=op->a[1]; int origin=-1;
+            if(src.type==TAG_x && (Uint)src.val<MAX_REG) origin=x_origin[(Uint)src.val&REG_MASK];
+            if(src.type==TAG_y && (Uint)src.val<MAX_REG) origin=y_origin[(Uint)src.val&REG_MASK];
+            if(dst.type==TAG_x && (Uint)dst.val<MAX_REG) x_origin[(Uint)dst.val&REG_MASK]=origin;
+            if(dst.type==TAG_y && (Uint)dst.val<MAX_REG) y_origin[(Uint)dst.val&REG_MASK]=origin;
+            continue;
+        }
+        if(op->op==genop_bs_start_match3_4 || op->op==genop_bs_start_match4_4) {
+            unsigned source_index=op->op==genop_bs_start_match3_4?1:2;
+            BeamOpArg src=op->a[source_index],dst=op->a[3]; int origin=-1;
+            if(src.type==TAG_x && (Uint)src.val<MAX_REG) origin=x_origin[(Uint)src.val&REG_MASK];
+            if(src.type==TAG_y && (Uint)src.val<MAX_REG) origin=y_origin[(Uint)src.val&REG_MASK];
+            if(origin==(int)parameter) restarted=1;
+            if(dst.type==TAG_x && (Uint)dst.val<MAX_REG) x_origin[(Uint)dst.val&REG_MASK]=origin;
+            if(dst.type==TAG_y && (Uint)dst.val<MAX_REG) y_origin[(Uint)dst.val&REG_MASK]=origin;
+            continue;
+        }
+        ctx=(BeamOpArg){TAG_x,-1};
+        if(op->op==genop_bs_match_3) ctx=op->a[1];
+        else if(op->op==genop_bs_get_position_3 || op->op==genop_bs_set_position_2 ||
+                op->op==genop_bs_get_tail_3) ctx=op->a[0];
+        if(ctx.type==TAG_x && (Uint)ctx.val<MAX_REG &&
+           x_origin[(Uint)ctx.val&REG_MASK]==(int)parameter && !restarted) unsafe_use=1;
+        if(ctx.type==TAG_y && (Uint)ctx.val<MAX_REG &&
+           y_origin[(Uint)ctx.val&REG_MASK]==(int)parameter && !restarted) unsafe_use=1;
+    }
+    if(restarted) return !unsafe_use;
+    if(unsafe_use) return 0;
+
+    /* A small prologue may forward the binary through moves before the first
+     * operation that can branch or mutate registers. Follow only those calls. */
+    {
+        int x_origin[MAX_REG],y_origin[MAX_REG];
+        for(size_t reg=0;reg<MAX_REG;++reg) { x_origin[reg]=-1; y_origin[reg]=-1; }
+        if(parameter>=MAX_REG) return 0;
+        x_origin[parameter]=(int)parameter;
+        for(size_t i=start+1;i<w->count && w->nodes[i].function==function;++i) {
+            const BeamOp *op=w->nodes[i].op;
+            if(op->op==genop_label_1 || op->op==genop_line_1 || op->op==genop_init_yregs_1 ||
+               op->op==genop_allocate_2 || op->op==genop_allocate_heap_3) continue;
+            if(op->op==genop_move_2) {
+                BeamOpArg src=op->a[0],dst=op->a[1]; int origin=-1;
+                if(src.type==TAG_x && (Uint)src.val<MAX_REG) origin=x_origin[(Uint)src.val&REG_MASK];
+                if(src.type==TAG_y && (Uint)src.val<MAX_REG) origin=y_origin[(Uint)src.val&REG_MASK];
+                if(dst.type==TAG_x && (Uint)dst.val<MAX_REG) x_origin[(Uint)dst.val&REG_MASK]=origin;
+                if(dst.type==TAG_y && (Uint)dst.val<MAX_REG) y_origin[(Uint)dst.val&REG_MASK]=origin;
+                continue;
+            }
+            if(op->op==genop_call_2 || op->op==genop_call_only_2 || op->op==genop_call_last_3) {
+                size_t target,callee,arity=(Uint)op->a[0].val;
+                if(op->a[1].type!=TAG_f || op->a[1].val<=0 || (Uint)op->a[1].val>=w->count) return 0;
+                target=w->labels[op->a[1].val]; if(target>=w->count) return 0;
+                callee=w->nodes[target].function;
+                if(!callee || arity!=w->parameter_arities[callee]) return 0;
+                for(size_t arg=0;arg<arity && arg<MAX_REG;++arg) {
+                    size_t slot=w->parameter_offsets[callee]+arg;
+                    if(x_origin[arg]==(int)parameter && w->parameter_shapes[slot]==MATCH_CONTEXT_SHAPE &&
+                       parameter_restarts_match_depth(w,callee,arg,depth+1)) return 1;
+                }
+                return 0;
+            }
+            break;
+        }
     }
     return 0;
 }

@@ -173,7 +173,7 @@ Status Isolate::load_module(ByteView input) {
         return load_modules(std::vector<ByteView>{input});
     } catch (const std::bad_alloc&) { return Error{ErrorCode::limit, {}}; }
 }
-Status Isolate::load_modules(const std::vector<ByteView>& modules) {
+Status Isolate::load_modules(const std::vector<ByteView>& modules, ModuleLoadOptions options) {
     try {
         if (!usable(impl_)) return invalid_handle();
         std::vector<LbBytesView> views;
@@ -181,7 +181,10 @@ Status Isolate::load_modules(const std::vector<ByteView>& modules) {
         for (const auto& module : modules) views.push_back(bytes(module));
 
         LbWorldLoadReport report{};
-        const auto status = lb_world_load_batch_report(impl_->runtime, views.data(), views.size(), &report);
+        const auto policy=options.on_load==OnLoadPolicy::defer_denied_nif?
+            LB_WORLD_ON_LOAD_DEFER_DENIED_NIF:LB_WORLD_ON_LOAD_REJECT;
+        const auto status=lb_world_load_batch_report_with_policy(
+            impl_->runtime,views.data(),views.size(),policy,&report);
         if (status != LB_WORLD_OK) return load_error(status, report);
         return std::nullopt;
     } catch (const std::bad_alloc&) {
