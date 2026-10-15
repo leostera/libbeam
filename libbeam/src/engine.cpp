@@ -55,7 +55,8 @@ LbBytesView name(std::string_view view) {
 }
 Error load_error(LbWorldStatus status, const LbWorldLoadReport& report) {
     auto error = world_error(status);
-    if (status == LB_WORLD_BAD_BEAM || status == LB_WORLD_UNSUPPORTED || status == LB_WORLD_MEMORY_LIMIT) {
+    if (status == LB_WORLD_BAD_BEAM || status == LB_WORLD_UNSUPPORTED || status == LB_WORLD_MEMORY_LIMIT ||
+        status == LB_WORLD_LIMIT) {
         const std::string stage = report.stage ? report.stage : "unknown";
         error.message += " (stage=" + stage +
             (stage == "unresolved import" ? ", import_index=" : ", offset=") +

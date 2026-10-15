@@ -62,7 +62,7 @@ inline void adapt_make_fun(std::string& body) {
 }
 inline void adapt_select_val(std::string& body) {
     replace_all(body, "int arity = Size.val + 3;",
-        "int arity;\n  if (Size.type!=TAG_u || Size.val<2 || Size.val%2 || Size.val>MAX_REG*2) { S->program->error.status=LB_BEAM_LIMIT; return NULL; }\n  arity = Size.val + 3;");
+        "int arity;\n  /* Unicode-security tables are larger than the X-register file. */\n  if (Size.type!=TAG_u || Size.val<2 || Size.val%2 || Size.val>65536) { S->program->error.status=LB_BEAM_LIMIT; return NULL; }\n  arity = Size.val + 3;");
     replace_all(body, "erts_alloc(ERTS_ALC_T_LOADER_TMP, op->arity * sizeof(BeamOpArg))",
         "lb_palloc(S->program, op->arity, sizeof(BeamOpArg))");
     replace_all(body, "op->a[0] = Src;", "if (!op->a) return NULL;\n    op->a[0] = Src;");
