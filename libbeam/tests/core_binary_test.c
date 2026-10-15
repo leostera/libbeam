@@ -55,6 +55,15 @@ static void component_test(void)
     CHECK(m.live==live && m.bytes==bytes); m.fail=0;
     CHECK(lb_bitstring_build(d,&source,&top,data,513,TAG_LITERAL_PTR,&first)==LB_ALLOC_OK);
     CHECK(refcount(first)==1 && is_literal_ptr(first) && is_literal_ptr(((LbSubBits *)boxed_val(first))->orig));
+    {
+        Eterm slice_storage[LB_REFC_BITS_WORDS],slice; Eterm *slice_top=slice_storage;
+        LbOffHeap slice_offheap={0}; LbSubBits cursor=*(LbSubBits *)boxed_val(first);
+        cursor.base_flags=(Uint)binary_ref(first)->val->orig_bytes|LB_SUB_MUTABLE;
+        cursor.start=5; cursor.end=513;
+        CHECK(lb_bitstring_slice(d,&slice_offheap,&slice_top,&cursor,16,&slice)==LB_ALLOC_OK);
+        CHECK(lb_bitstring_view(slice,&view) && view.bit_offset==5 && view.bit_size==16);
+        CHECK(refcount(first)==2); lb_offheap_clear(&slice_offheap); CHECK(refcount(first)==1);
+    }
     CHECK(lb_bitstring_view(first,&view) && !view.bit_offset && view.bit_size==513 && view.data[64]==0x80);
     memset(data,0,sizeof(data)); CHECK(view.data[0]==0xff);
     CHECK(lb_bitstring_build(d,&source,&top,data,520,TAG_LITERAL_PTR,&second)==LB_ALLOC_OK);

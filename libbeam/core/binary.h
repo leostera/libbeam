@@ -44,6 +44,7 @@ typedef struct {
 #define LB_BIN_REF_WORDS (sizeof(LbBinRef)/sizeof(Eterm))
 #define LB_SUB_BITS_WORDS (sizeof(LbSubBits)/sizeof(Eterm))
 #define LB_REFC_BITS_WORDS (LB_BIN_REF_WORDS+LB_SUB_BITS_WORDS)
+#define LB_BITSTRING_TAIL_HEAP_NEED 10
 #define LB_HEADER_BIN_REF _make_header(LB_BIN_REF_WORDS-1,BIN_REF_SUBTAG)
 #define LB_HEADER_SUB_BITS _make_header(LB_SUB_BITS_WORDS-1,SUB_BITS_SUBTAG)
 _Static_assert(sizeof(_Atomic Uint)==sizeof(Uint), "native reference-count word");
@@ -73,6 +74,10 @@ void lb_offheap_sweep(LbOffHeap *); /* after forwarding; before old heap release
  * Frozen volatile views resolve/canonicalize the destination only. Pin writable
  * backing explicitly before copying; no mutation of the source on failure. */
 int lb_bitstring_copy_ref(const LbSubBits *,LbOffHeap *,Eterm **heap,Eterm *out);
+LbAllocStatus lb_bitstring_tail(LbAllocDomain *,LbOffHeap *,Eterm **heap,
+                                const LbSubBits *,Eterm *out);
+LbAllocStatus lb_bitstring_slice(LbAllocDomain *,LbOffHeap *,Eterm **heap,
+                                 const LbSubBits *,size_t bits,Eterm *out);
 
 typedef struct {
     const unsigned char *data;

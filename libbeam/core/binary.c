@@ -168,6 +168,74 @@ int lb_bitstring_copy_ref(const LbSubBits *source,LbOffHeap *offheap,Eterm **hea
     link_ref(offheap,ref); *heap+=LB_REFC_BITS_WORDS; *out=make_boxed((Eterm *)sub);
     return 1;
 }
+static LbAllocStatus bitstring_build_slice(LbAllocDomain *domain,LbOffHeap *offheap,Eterm **heap,
+                                           const unsigned char *source,size_t source_bits,
+                                           size_t offset,size_t bits,Eterm *out)
+{
+    size_t words,size,source_bytes; unsigned char *destination; LbBinary *binary=NULL; Eterm result;
+    if(!domain || !offheap || !heap || !*heap || !_is_taggable_pointer(*heap) || !out ||
+       (bits && !source) || bits>8u*(size_t)LB_MAX_BINARY_BYTES || offset>source_bits ||
+       bits>source_bits-offset) return LB_ALLOC_INVALID;
+    words=lb_bitstring_heap_words(bits); if(!words) return LB_ALLOC_LIMIT;
+    size=bits/8+(bits%8!=0); source_bytes=source_bits/8+(source_bits%8!=0);
+    if(!lb_work_domain_charge(domain,lb_work_bulk_units(size))) return LB_ALLOC_WORK_LIMIT;
+    if(size>LB_ONHEAP_BINARY_LIMIT) {
+        if(!overhead_fits(offheap,size)) return LB_ALLOC_LIMIT;
+        binary=lb_binary_allocate(domain,size);
+        if(!binary) {
+            LbAllocStatus failure=lb_alloc_domain_failure(domain);
+            return failure==LB_ALLOC_LIMIT || failure==LB_ALLOC_WORK_LIMIT?failure:LB_ALLOC_NO_MEMORY;
+        }
+        destination=binary->orig_bytes;
+    } else {
+        (*heap)[0]=_make_header(words-1,HEAP_BITS_SUBTAG); (*heap)[1]=bits;
+        destination=(unsigned char *)(*heap+2);
+        memset(destination,0,(words-2)*sizeof(Eterm));
+    }
+    if(size) {
+        size_t first=offset/8; unsigned shift=(unsigned)(offset&7);
+        if(!shift) memcpy(destination,source+first,size);
+        else for(size_t i=0;i<size;++i) {
+            size_t index=first+i; unsigned value=(unsigned)source[index]<<shift;
+            if(index+1<source_bytes) value|=source[index+1]>>(8-shift);
+            destination[i]=(unsigned char)value;
+        }
+        if(bits&7) destination[size-1]&=(unsigned char)(0xffu<<(8-(bits&7)));
+    }
+    if(binary) result=lb_binary_wrap(offheap,heap,binary,bits,0);
+    else { result=make_boxed(*heap); *heap+=words; }
+    *out=result; return LB_ALLOC_OK;
+}
+LbAllocStatus lb_bitstring_slice(LbAllocDomain *domain,LbOffHeap *offheap,Eterm **heap,
+                                 const LbSubBits *source,size_t bits,Eterm *out)
+{
+    Eterm original; Eterm *original_box; LbSubBits snapshot;
+    if(!source || source->thing_word!=LB_HEADER_SUB_BITS || (source->base_flags&3)!=LB_SUB_MUTABLE ||
+       source->start>source->end || bits>source->end-source->start || !out) return LB_ALLOC_INVALID;
+    original=source->orig;
+    if(!is_boxed(original)) return LB_ALLOC_INVALID;
+    original_box=boxed_val(original);
+    if(*original_box==LB_HEADER_BIN_REF) {
+        LbBinRef *ref=(LbBinRef *)original_box;
+        if(!ref->val || ref->val->intern.flags) return LB_ALLOC_INVALID;
+        snapshot=*source; snapshot.end=snapshot.start+bits; snapshot.base_flags&=~(Uint)3;
+        return lb_bitstring_copy_ref(&snapshot,offheap,heap,out)?LB_ALLOC_OK:LB_ALLOC_LIMIT;
+    }
+    if((*original_box&_TAG_HEADER_MASK)==HEAP_BITS_SUBTAG) {
+        const unsigned char *base=(const unsigned char *)(source->base_flags&~(Uint)3);
+        const unsigned char *expected=(const unsigned char *)(original_box+2);
+        size_t source_bits=(size_t)original_box[1];
+        if(base!=expected || source->end>source_bits) return LB_ALLOC_INVALID;
+        return bitstring_build_slice(domain,offheap,heap,base,source_bits,source->start,bits,out);
+    }
+    return LB_ALLOC_INVALID;
+}
+LbAllocStatus lb_bitstring_tail(LbAllocDomain *domain,LbOffHeap *offheap,Eterm **heap,
+                                const LbSubBits *source,Eterm *out)
+{
+    if(!source || source->start>source->end) return LB_ALLOC_INVALID;
+    return lb_bitstring_slice(domain,offheap,heap,source,source->end-source->start,out);
+}
 int lb_bitstring_view(Eterm value,LbBitstringView *view)
 {
     Eterm *pointer;
