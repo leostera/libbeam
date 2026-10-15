@@ -23,6 +23,12 @@
 #define F_INSLPQUEUE (1u<<1)
 #define F_TIMO (1u<<2)
 #define F_DELAY_GC (1u<<13) /* pinned native matching/schedule-out flag */
+typedef struct LbCatchFrame {
+    struct LbCatchFrame *previous;
+    size_t stack_offset,y_offset;
+    const BeamInstr *failure_pc;
+    Uint saved_freason;
+} LbCatchFrame;
 struct LbProcess {
     LbCodeModule *entry_module;
     LbWorld *world; /* borrowed C task owner; task retirement precedes world destruction */
@@ -37,7 +43,10 @@ struct LbProcess {
     LbFunLease *fun_leases; /* one lease per defining module, represented by a stable entry */
     LbMessageQueue messages; /* native inner queue; immutable fragments own their code/offheap roots */
     int waiting; /* serialized scheduler state, not a terminal result */
+    int hibernating; /* restart at the prepared MFA on the first subsequent message */
+    int yield_requested; /* dynamic erlang:yield/0 returns before cooperative schedule-out */
     Uint flags;
+    Uint save_calls;
     Sint fcalls;
     int receive_timed_out;
     uint64_t receive_deadline;
@@ -48,6 +57,7 @@ struct LbProcess {
     LbMFA local_mfa; /* owned copy of a private function's native word header */
     const BeamInstr *i;
     Eterm reg[MAX_REG];
+    double float_regs[MAX_REG]; /* BEAM fr registers, preserved across cooperative yields */
     Eterm *heap, *htop, *stop, *hend;
     LbOffHeap off_heap, writable;
     uint64_t bin_vheap_sz; /* owned soft collection threshold, in words */
@@ -56,15 +66,20 @@ struct LbProcess {
     Eterm group_leader; /* local PID; NIL until a root's own identity is observed */
     Eterm construction_root; /* explicit temporary root during fallible append */
     Eterm native_time_root; /* intermediate native time term across unit conversion GC */
+    Eterm caught_trace; /* last owned exception trace exposed to compiled helpers */
     LbDecimal *decimal; /* sole pending native continuation; independent scratch */
     Uint freason; /* Native encoded scalar, never a GC root. */
     Eterm fvalue,exception_value; /* Pending payload and expanded terminal value. */
     Eterm ftrace; /* Owned opaque supplied trace; moving root, never a raw code pointer. */
     const BeamInstr *native_callsite,*native_trace_previous; /* owned code leases, not heap aliases */
     Uint arity, last_gc_cost, last_native_cost;
+    Uint length_saved_arity; /* precise register-root extent across resumable i_length */
+    int length_arity_active;
     size_t collections, heap_reserved;
+    uint64_t reductions_total, reductions_last_query;
     size_t last_binary_bytes; /* zero/copy work reported by one storage operation */
     LbProcessStatus status;
+    LbCatchFrame *catch_frames; /* owned LIFO unwind targets; offsets survive moving GC */
     const LbCapabilityFailure *capability_failure; /* static diagnostic, not a term */
     int running;
 };

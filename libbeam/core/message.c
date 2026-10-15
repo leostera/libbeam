@@ -6,6 +6,7 @@
 #include "message.h"
 #include "receive_marker.h"
 #include "process_internal.h"
+#include "alias.h"
 
 /* Publish an already-owned message at the serialized delivery boundary.
  * Caller accounts delivery work before entering; failed publication retains
@@ -16,6 +17,10 @@ LbProcessStatus lb_message_deliver(LbProcess *receiver,LbMessage *message)
     LbProcessStatus status=lb_message_queue_append(&receiver->messages,message);
     if(status!=LB_PROCESS_READY) return status;
     lb_work_cross_effect(message->budget,receiver->work_birth);
+    if(receiver->hibernating) {
+        receiver->hibernating=0;
+        receiver->flags&=~(F_INSLPQUEUE|F_TIMO);
+    }
     receiver->waiting=0;
     return LB_PROCESS_READY;
 }
@@ -26,14 +31,20 @@ LbProcessStatus lb_message_deliver(LbProcess *receiver,LbMessage *message)
 Eterm lb_erl_send(LbProcess *sender,Eterm destination,Eterm term)
 {
     sender->last_native_cost=1;
+    LbCodeSpace *space=sender->entry_module->space; LbAlias *alias=NULL;
     if(!is_internal_pid(destination) && !is_atom(destination)) {
-        if(is_pid(destination)) sender->status=LB_PROCESS_REFUSED;
-        else sender->freason=LB_EXC_BADARG;
-        return THE_NON_VALUE;
+        if(lb_is_reference(destination)) {
+            alias=lb_alias_lookup(space,destination,&sender->last_native_cost);
+            if(!alias) { sender->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+            if(!alias->active) return term;
+        } else {
+            if(is_pid(destination)) sender->status=LB_PROCESS_REFUSED;
+            else sender->freason=LB_EXC_BADARG;
+            return THE_NON_VALUE;
+        }
     }
-    LbCodeSpace *space=sender->entry_module->space;
     if(!sender->world || !sender->running) { sender->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
-    LbProcess *receiver=is_atom(destination)?lb_registry_lookup(space,destination,&sender->last_native_cost):lb_pid_lookup(space->pids,destination);
+    LbProcess *receiver=alias?alias->owner:is_atom(destination)?lb_registry_lookup(space,destination,&sender->last_native_cost):lb_pid_lookup(space->pids,destination);
     if(lb_alloc_domain_failure(space->domain)==LB_ALLOC_WORK_LIMIT) {
         sender->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
     }
@@ -48,7 +59,7 @@ Eterm lb_erl_send(LbProcess *sender,Eterm destination,Eterm term)
     Uint identity_cost=sender->last_native_cost,cost; LbMessage *message;
     status=lb_message_create(space,term,&message,&cost); sender->last_native_cost=lookup_cost+identity_cost+cost;
     if(status!=LB_PROCESS_READY) { sender->status=status; return THE_NON_VALUE; }
-    message->m[2]=from;
+    message->m[2]=from; if(alias && alias->reply) message->reply_alias=alias;
     if(!lb_work_domain_charge(space->domain,1)) {
         lb_message_destroy(message); sender->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
     }
@@ -133,6 +144,7 @@ void lb_message_consume_owned(LbProcess *receiver)
     if(!lb_work_domain_charge(selected->space->domain,LB_RECV_MARKERS)) {
         receiver->status=LB_PROCESS_WORK_LIMIT; return;
     }
+    if(selected->reply_alias) lb_alias_deactivate(selected->reply_alias);
     receiver->receive_message=NULL; receiver->receive_root=NIL;
     if(lb_message_queue_take(&receiver->messages)!=selected) abort();
     receiver->messages.save=&receiver->messages.first;

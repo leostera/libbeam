@@ -5,6 +5,7 @@
  * instruction ABI; this replaces the singleton loader/code-index architecture.
  */
 #include "code_internal.h"
+#include "alias.h"
 #include "md5.h"
 #include "pid_table.h"
 #include "fun.h"
@@ -77,6 +78,7 @@ LbCodeStatus lb_code_space_destroy(LbCodeSpace *space)
     if(!space) return LB_CODE_INVALID;
     if(space->modules || space->loading || space->messages || space->registry || lb_pid_count(space->pids)) return LB_CODE_BUSY;
     if(lb_atoms_destroy(space->atoms)!=LB_ATOM_OK) return LB_CODE_BUSY;
+    lb_alias_space_destroy(space);
     if(space->pids && lb_pid_table_destroy(space->pids)!=LB_PID_OK) abort();
     domain=space->domain; engine=space->engine;
     lb_release(domain,space); lb_engine_space_released(engine); return LB_CODE_OK;
@@ -155,7 +157,8 @@ static LbCodeStatus setup(LoaderState *st)
             LbBeamLambda *lambda=&p->lambdas[i]; LbFunEntry *entry=&module->funs[i];
             if(indices[lambda->index]) return LB_CODE_FORMAT;
             indices[lambda->index]=1;
-            entry->module=module->name; entry->arity=(int)(lambda->arity-lambda->num_free);
+            entry->module=module->name; entry->function=lambda->function;
+            entry->arity=(int)(lambda->arity-lambda->num_free);
             entry->index=(int)lambda->index; entry->old_index=(int)i;
             _Static_assert(sizeof(entry->old_uniq)==sizeof(lambda->old_uniq),"native fun uniq width");
             memcpy(&entry->old_uniq,&lambda->old_uniq,sizeof(entry->old_uniq));
@@ -334,16 +337,48 @@ LbCodeStatus lb_compile_code(LbCodeModule *module)
     if(status==LB_CODE_OK) status=lb_code_compile_prepared(&state);
     return status;
 }
-static void report_import(LbBeamProgram *p,LbLoadReport *report)
+static void report_external_fun(LbBeamProgram *p,LbLoadReport *report,const LbAtomTransaction *transaction)
+{
+    LbExternalFunPatch *patch=p->external_funs; LbBeamBytes module,function; size_t index=0;
+    while(patch && index++<p->error.offset) patch=patch->next;
+    if(!transaction) transaction=p->transaction;
+    LbAtomStatus module_status=patch?(transaction?lb_atoms_transaction_name(transaction,patch->module,&module):
+        lb_atoms_name(p->atoms,patch->module,&module)):LB_ATOM_INVALID;
+    LbAtomStatus function_status=patch?(transaction?lb_atoms_transaction_name(transaction,patch->function,&function):
+        lb_atoms_name(p->atoms,patch->function,&function)):LB_ATOM_INVALID;
+    if(!patch || module_status!=LB_ATOM_OK || function_status!=LB_ATOM_OK ||
+       module.size>sizeof(report->module) || function.size>sizeof(report->function)) return;
+    report->has_import=1; report->arity=(unsigned)signed_val(patch->arity);
+    report->module_size=module.size; report->function_size=function.size;
+    memcpy(report->module,module.data,module.size); memcpy(report->function,function.data,function.size);
+}
+static void report_import_index(LbBeamProgram *p,LbLoadReport *report,uint32_t index)
 {
     LbBeamImport import; LbBeamBytes module,function;
-    if(lb_beam_image_import(p->image,(uint32_t)p->error.offset,&import)!=LB_BEAM_OK ||
+    if(lb_beam_image_import(p->image,index,&import)!=LB_BEAM_OK ||
        lb_beam_image_atom(p->image,import.module,&module)!=LB_BEAM_OK ||
        lb_beam_image_atom(p->image,import.function,&function)!=LB_BEAM_OK ||
        module.size>sizeof(report->module) || function.size>sizeof(report->function)) abort();
     report->has_import=1; report->arity=import.arity;
     report->module_size=module.size; report->function_size=function.size;
     memcpy(report->module,module.data,module.size); memcpy(report->function,function.data,function.size);
+}
+static void report_import(LbBeamProgram *p,LbLoadReport *report)
+{ report_import_index(p,report,(uint32_t)p->error.offset); }
+static void report_unsupported_bif(LbBeamProgram *p,LbLoadReport *report)
+{
+    for(const LbBeamOp *op=lb_beam_program_ops(p);op;op=op->next) {
+        size_t import_index;
+        if(op->offset!=p->error.offset) continue;
+        if(op->op==genop_i_bif1_body_3 && op->arity==3 && op->a[1].type==TAG_u && op->a[1].val>=0)
+            import_index=(Uint)op->a[1].val;
+        else if(op->op==genop_gc_bif1_5 && op->arity==5 && op->a[2].type==TAG_u && op->a[2].val>=0)
+            import_index=(Uint)op->a[2].val;
+        else continue;
+        if(import_index<lb_beam_image_info(p->image)->import_count)
+            report_import_index(p,report,(uint32_t)import_index);
+        return;
+    }
 }
 static LbCodeStatus load_code(LbCodeSpace *space,const void *bytes,size_t size,LbCodeModule **out,LbBeamError *error,LbLoadReport *report)
 {
@@ -378,8 +413,10 @@ static LbCodeStatus load_code(LbCodeSpace *space,const void *bytes,size_t size,L
         if(error) *error=(LbBeamError){result==LB_CODE_NO_MEMORY?LB_BEAM_NO_MEMORY:result==LB_CODE_LIMIT?LB_BEAM_LIMIT:
             result==LB_CODE_UNSUPPORTED?LB_BEAM_UNSUPPORTED:result==LB_CODE_UNRESOLVED?LB_BEAM_NOT_FOUND:LB_BEAM_BAD_FORMAT,
             p->error.offset,p->error.stage};
-        if(result==LB_CODE_UNRESOLVED && report && p->error.stage &&
-           strcmp(p->error.stage,"unresolved import")==0) report_import(p,report);
+        if(result==LB_CODE_UNRESOLVED && report && p->error.stage) {
+            if(strcmp(p->error.stage,"unresolved import")==0) report_import(p,report);
+            else if(strcmp(p->error.stage,"unresolved external fun")==0) report_external_fun(p,report,p->transaction);
+        }
         lb_beam_program_destroy(p); lb_release(space->domain,module->dependencies); lb_release(space->domain,module); space->loading=0; return result;
     }
     /* Publication: all allocations, resolution, dispatch admission and fixups
@@ -417,7 +454,7 @@ static LbBeamStatus beam_status_for_code(LbCodeStatus status)
     }
 }
 static void batch_error(LbBeamError *error,LbLoadReport *report,LbCodeStatus status,
-                        LbBeamProgram *program,size_t module_index)
+                        LbBeamProgram *program,size_t module_index,const LbAtomTransaction *transaction)
 {
     if(error) *error=(LbBeamError){beam_status_for_code(status),program?program->error.offset:0,
         program&&program->error.stage?program->error.stage:"batch admission"};
@@ -427,8 +464,12 @@ static void batch_error(LbBeamError *error,LbLoadReport *report,LbCodeStatus sta
         if(module_index!=SIZE_MAX) {
             report->has_module_index=1; report->module_index=module_index;
         }
-        if(status==LB_CODE_UNRESOLVED && program && program->error.stage &&
-           strcmp(program->error.stage,"unresolved import")==0) report_import(program,report);
+        if(status==LB_CODE_UNRESOLVED && program && program->error.stage) {
+            if(strcmp(program->error.stage,"unresolved import")==0) report_import(program,report);
+            else if(strcmp(program->error.stage,"unresolved external fun")==0) report_external_fun(program,report,transaction);
+        } else if(status==LB_CODE_UNSUPPORTED && program && program->error.stage &&
+                  (strcmp(program->error.stage,"bif1")==0 || strcmp(program->error.stage,"gc_bif1")==0))
+            report_unsupported_bif(program,report);
     }
 }
 static void batch_cleanup(LbCodeSpace *space,LbCodeModule **modules,LbBeamProgram **programs,
@@ -533,7 +574,7 @@ LbCodeStatus lb_code_load_batch(LbCodeSpace *space,const LbCodeInput *inputs,siz
         modules[i]->space=space; modules[i]->program=programs[i];
     }
     result=from_beam(lb_program_bind_batch(programs,count));
-    if(result!=LB_CODE_OK) { failed_program=programs[0]; batch_error(error,report,result,failed_program,SIZE_MAX); goto rollback; }
+    if(result!=LB_CODE_OK) { failed_program=programs[0]; batch_error(error,report,result,failed_program,SIZE_MAX,programs[0]->transaction); goto rollback; }
     for(i=0;i<count;++i) {
         modules[i]->name=programs[i]->file_atoms[1];
         if(modules[i]->name==am_erlang && !space->preloading) {
@@ -557,11 +598,11 @@ LbCodeStatus lb_code_load_batch(LbCodeSpace *space,const LbCodeInput *inputs,siz
     }
     for(i=0;i<count;++i) {
         result=lb_code_prepare_module(modules[i],&states[i]);
-        if(result!=LB_CODE_OK) { failed_program=programs[i]; batch_error(error,report,result,failed_program,i); goto rollback; }
+        if(result!=LB_CODE_OK) { failed_program=programs[i]; batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback; }
     }
     for(i=0;i<count;++i) {
         result=lb_code_resolve_imports(&states[i],modules,count);
-        if(result!=LB_CODE_OK) { failed_program=programs[i]; batch_error(error,report,result,failed_program,i); goto rollback; }
+        if(result!=LB_CODE_OK) { failed_program=programs[i]; batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback; }
     }
     result=validate_batch_importers(space,modules,count);
     if(result!=LB_CODE_OK) {
@@ -572,7 +613,7 @@ LbCodeStatus lb_code_load_batch(LbCodeSpace *space,const LbCodeInput *inputs,siz
     }
     for(i=0;i<count;++i) {
         result=lb_code_compile_prepared(&states[i]);
-        if(result!=LB_CODE_OK) { failed_program=programs[i]; batch_error(error,report,result,failed_program,i); goto rollback; }
+        if(result!=LB_CODE_OK) { failed_program=programs[i]; batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback; }
     }
     /* Atom identities and all code become visible together. From this point
      * through publication, every operation is allocation-free and cannot fail. */

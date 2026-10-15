@@ -9,6 +9,8 @@
  * No GC/yield/mutation. Scratch allocation is fallible and always released.
  * On allocation refusal, equal is untouched; failure is never inequality. */
 LbAllocStatus lb_term_equal(LbAllocDomain *,Eterm a,Eterm b,int *equal);
+/* Erlang ==: exact structural equality except numeric integer/float coercion. */
+LbAllocStatus lb_term_loose_equal(LbAllocDomain *,Eterm a,Eterm b,int *equal);
 /* Valid borrowed views. Native bit comparison, including unaligned tails. */
 int lb_bitstrings_equal(LbBitstringView a,LbBitstringView b);
 #endif

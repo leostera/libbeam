@@ -140,8 +140,17 @@ static void malformed(LbEngine *engine,unsigned char *data,size_t size)
         CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
         data[where]=i==0?0x20:i==1?genop_is_nil_2:genop_is_eq_exact_3;
         if(i==2) data[arity+3]=0x21; /* equality with small 2 proves no tuple bound */
-        CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_FORMAT && !module);
-        CHECK(!strcmp(error.stage,"tuple/list shape admission"));
+        if(i==1) {
+            CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_OK && module);
+            LbProcess *p=start(space,module,"list"); LbProcessStatus status=LB_PROCESS_READY;
+            for(size_t step=0;step<1000 && (status==LB_PROCESS_READY || status==LB_PROCESS_YIELDED);++step)
+                status=lb_process_run(p,1,4);
+            CHECK(status==LB_PROCESS_EXCEPTION && p->exception_value==am_badarg);
+            lb_process_destroy(p); CHECK(lb_code_unload(module)==LB_CODE_OK);
+        } else {
+            CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_OK && module);
+            CHECK(lb_code_unload(module)==LB_CODE_OK);
+        }
         data[where]=saved; data[arity+3]=second;
         CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_OK);
         CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);

@@ -19,6 +19,7 @@ typedef struct LbFunEntry {
     int arity,index,old_uniq,old_index;
     /* Owned sidecar after the native entry prefix. */
     LbCodeModule *owner;
+    Eterm function;
 } LbFunEntry;
 typedef struct {
     Eterm thing_word;
@@ -74,6 +75,11 @@ const BeamInstr *lb_fun_call(LbProcess *,unsigned arity);
 LbAllocStatus lb_fun_prepare_instruction(LbProcess *,const BeamInstr *,Uint *cost);
 int lb_fun_is_arity(Eterm,Uint);
 Eterm lb_fun_test_arity(LbProcess *,Eterm,Eterm);
+Eterm lb_bif_fun_info_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_fun_info_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_fun_info_mfa_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_fun_to_list_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_make_fun_3(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_is_function_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_is_function_2(LbProcess *,Eterm *,const BeamInstr *);
 #endif

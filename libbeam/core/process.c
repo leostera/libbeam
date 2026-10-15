@@ -21,6 +21,13 @@ typedef unsigned char byte;
 #define ERTS_FALLTHROUGH() __attribute__((fallthrough))
 #define erl_sub_bits_is_match_context lb_is_match_context
 #define is_bitstring_header(h) (((h)&_TAG_HEADER_MASK)==HEAP_BITS_SUBTAG || (h)==LB_HEADER_SUB_BITS)
+static int tuple_field_range(Eterm tuple,Uint byte_offset,Uint count)
+{
+    Uint first,arity;
+    if(!is_tuple(tuple) || !count || byte_offset<sizeof(Eterm) || byte_offset%sizeof(Eterm)) return 0;
+    first=byte_offset/sizeof(Eterm); arity=arityval(*tuple_val(tuple));
+    return first<=arity && count-1<=arity-first;
+}
 #include "term_compare.h"
 #include "writable.h"
 #include "binary_build.h"
@@ -29,7 +36,11 @@ typedef unsigned char byte;
 #include "flatmap.h"
 #include "reference.h"
 #include "stacktrace.h"
+#include "raise_trace.h"
+#include "alias.h"
 #include "receive.h"
+#include <math.h>
+#include <fenv.h>
 #define is_not_ref(term) (!lb_is_reference(term))
 #define is_not_float(term) (!(is_boxed(term) && *boxed_val(term)==_make_header(1,FLOAT_SUBTAG)))
 #define is_not_bitstring(term) (!lb_build_is_bitstring(term))
@@ -80,7 +91,7 @@ static LbProcessStatus create_owned(LbCodeModule *module,const BeamInstr *pc,con
     p->entry_module=module; p->heap=p->htop=memory; p->hend=p->heap+words; p->stop=p->hend-1;
     *p->stop=(Eterm)lb_host_return; p->bin_vheap_sz=LB_BINARY_VHEAP_MIN_WORDS;
     for(i=0;i<MAX_REG;++i) p->reg[i]=NIL;
-    p->fvalue=p->exception_value=p->construction_root=p->native_time_root=p->ftrace=NIL; p->freason=LB_EXC_NULL;
+    p->fvalue=p->exception_value=p->construction_root=p->native_time_root=p->ftrace=p->caught_trace=NIL; p->freason=LB_EXC_NULL;
     p->local_mfa=*mfa; p->arity=mfa->arity; p->current=&p->local_mfa;
     p->i=pc; p->status=LB_PROCESS_READY; p->error_handler=am_error_handler; p->group_leader=NIL;
     ++module->users; *out=p; return LB_PROCESS_READY;
@@ -240,6 +251,7 @@ void lb_process_destroy(LbProcess *p)
     if(!p) return;
     if(p->running) abort(); /* internal serialized API misuse, not a guest path */
     module=p->entry_module; d=module->space->domain;
+    lb_alias_deactivate_process(p);
     lb_link_exit(p,0);
     lb_monitor_exit(p,0);
     lb_registry_remove(p);
@@ -248,6 +260,10 @@ void lb_process_destroy(LbProcess *p)
     lb_message_queue_clear(&p->messages);
     if(p->exit_signal) lb_message_destroy(p->exit_signal);
     lb_fun_leases_clear(p);
+    while(p->catch_frames) {
+        LbCatchFrame *frame=p->catch_frames; p->catch_frames=frame->previous;
+        lb_release(d,frame);
+    }
     lb_decimal_destroy(p->decimal);
     lb_release(p->entry_module->space->domain,p->dictionary);
     lb_offheap_clear(&p->off_heap);
@@ -336,6 +352,8 @@ static int32_t lb_packed_label(const BeamInstr *table,size_t index)
 #define fb(word) ((Sint)(int32_t)(word))
 #define jb(word) fb(word)
 #define db(word) (word)
+#define FLOAT_REG(offset) (c_p->float_regs[(offset)/sizeof(double)])
+#define FLOAT_REG_VALID(offset) (((offset)%sizeof(double))==0 && (offset)/sizeof(double)<MAX_REG)
 #define is_both_small(a,b) (is_small(a) && is_small(b))
 #define is_value(value) (!is_non_value(value))
 #define cp_val(word) ((const BeamInstr *)(word))
@@ -355,8 +373,27 @@ static int32_t lb_packed_label(const BeamInstr *table,size_t index)
 #define SMALL_ZERO make_small(0)
 #define SYSTEM_LIMIT LB_EXC_SYSTEM_LIMIT
 #define BSF_LITTLE 2
+#define BSF_SIGNED 4
 #define BADMATCH LB_EXC_BADMATCH
 #define EXC_CASE_CLAUSE LB_EXC_CASE_CLAUSE
+typedef enum { LB_LENGTH_MORE, LB_LENGTH_DONE, LB_LENGTH_BADARG, LB_LENGTH_SYSTEM_LIMIT, LB_LENGTH_WORK_LIMIT } LbLengthStep;
+static LbLengthStep lb_length_step(LbProcess *p,Uint live,Sint *reductions)
+{
+    Eterm *state=p->reg+live; Eterm tail=state[0]; Sint count;
+    unsigned steps=0;
+    if(!is_small(state[1])) return LB_LENGTH_BADARG;
+    count=signed_val(state[1]);
+    while(is_list(tail) && steps<64u && *reductions>0) {
+        if(count>=MAX_SMALL) return LB_LENGTH_SYSTEM_LIMIT;
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) {
+            p->status=LB_PROCESS_WORK_LIMIT; return LB_LENGTH_WORK_LIMIT;
+        }
+        tail=CDR(list_val(tail)); ++count; ++steps; --*reductions;
+        state[0]=tail; state[1]=make_small(count);
+    }
+    if(is_nil(tail)) return LB_LENGTH_DONE;
+    return is_list(tail)?LB_LENGTH_MORE:LB_LENGTH_BADARG;
+}
 LbProcessStatus lb_process_run(LbProcess *c_p,size_t budget,unsigned reductions)
 {
     Eterm *reg,*E,*HTOP;
@@ -369,6 +406,7 @@ LbProcessStatus lb_process_run(LbProcess *c_p,size_t budget,unsigned reductions)
     if(reductions<4) return LB_PROCESS_INVALID;
     if(c_p->waiting) return LB_PROCESS_INVALID;
     if(c_p->receive_message) c_p->flags|=F_DELAY_GC;
+    c_p->status=LB_PROCESS_READY; /* A completed slice is resumable, not a persistent BIF-yield signal. */
     c_p->running=1; reg=c_p->reg; I=c_p->i; E=c_p->stop; HTOP=c_p->htop; FCALLS=reductions;
     if(c_p->exit_signal) {
         SWAPOUT; c_p->status=lb_exit_signal_receive(c_p); SWAPIN; goto stop;
@@ -431,6 +469,7 @@ dispatch:
             goto context_switch;
         }
         if(is_non_value(value)) {
+            if(c_p->status==LB_PROCESS_YIELDED) { I=c_p->i; goto context_switch; }
             if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;
             if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
             if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
@@ -439,7 +478,9 @@ dispatch:
             if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
             goto find_func_info;
         }
-        x(0)=value; SET_I(cp_val(*E)); *E=NIL; Goto(*I);
+        x(0)=value; SET_I(cp_val(*E)); *E=NIL;
+        if(c_p->yield_requested) { c_p->yield_requested=0; c_p->arity=1; goto context_switch3; }
+        Goto(*I);
     }
     OpCase(normal_exit):
         c_p->status=LB_PROCESS_DONE; c_p->arity=1; goto stop;
@@ -457,10 +498,8 @@ context_switch3:
 find_func_info: {
     if(c_p->status==LB_PROCESS_CAPABILITY_DENIED) goto capability_denied;
     if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;
-    /* Materialize the native error value, not handle_error/stacktrace/catch.
-     * Keep the original code/flags and extended payload for future handling.
-     * Native error/3 arglist wrappers retain their raw payload separately;
-     * this still grants no stacktrace construction or catch/unwind. */
+    /* Expand guest exception reasons once, then either unwind to an owned
+     * catch target or publish the terminal exception without host handlers. */
     LbAllocStatus expanded;
     Uint exception_class=LB_GET_EXC_CLASS(c_p->freason);
     if((exception_class!=LB_EXTAG_ERROR && exception_class!=LB_EXTAG_EXIT && exception_class!=LB_EXTAG_THROWN) ||
@@ -476,9 +515,46 @@ find_func_info: {
     SWAPOUT; expanded=lb_exception_expand(c_p,c_p->freason,reason,&c_p->exception_value); SWAPIN;
     if(expanded==LB_ALLOC_NO_MEMORY) goto memory_failure;
     if(expanded!=LB_ALLOC_OK) goto malformed_code;
+    if(c_p->catch_frames) {
+        LbCatchFrame *frame=c_p->catch_frames;
+        size_t stack_words=(size_t)(c_p->hend-c_p->heap);
+        Eterm caught_class=lb_exception_class(c_p->freason);
+        Eterm caught_reason;
+        Eterm caught_trace=c_p->ftrace;
+        if(!is_atom(caught_class) || frame->stack_offset>stack_words) goto malformed_code;
+        if(exception_class==LB_EXTAG_ERROR && (c_p->freason&LB_EXF_SAVETRACE)) {
+            Eterm exception_and_trace;
+            LbProcessStatus old_status=c_p->status;
+            c_p->status=LB_PROCESS_EXCEPTION; SWAPOUT;
+            LbProcessStatus trace_status=lb_error_down_reason(c_p,&exception_and_trace);
+            SWAPIN; c_p->status=old_status;
+            if(trace_status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+            if(trace_status==LB_PROCESS_LIMIT) goto resource_limit;
+            if(trace_status==LB_PROCESS_NO_MEMORY) {
+                if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_LIMIT) goto resource_limit;
+                if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;
+                goto memory_failure;
+            }
+            if(trace_status==LB_PROCESS_REFUSED) goto execution_refused;
+            if(trace_status!=LB_PROCESS_READY || !is_tuple(exception_and_trace) || arityval(*tuple_val(exception_and_trace))!=2) goto malformed_code;
+            caught_trace=tuple_val(exception_and_trace)[2];
+        } else if(c_p->ftrace!=NIL) {
+            LbRaisedTrace supplied;
+            if(!lb_raise_trace_unpack(c_p->ftrace,&supplied)) goto malformed_code;
+            caught_trace=supplied.symbolic;
+        }
+        c_p->caught_trace=caught_trace;
+        caught_reason=c_p->exception_value;
+        E= c_p->hend-frame->stack_offset;
+        if(E<c_p->stop || E>=c_p->hend || frame->y_offset/sizeof(Eterm)>=(size_t)(c_p->hend-E) ||
+           !pc_valid(c_p,frame->failure_pc)) goto malformed_code;
+        reg[0]=THE_NON_VALUE; reg[1]=caught_reason; reg[2]=caught_trace; reg[3]=caught_class;
+        c_p->fvalue=NIL; c_p->ftrace=NIL; c_p->exception_value=NIL;
+        I=frame->failure_pc; Goto(*I);
+    }
     if(!(c_p->freason&(LB_EXF_HAS_EXT_INFO|LB_EXF_ARGLIST))) c_p->fvalue=NIL;
-    /* With catch admission still closed, every thrown value is uncaught.
-     * Preserve its trace while promoting the terminal reason to nocatch. */
+    /* Only uncaught throws are promoted to nocatch; caught throws retain their
+     * class and value in the X registers at the local handler. */
     if(c_p->freason&LB_EXF_THROWN) {
         size_t need;
         if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
@@ -514,6 +590,11 @@ memory_failure:
 malformed_code:
     c_p->status=LB_PROCESS_INVALID;
 stop:
+    if(FCALLS<(Sint)reductions) {
+        uint64_t consumed=(uint64_t)((Sint)reductions-FCALLS);
+        c_p->reductions_total=UINT64_MAX-c_p->reductions_total<consumed?
+            UINT64_MAX:c_p->reductions_total+consumed;
+    }
     /* Terminal monitor capture may collect. Publish the active heap/stack/PC
      * first and reload afterward; local interpreter aliases are not roots. */
     SWAPOUT;

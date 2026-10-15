@@ -44,6 +44,14 @@ static LbProcess *create(LbWorld *w,LbCodeModule *m,const char *name,const Vecto
     p->heap_reserved=11;if(full)while(p->htop<p->stop-S_RESERVED-p->heap_reserved)*p->htop++=NIL;
     return p;
 }
+static LbProcess *create_binary(LbWorld *w,LbCodeModule *m,const char *name,Sint left,Sint right)
+{
+    LbCodeEntry *entry; LbProcess *p; Eterm args[2]={make_small(left),make_small(right)};
+    CHECK(lb_code_entry_acquire(w->space,m->name,atom(w,name),2,&entry)==LB_CODE_OK);
+    CHECK(lb_process_create(entry,args,2,1024,&p)==LB_PROCESS_READY);
+    lb_code_entry_release(entry); p->heap_reserved=11;
+    return p;
+}
 static void source(LbProcess *p,const Vector *v)
 {
     Eterm t=p->construction_root;
@@ -131,6 +139,15 @@ int main(int argc,char **argv)
     LbCodeModule *m;LbBeamError error;LbCodeStatus status=lb_code_load(w->space,bytes,(size_t)n,&m,&error);
     if(status!=LB_CODE_OK)fprintf(stderr,"load=%d stage=%s offset=%zu\n",status,error.stage,error.offset);
     CHECK(status==LB_CODE_OK);free(bytes);
+    Vector one=vector("1","3ff0000000000000"),negative_one=vector("-1","bff0000000000000");
+    LbProcess *operation=create(w,m,"negate",&one,0);
+    CHECK(run(operation)==LB_PROCESS_DONE);result(lb_process_result(operation),&negative_one);lb_process_destroy(operation);
+    operation=create_binary(w,m,"add",2,3);
+    CHECK(run(operation)==LB_PROCESS_DONE);Vector five=vector("0","4014000000000000");
+    result(lb_process_result(operation),&five);lb_process_destroy(operation);
+    operation=create_binary(w,m,"subtract",5,2);
+    CHECK(run(operation)==LB_PROCESS_DONE);Vector three=vector("0","4008000000000000");
+    result(lb_process_result(operation),&three);lb_process_destroy(operation);
     FILE *oracle=fopen(argv[2],"r");CHECK(oracle);char hex[320],answer[17];unsigned rows=0;
     int parsed;
     while((parsed=fscanf(oracle,"%319s %16s",hex,answer))==2) { Vector v=vector(hex,answer);semantics(w,m,&v);++rows; }

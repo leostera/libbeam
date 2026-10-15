@@ -2,6 +2,411 @@
  * Copyright Ericsson AB 1996-2026. All Rights Reserved.
  * Owned interpreter code adapted from OTP beam_makeops output.
  */
+OpCase(i_yield):
+{
+  x(0)=am_true;
+  FCALLS--;
+  c_p->arity=1;
+  ++I;
+  goto context_switch3;
+}
+
+OpCase(i_length_setup_tx):
+{
+  Eterm packed=I[1]; Uint live=tb(packed&BEAM_LOOSE_MASK);
+  Eterm source=xb((packed>>BEAM_LOOSE_SHIFT));
+  if(live>MAX_REG-3 || c_p->length_arity_active || I[2]!=op_i_length_jtd) goto malformed_code;
+  c_p->length_saved_arity=c_p->arity; c_p->length_arity_active=1; c_p->arity=live+3;
+  x(live)=source; x(live+1)=make_small(0); x(live+2)=source;
+  I+=2; Goto(*I);
+}
+
+OpCase(i_length_setup_ty):
+{
+  Eterm packed=I[1]; Uint live=tb(packed&BEAM_LOOSE_MASK);
+  Eterm source=yb((packed>>BEAM_LOOSE_SHIFT));
+  if(live>MAX_REG-3 || c_p->length_arity_active || I[2]!=op_i_length_jtd) goto malformed_code;
+  c_p->length_saved_arity=c_p->arity; c_p->length_arity_active=1; c_p->arity=live+3;
+  x(live)=source; x(live+1)=make_small(0); x(live+2)=source;
+  I+=2; Goto(*I);
+}
+
+OpCase(i_length_jtd):
+{
+  Eterm packed=I[2],dst=db(packed>>BEAM_LOOSE_SHIFT);
+  Uint live=tb(packed&BEAM_LOOSE_MASK);
+  if(!c_p->length_arity_active || live>MAX_REG-3 || c_p->arity!=live+3) goto malformed_code;
+  --FCALLS;
+  LbLengthStep step=lb_length_step(c_p,live,&FCALLS);
+  if(step==LB_LENGTH_MORE) { c_p->arity=live+3; goto context_switch3; }
+  c_p->arity=c_p->length_saved_arity; c_p->length_arity_active=0;
+  if(step==LB_LENGTH_WORK_LIMIT) goto work_failure;
+  if(step==LB_LENGTH_BADARG || step==LB_LENGTH_SYSTEM_LIMIT) {
+    if(I[1]) { I+=(Sint)I[1]; if(FCALLS<=0) goto context_switch3; Goto(*I); }
+    c_p->freason=step==LB_LENGTH_BADARG?LB_EXC_BADARG:LB_EXC_SYSTEM_LIMIT;
+    goto find_func_info;
+  }
+  Eterm result=x(live+1); Eterm *dst_ptr=REG_TARGET_PTR(dst); *dst_ptr=result;
+  I+=3; if(FCALLS<=0) goto context_switch3; Goto(*I);
+}
+
+#define LB_RUN_MINUS(left,right,packed,words) do { \
+  Eterm minus_args[2]={(left),(right)}; Eterm minus_result; \
+  Eterm minus_dst=db((packed)>>BEAM_WIDE_SHIFT); Sint minus_fail=fb((packed)&BEAM_WIDE_MASK); \
+  c_p->last_native_cost=0; SWAPOUT; minus_result=lb_bif_minus_2(c_p,minus_args,I); SWAPIN; \
+  FCALLS-=1+(Sint)c_p->last_native_cost; \
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure; \
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure; \
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit; \
+  if(c_p->status==LB_PROCESS_INVALID) goto malformed_code; \
+  if(is_non_value(minus_result)) { \
+    if(minus_fail) { I+=minus_fail; if(FCALLS<=0) goto context_switch3; Goto(*I); } \
+    goto find_func_info; \
+  } \
+  *REG_TARGET_PTR(minus_dst)=minus_result; I+=(words); \
+  if(FCALLS<=0) goto context_switch3; Goto(*I); \
+} while(0)
+
+OpCase(i_minus_xxjd):
+{ Eterm pair=I[1]; LB_RUN_MINUS(xb(pair&BEAM_LOOSE_MASK),xb(pair>>BEAM_LOOSE_SHIFT),I[2],3); }
+OpCase(i_minus_xyjd):
+{ Eterm pair=I[1]; LB_RUN_MINUS(xb(pair&BEAM_LOOSE_MASK),yb(pair>>BEAM_LOOSE_SHIFT),I[2],3); }
+OpCase(i_minus_yxjd):
+{ Eterm pair=I[1]; LB_RUN_MINUS(yb(pair&BEAM_LOOSE_MASK),xb(pair>>BEAM_LOOSE_SHIFT),I[2],3); }
+OpCase(i_minus_yyjd):
+{ Eterm pair=I[1]; LB_RUN_MINUS(yb(pair&BEAM_LOOSE_MASK),yb(pair>>BEAM_LOOSE_SHIFT),I[2],3); }
+OpCase(i_minus_cxjd):
+{ LB_RUN_MINUS(I[1],xb(I[2]),I[3],4); }
+OpCase(i_minus_cyjd):
+{ LB_RUN_MINUS(I[1],yb(I[2]),I[3],4); }
+#undef LB_RUN_MINUS
+
+OpCase(i_fast_element_xjId):
+{
+  Eterm tuple=xb(I[1]),packed=I[3];
+  Uint index=Ib(packed&BEAM_WIDE_MASK);
+  Eterm dst=db(packed>>BEAM_WIDE_SHIFT);
+  if(is_tuple(tuple) && index>0 && index<=arityval(*tuple_val(tuple))) {
+    *REG_TARGET_PTR(dst)=tuple_val(tuple)[index]; I+=4; Goto(*I);
+  }
+  if(I[2]) { I+=(Sint)I[2]; Goto(*I); }
+  c_p->freason=LB_EXC_BADARG; goto find_func_info;
+}
+
+OpCase(i_fast_element_yjId):
+{
+  Eterm tuple=yb(I[1]),packed=I[3];
+  Uint index=Ib(packed&BEAM_WIDE_MASK);
+  Eterm dst=db(packed>>BEAM_WIDE_SHIFT);
+  if(is_tuple(tuple) && index>0 && index<=arityval(*tuple_val(tuple))) {
+    *REG_TARGET_PTR(dst)=tuple_val(tuple)[index]; I+=4; Goto(*I);
+  }
+  if(I[2]) { I+=(Sint)I[2]; Goto(*I); }
+  c_p->freason=LB_EXC_BADARG; goto find_func_info;
+}
+
+OpCase(i_element_xjsd):
+{
+  Eterm tuple=xb(I[1]),packed=I[2],index; GetSource(I[3],index);
+  Eterm dst=db(packed>>BEAM_WIDE_SHIFT); Sint fail=fb(packed&BEAM_WIDE_MASK);
+  if(is_small(index) && is_tuple(tuple) && signed_val(index)>=1 &&
+     (Uint)signed_val(index)<=arityval(*tuple_val(tuple))) {
+    *REG_TARGET_PTR(dst)=tuple_val(tuple)[signed_val(index)]; I+=4; Goto(*I);
+  }
+  if(fail) { I+=fail; Goto(*I); }
+  c_p->freason=LB_EXC_BADARG; goto find_func_info;
+}
+
+OpCase(i_element_yjsd):
+{
+  Eterm tuple=yb(I[1]),packed=I[2],index; GetSource(I[3],index);
+  Eterm dst=db(packed>>BEAM_WIDE_SHIFT); Sint fail=fb(packed&BEAM_WIDE_MASK);
+  if(is_small(index) && is_tuple(tuple) && signed_val(index)>=1 &&
+     (Uint)signed_val(index)<=arityval(*tuple_val(tuple))) {
+    *REG_TARGET_PTR(dst)=tuple_val(tuple)[signed_val(index)]; I+=4; Goto(*I);
+  }
+  if(fail) { I+=fail; Goto(*I); }
+  c_p->freason=LB_EXC_BADARG; goto find_func_info;
+}
+
+OpCase(i_select_val_bins_xfI):
+{
+  Eterm selected=xb(I[1]),packed=I[2];
+  Uint count=Ib(packed>>BEAM_WIDE_SHIFT);
+  struct Singleton { BeamInstr value; };
+  const struct Singleton *low=(const struct Singleton *)(I+3),*high=low+count;
+  if(!count) goto malformed_code;
+  while(low<high) {
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
+    const struct Singleton *middle=low+(high-low)/2;
+    if(selected<middle->value) high=middle;
+    else if(selected>middle->value) low=middle+1;
+    else {
+      const int32_t *jumps=(const int32_t *)(I+3+count);
+      int32_t offset=jumps[middle-(const struct Singleton *)(I+3)];
+      ASSERT(VALID_INSTR(*(I+(Sint)offset))); I+=(Sint)offset; Goto(*I);
+    }
+  }
+  { Sint fail=fb(packed&BEAM_WIDE_MASK); ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I); }
+}
+
+OpCase(i_select_val_bins_yfI):
+{
+  Eterm selected=yb(I[1]),packed=I[2];
+  Uint count=Ib(packed>>BEAM_WIDE_SHIFT);
+  struct Singleton { BeamInstr value; };
+  const struct Singleton *low=(const struct Singleton *)(I+3),*high=low+count;
+  if(!count) goto malformed_code;
+  while(low<high) {
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
+    const struct Singleton *middle=low+(high-low)/2;
+    if(selected<middle->value) high=middle;
+    else if(selected>middle->value) low=middle+1;
+    else {
+      const int32_t *jumps=(const int32_t *)(I+3+count);
+      int32_t offset=jumps[middle-(const struct Singleton *)(I+3)];
+      ASSERT(VALID_INSTR(*(I+(Sint)offset))); I+=(Sint)offset; Goto(*I);
+    }
+  }
+  { Sint fail=fb(packed&BEAM_WIDE_MASK); ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I); }
+}
+
+{
+  Eterm selected;
+  OpCase(i_jump_on_val_xfIW): selected=xb(I[1]); goto jump_on_val__execute;
+  OpCase(i_jump_on_val_yfIW): selected=yb(I[1]);
+  jump_on_val__execute: {
+    Eterm packed=I[2]; Uint count=Ib(packed>>BEAM_WIDE_SHIFT);
+    Sint fail=fb(packed&BEAM_WIDE_MASK);
+    if(is_small(selected)) {
+      Sint value=signed_val(selected),base=(Sint)I[3];
+      if(value>=base && (Uint)(value-base)<count) {
+        const int32_t *jumps=(const int32_t *)(I+4);
+        Sint offset=jumps[value-base];
+        if(!pc_valid(c_p,I+offset)) goto malformed_code;
+        I+=offset; Goto(*I);
+      }
+    }
+    if(!pc_valid(c_p,I+fail)) goto malformed_code;
+    I+=fail; Goto(*I);
+  }
+}
+
+{
+  Eterm selected;
+  OpCase(i_jump_on_val_zero_xfI): selected=xb(I[1]); goto jump_on_val_zero__execute;
+  OpCase(i_jump_on_val_zero_yfI): selected=yb(I[1]);
+  jump_on_val_zero__execute: {
+    Eterm packed=I[2]; Uint count=Ib(packed>>BEAM_WIDE_SHIFT);
+    Sint fail=fb(packed&BEAM_WIDE_MASK);
+    if(is_small(selected)) {
+      Sint value=signed_val(selected);
+      if(value>=0 && (Uint)value<count) {
+        const int32_t *jumps=(const int32_t *)(I+3);
+        Sint offset=jumps[value];
+        if(!pc_valid(c_p,I+offset)) goto malformed_code;
+        I+=offset; Goto(*I);
+      }
+    }
+    if(!pc_valid(c_p,I+fail)) goto malformed_code;
+    I+=fail; Goto(*I);
+  }
+}
+
+{
+  Eterm band_left,band_right;
+  OpCase(i_band_xcjd): band_left=xb(I[1]); band_right=I[2]; goto band__execute;
+  OpCase(i_band_ssjd): GetSource(I[1],band_left); GetSource(I[2],band_right);
+  band__execute: {
+    Eterm packed=I[3],destination=db(packed>>BEAM_WIDE_SHIFT);
+    Eterm *destination_ptr=REG_TARGET_PTR(destination);
+    Sint fail=jb(packed&BEAM_WIDE_MASK);
+    Uint previous_freason=c_p->freason;
+    if(is_small(band_left) && is_small(band_right)) {
+      *destination_ptr=band_left&band_right; I+=4; Goto(*I);
+    }
+    reg[0]=band_left; reg[1]=band_right;
+    SWAPOUT; Eterm result=lb_bif_band_2(c_p,reg,I); SWAPIN;
+    FCALLS-=(Sint)c_p->last_native_cost;
+    if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+    if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+    if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+    if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+    if(is_value(result)) {
+      destination_ptr=REG_TARGET_PTR(destination); *destination_ptr=result; I+=4; Goto(*I);
+    }
+    if(fail) {
+      c_p->freason=previous_freason; I+=fail; Goto(*I);
+    }
+    reg[0]=band_left; reg[1]=band_right; SWAPOUT; goto find_func_info;
+  }
+}
+
+{
+  Eterm bor_left,bor_right;
+  OpCase(i_bor_jssd): {
+    Eterm packed=I[1],destination=db(packed>>BEAM_WIDE_SHIFT);
+    GetSource(I[2],bor_left); GetSource(I[3],bor_right);
+    Eterm *destination_ptr=REG_TARGET_PTR(destination);
+    Sint fail=jb(packed&BEAM_WIDE_MASK);
+    Uint previous_freason=c_p->freason;
+    if(is_small(bor_left) && is_small(bor_right)) {
+      *destination_ptr=bor_left|bor_right; I+=4; Goto(*I);
+    }
+    reg[0]=bor_left; reg[1]=bor_right;
+    SWAPOUT; Eterm result=lb_bif_bor_2(c_p,reg,I); SWAPIN;
+    FCALLS-=(Sint)c_p->last_native_cost;
+    if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+    if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+    if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+    if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+    if(is_value(result)) {
+      destination_ptr=REG_TARGET_PTR(destination); *destination_ptr=result; I+=4; Goto(*I);
+    }
+    if(fail) { c_p->freason=previous_freason; I+=fail; Goto(*I); }
+    reg[0]=bor_left; reg[1]=bor_right; SWAPOUT; goto find_func_info;
+  }
+}
+
+{
+  Eterm shift_left,shift_amount;
+  OpCase(i_bsr_ssjd): GetSource(I[1],shift_left); GetSource(I[2],shift_amount); goto shift__execute;
+  OpCase(i_bsl_ssjd): GetSource(I[1],shift_left); GetSource(I[2],shift_amount);
+  shift__execute: {
+    Eterm packed=I[3],destination=db(packed>>BEAM_WIDE_SHIFT);
+    Eterm *destination_ptr=REG_TARGET_PTR(destination);
+    Sint fail=jb(packed&BEAM_WIDE_MASK);
+    Uint previous_freason=c_p->freason;
+    reg[0]=shift_left; reg[1]=shift_amount;
+    SWAPOUT;
+    Eterm result=next_op==op_i_bsr_ssjd?lb_bif_bsr_2(c_p,reg,I):lb_bif_bsl_2(c_p,reg,I);
+    SWAPIN; FCALLS-=(Sint)c_p->last_native_cost;
+    if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+    if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+    if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+    if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+    if(is_value(result)) {
+      destination_ptr=REG_TARGET_PTR(destination); *destination_ptr=result; I+=4; Goto(*I);
+    }
+    if(fail) { c_p->freason=previous_freason; I+=fail; Goto(*I); }
+    reg[0]=shift_left; reg[1]=shift_amount; SWAPOUT; goto find_func_info;
+  }
+}
+
+OpCase(i_hibernate):
+{
+  SWAPOUT;
+  Eterm result=lb_bif_hibernate_0(c_p,c_p->reg,I);
+  SWAPIN;
+  FCALLS-=1+(Sint)c_p->last_native_cost;
+  if(is_non_value(result)) {
+    if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+    if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+    if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+    if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;
+    goto find_func_info;
+  }
+  x(0)=result; c_p->yield_requested=0; c_p->arity=1; ++I;
+  goto context_switch3;
+}
+
+OpCase(fconv_Sl):
+{
+  Eterm packed=I[1],source=Sb(packed&BEAM_LOOSE_MASK);
+  Uint destination=packed>>BEAM_LOOSE_SHIFT;
+  if(!FLOAT_REG_VALID(destination)) goto malformed_code;
+  if(is_small(source)) FLOAT_REG(destination)=(double)signed_val(source);
+  else if(lb_is_big(source)) {
+    if(lb_big_to_double(source,&FLOAT_REG(destination))<0) { c_p->freason=LB_EXC_BADARITH; goto find_func_info; }
+  } else if(!is_not_float(source)) memcpy(&FLOAT_REG(destination),boxed_val(source)+1,sizeof(double));
+  else { c_p->freason=LB_EXC_BADARITH; goto find_func_info; }
+  BeamInstr next=I[2]; I+=2; GotoPF(next);
+}
+OpCase(fload_Sl):
+{
+  Eterm packed=I[1],source=Sb(packed&BEAM_LOOSE_MASK);
+  Uint destination=packed>>BEAM_LOOSE_SHIFT;
+  if(!FLOAT_REG_VALID(destination)) goto malformed_code;
+  if(is_not_float(source)) { c_p->freason=LB_EXC_BADARITH; goto find_func_info; }
+  memcpy(&FLOAT_REG(destination),boxed_val(source)+1,sizeof(double));
+  BeamInstr next=I[2]; I+=2; GotoPF(next);
+}
+OpCase(fload_ql):
+{
+  Uint destination=I[2]; Eterm source=I[1];
+  if(!FLOAT_REG_VALID(destination) || is_not_float(source)) goto malformed_code;
+  memcpy(&FLOAT_REG(destination),boxed_val(source)+1,sizeof(double));
+  BeamInstr next=I[3]; I+=3; GotoPF(next);
+}
+OpCase(fstore_ld):
+{
+  Eterm packed=I[1],destination=db(packed>>BEAM_LOOSE_SHIFT);
+  Uint source=packed&BEAM_LOOSE_MASK;
+  if(!FLOAT_REG_VALID(source)) goto malformed_code;
+  Eterm *target=REG_TARGET_PTR(destination); HEAP_SPACE_VERIFIED(2);
+  HTOP[0]=_make_header(1,FLOAT_SUBTAG);
+  memcpy(HTOP+1,&FLOAT_REG(source),sizeof(double)); *target=make_boxed(HTOP); HTOP+=2;
+  BeamInstr next=I[2]; I+=2; GotoPF(next);
+}
+OpCase(i_fadd_lll):
+{
+  Eterm packed=I[1]; Uint left=packed&BEAM_TIGHT_MASK;
+  Uint right=(packed>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK;
+  Uint destination=packed>>(2*BEAM_TIGHT_SHIFT);
+  if(!FLOAT_REG_VALID(left) || !FLOAT_REG_VALID(right) || !FLOAT_REG_VALID(destination)) goto malformed_code;
+  fenv_t previous;
+  if(fegetenv(&previous) || fesetenv(FE_DFL_ENV)) { c_p->status=LB_PROCESS_ENVIRONMENT; goto environment_failure; }
+  double result=FLOAT_REG(left)+FLOAT_REG(right); int finite=isfinite(result);
+  if(fesetenv(&previous)) { c_p->status=LB_PROCESS_ENVIRONMENT; goto environment_failure; }
+  if(!finite) { c_p->freason=LB_EXC_BADARITH; goto find_func_info; }
+  FLOAT_REG(destination)=result; BeamInstr next=I[2]; I+=2; GotoPF(next);
+}
+OpCase(i_fsub_lll):
+{
+  Eterm packed=I[1]; Uint left=packed&BEAM_TIGHT_MASK;
+  Uint right=(packed>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK;
+  Uint destination=packed>>(2*BEAM_TIGHT_SHIFT);
+  if(!FLOAT_REG_VALID(left) || !FLOAT_REG_VALID(right) || !FLOAT_REG_VALID(destination)) goto malformed_code;
+  fenv_t previous;
+  if(fegetenv(&previous) || fesetenv(FE_DFL_ENV)) { c_p->status=LB_PROCESS_ENVIRONMENT; goto environment_failure; }
+  double result=FLOAT_REG(left)-FLOAT_REG(right); int finite=isfinite(result);
+  if(fesetenv(&previous)) { c_p->status=LB_PROCESS_ENVIRONMENT; goto environment_failure; }
+  if(!finite) { c_p->freason=LB_EXC_BADARITH; goto find_func_info; }
+  FLOAT_REG(destination)=result; BeamInstr next=I[2]; I+=2; GotoPF(next);
+}
+OpCase(i_fnegate_ll):
+{
+  Eterm packed=I[1]; Uint source=packed&BEAM_TIGHT_MASK;
+  Uint destination=packed>>BEAM_TIGHT_SHIFT;
+  if(!FLOAT_REG_VALID(source) || !FLOAT_REG_VALID(destination)) goto malformed_code;
+  uint64_t bits; memcpy(&bits,&FLOAT_REG(source),sizeof(bits)); bits^=UINT64_C(1)<<63;
+  memcpy(&FLOAT_REG(destination),&bits,sizeof(bits));
+  BeamInstr next=I[2]; I+=2; GotoPF(next);
+}
+OpCase(i_fmul_lll):
+{
+  Eterm packed=I[1]; Uint left=packed&BEAM_TIGHT_MASK;
+  Uint right=(packed>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK;
+  Uint destination=packed>>(2*BEAM_TIGHT_SHIFT);
+  if(!FLOAT_REG_VALID(left) || !FLOAT_REG_VALID(right) || !FLOAT_REG_VALID(destination)) goto malformed_code;
+  double result=FLOAT_REG(left)*FLOAT_REG(right);
+  if(!isfinite(result)) { c_p->freason=LB_EXC_BADARITH; goto find_func_info; }
+  FLOAT_REG(destination)=result; BeamInstr next=I[2]; I+=2; GotoPF(next);
+}
+OpCase(i_fdiv_lll):
+{
+  Eterm packed=I[1]; Uint left=packed&BEAM_TIGHT_MASK;
+  Uint right=(packed>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK;
+  Uint destination=packed>>(2*BEAM_TIGHT_SHIFT);
+  if(!FLOAT_REG_VALID(left) || !FLOAT_REG_VALID(right) || !FLOAT_REG_VALID(destination)) goto malformed_code;
+  fenv_t previous;
+  if(fegetenv(&previous) || fesetenv(FE_DFL_ENV)) { c_p->status=LB_PROCESS_ENVIRONMENT; goto environment_failure; }
+  double result=FLOAT_REG(left)/FLOAT_REG(right); int finite=isfinite(result);
+  if(fesetenv(&previous)) { c_p->status=LB_PROCESS_ENVIRONMENT; goto environment_failure; }
+  if(!finite) { c_p->freason=LB_EXC_BADARITH; goto find_func_info; }
+  FLOAT_REG(destination)=result; BeamInstr next=I[2]; I+=2; GotoPF(next);
+}
+
 OpCase(is_ge_fxx):
 {
   Eterm tmp_packed1 = I[2];
@@ -465,6 +870,50 @@ OpCase(put_tuple2_yI):
   Goto(*I);ASSERT(!"Fell through 'put_tuple2' (-no_next)");
 }
 
+{
+  Eterm packed,source,element;
+  Eterm *destination;
+  Uint size,offset,source_offset,destination_offset;
+  OpCase(i_update_record_copy_txxts): { packed=I[2]; source=xb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK); destination=&xb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK); } goto update_record_copy__execute;
+  OpCase(i_update_record_copy_txyts): { packed=I[2]; source=xb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK); destination=&yb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK); } goto update_record_copy__execute;
+  OpCase(i_update_record_copy_tyxts): { packed=I[2]; source=yb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK); destination=&xb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK); } goto update_record_copy__execute;
+  OpCase(i_update_record_copy_tyyts): { packed=I[2]; source=yb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK); destination=&yb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK); } goto update_record_copy__execute;
+  OpCase(i_update_record_in_place_txxts): { packed=I[2]; source=xb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK); destination=&xb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK); } goto update_record_copy__execute;
+  OpCase(i_update_record_in_place_txyts): { packed=I[2]; source=xb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK); destination=&yb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK); } goto update_record_copy__execute;
+  OpCase(i_update_record_in_place_tyxts): { packed=I[2]; source=yb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK); destination=&xb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK); } goto update_record_copy__execute;
+  OpCase(i_update_record_in_place_tyyts): { packed=I[2]; source=yb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK); destination=&yb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK); } goto update_record_copy__execute;
+  update_record_copy__execute:
+  {
+    size=packed&BEAM_LOOSE_MASK; source_offset=(packed>>(BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK;
+    destination_offset=(packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK; offset=packed>>(3*BEAM_LOOSE_SHIFT);
+    if(!size || size>=MAX_REG-1 || !offset || offset>size || source_offset%sizeof(Eterm) ||
+       destination_offset%sizeof(Eterm) || c_p->heap_reserved<size+1 || (Uint)(E-HTOP)<size+1+S_RESERVED)
+      goto malformed_code;
+    GetSource(I[1],element);
+    if(!is_tuple(source) || arityval(*tuple_val(source))!=size) {
+      c_p->freason=LB_EXC_BADRECORD; c_p->fvalue=source; goto find_func_info;
+    }
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,size+lb_work_bulk_units(size+1))) goto work_failure;
+    reg[MAX_REG-1]=*destination;
+    memcpy(HTOP,tuple_val(source),(size+1)*sizeof(Eterm)); HTOP[offset]=element;
+    *destination=make_tuple(HTOP); HTOP+=size+1; c_p->heap_reserved-=size+1;
+    I+=3; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
+  Eterm element;
+  OpCase(i_update_record_continue_ts):
+  {
+    Uint offset=Ib(I[1]);
+    if(!offset || offset>MAX_REG-1 || (size_t)(HTOP-c_p->heap)<offset) goto malformed_code;
+    GetSource(I[2],element);
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
+    HTOP[-(Sint)offset]=element; I+=3; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+  OpCase(i_update_record_in_place_done): I+=1; ASSERT(VALID_INSTR(*I)); Goto(*I);
+}
+
 OpCase(test_heap_1_put_list_Iy):
 {
   Eterm tmp_packed1 = I[1];
@@ -587,6 +1036,120 @@ OpCase(case_end_x):
   c_p->freason = EXC_CASE_CLAUSE;
   goto find_func_info;
   ASSERT(!"Fell through 'case_end' (-no_next)");
+}
+
+OpCase(badrecord_s):
+{
+  c_p->fvalue = Sb(I[1]);
+  c_p->freason = LB_EXC_BADRECORD;
+  goto find_func_info;
+  ASSERT(!"Fell through 'badrecord' (-no_next)");
+}
+
+OpCase(if_end):
+{
+  c_p->freason = LB_EXC_IF_CLAUSE;
+  goto find_func_info;
+  ASSERT(!"Fell through 'if_end' (-no_next)");
+}
+
+OpCase(build_stacktrace):
+  /* Exception dispatch captures the real symbolic frames before leaving the
+   * failing call; compiled rescue helpers consume that owned list here. */
+  x(0)=c_p->caught_trace; I++; Goto(*I);
+
+OpCase(i_raise):
+{
+  Eterm caught_class=lb_exception_class(c_p->freason);
+  if(!is_atom(caught_class)) goto malformed_code;
+  x(0)=caught_class;
+  Eterm raised=lb_bif_raise_3(c_p,reg,I);
+  FCALLS-=1+(Sint)c_p->last_native_cost;
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+  if(c_p->status!=LB_PROCESS_READY) goto malformed_code;
+  if(!is_non_value(raised)) {
+    if(raised!=am_badarg) goto malformed_code;
+    c_p->fvalue=am_badarg; c_p->freason=LB_EXC_BADARG;
+  } else if(c_p->freason==LB_EXC_NULL) goto malformed_code;
+  goto find_func_info;
+}
+
+OpCase(raw_raise):
+{
+  Eterm raised=lb_bif_raise_3(c_p,reg,I);
+  FCALLS-=1+(Sint)c_p->last_native_cost;
+  if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+  if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+  if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+  if(c_p->status!=LB_PROCESS_READY) goto malformed_code;
+  if(!is_non_value(raised)) {
+    if(raised!=am_badarg) goto malformed_code;
+    x(0)=am_badarg; I++; Goto(*I);
+  }
+  if(c_p->freason==LB_EXC_NULL) goto malformed_code;
+  goto find_func_info;
+}
+
+OpCase(catch_yf):
+{
+  LbCatchFrame *frame; void *memory; LbAllocStatus allocated;
+  const BeamInstr *failure=I+(Sint)I[2];
+  if(I[1]%sizeof(Eterm) || !pc_valid(c_p,failure)) goto malformed_code;
+  if(!lb_work_domain_charge(c_p->entry_module->space->domain,2)) goto work_failure;
+  allocated=lb_alloc_domain_allocate(c_p->entry_module->space->domain,sizeof(*frame),&memory);
+  if(allocated==LB_ALLOC_WORK_LIMIT) goto work_failure;
+  if(allocated==LB_ALLOC_LIMIT) goto resource_limit;
+  if(allocated!=LB_ALLOC_OK) goto memory_failure;
+  frame=memory; frame->previous=c_p->catch_frames;
+  frame->stack_offset=(size_t)(c_p->hend-E); frame->y_offset=(size_t)I[1];
+  frame->failure_pc=failure; frame->saved_freason=c_p->freason; c_p->catch_frames=frame;
+  make_blank(yb(I[1])); I+=3; Goto(*I);
+}
+
+OpCase(try_end_y):
+OpCase(try_case_y):
+{
+  LbCatchFrame *frame=c_p->catch_frames;
+  if(!frame || frame->stack_offset!=(size_t)(c_p->hend-E) || frame->y_offset!=(size_t)I[1]) goto malformed_code;
+  Uint saved_freason=frame->saved_freason;
+  c_p->catch_frames=frame->previous;
+  lb_release(c_p->entry_module->space->domain,frame);
+  make_blank(yb(I[1]));
+  if(next_op==op_try_case_y) {
+    if(!is_non_value(x(0))) goto malformed_code;
+    x(0)=x(3);
+  } else c_p->freason=saved_freason;
+  I+=2; Goto(*I);
+}
+
+OpCase(catch_end_y):
+{
+  LbCatchFrame *frame=c_p->catch_frames;
+  if(!frame || frame->stack_offset!=(size_t)(c_p->hend-E) || frame->y_offset!=(size_t)I[1]) goto malformed_code;
+  c_p->catch_frames=frame->previous;
+  c_p->freason=frame->saved_freason;
+  lb_release(c_p->entry_module->space->domain,frame);
+  make_blank(yb(I[1])); I+=2;
+  if(is_non_value(x(0))) {
+    if(x(3)==am_throw) x(0)=x(1);
+    else if(x(3)==am_error || x(3)==am_exit) {
+      if(!lb_work_domain_charge(c_p->entry_module->space->domain,3)) goto work_failure;
+      if((Uint)(E-HTOP)<3+S_RESERVED) {
+        SWAPOUT;
+        if(!lb_process_collect_live(c_p,3,MAX_REG)) goto memory_failure;
+        SWAPIN; FCALLS-=(Sint)c_p->last_gc_cost;
+      }
+      HEAP_SPACE_VERIFIED(3); x(0)=TUPLE2(HTOP,am_EXIT,x(1)); HTOP+=3;
+    } else goto malformed_code;
+  }
+  Goto(*I);
+}
+
+OpCase(try_case_end_s):
+{
+  c_p->fvalue=Sb(I[1]); c_p->freason=LB_EXC_TRY_CLAUSE; goto find_func_info;
 }
 
 OpCase(i_allocate_zero_tt):
@@ -870,6 +1433,31 @@ OpCase(move_jump_fcr):
   Goto(*I);;ASSERT(!"Fell through 'move_jump' (-no_next)");
 }
 
+OpCase(move_jump_fxx):
+{
+  Eterm label=I[1],packed=I[2];
+  xb((packed>>BEAM_LOOSE_SHIFT))=xb(packed&BEAM_LOOSE_MASK);
+  ASSERT(VALID_INSTR(*(I+(Sint)label))); I+=(Sint)label; Goto(*I);
+}
+OpCase(move_jump_fxy):
+{
+  Eterm label=I[1],packed=I[2];
+  yb((packed>>BEAM_LOOSE_SHIFT))=xb(packed&BEAM_LOOSE_MASK);
+  ASSERT(VALID_INSTR(*(I+(Sint)label))); I+=(Sint)label; Goto(*I);
+}
+OpCase(move_jump_fyx):
+{
+  Eterm label=I[1],packed=I[2];
+  xb((packed>>BEAM_LOOSE_SHIFT))=yb(packed&BEAM_LOOSE_MASK);
+  ASSERT(VALID_INSTR(*(I+(Sint)label))); I+=(Sint)label; Goto(*I);
+}
+OpCase(move_jump_fyy):
+{
+  Eterm label=I[1],packed=I[2];
+  yb((packed>>BEAM_LOOSE_SHIFT))=yb(packed&BEAM_LOOSE_MASK);
+  ASSERT(VALID_INSTR(*(I+(Sint)label))); I+=(Sint)label; Goto(*I);
+}
+
 OpCase(move_jump_fcx):
 {
   Eterm tmp_packed1 = I[1];
@@ -879,6 +1467,13 @@ OpCase(move_jump_fcx):
   ASSERT(VALID_INSTR(*(I + (Sint)lbl)));
   I += (Sint)lbl;;
   Goto(*I);;ASSERT(!"Fell through 'move_jump' (-no_next)");
+}
+
+OpCase(move_jump_fcy):
+{
+  Eterm packed=I[1]; Eterm label=fb(packed&BEAM_WIDE_MASK);
+  yb(packed>>BEAM_WIDE_SHIFT)=I[2];
+  ASSERT(VALID_INSTR(*(I+(Sint)label))); I+=(Sint)label; Goto(*I);
 }
 
 OpCase(move_xy):
@@ -1726,6 +2321,29 @@ OpCase(i_is_ne_exact_literal_fyc):
   Goto(*I);
 }
 
+{
+  Eterm packed,left,right;
+  int not_equal;
+  OpCase(is_eq_fSs): packed=I[2]; not_equal=0; goto is_eq_loose__execute;
+  OpCase(is_ne_fSs): packed=I[2]; not_equal=1;
+  is_eq_loose__execute:
+  {
+    int equal=0; Sint fail=fb(packed&BEAM_WIDE_MASK);
+    LbAllocStatus status;
+    left=Sb(packed>>BEAM_WIDE_SHIFT); GetSource(I[1],right);
+    status=lb_term_loose_equal(c_p->entry_module->space->domain,left,right,&equal);
+    if(status==LB_ALLOC_WORK_LIMIT) goto work_failure;
+    if(status==LB_ALLOC_LIMIT) goto resource_limit;
+    if(status==LB_ALLOC_NO_MEMORY) goto memory_failure;
+    if(status!=LB_ALLOC_OK) goto malformed_code;
+    if(not_equal?equal:!equal) {
+      if(!fail) goto malformed_code;
+      ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I);
+    }
+    I+=3; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
 OpCase(is_eq_exact_fxx):
 {
   Eterm tmp_packed1 = I[2];
@@ -2534,13 +3152,15 @@ OpCase(test_arity_fyA):
 OpCase(test_arity_get_tuple_element_fxAPx):
 {
   Eterm tmp_packed1 = I[2];
-  Eterm* ptr = tuple_val(xb(tmp_packed1&BEAM_LOOSE_MASK));
+  Eterm tuple = xb(tmp_packed1&BEAM_LOOSE_MASK);
+  Eterm* ptr;
   Eterm* src;
-  if (*ptr != I[3]) {
+  if (!is_tuple(tuple) || *tuple_val(tuple) != I[3] || !tuple_field_range(tuple,I[4],1)) {
     ASSERT(VALID_INSTR(*(I + (Sint)I[1])));
     I += (Sint)I[1];;
     Goto(*I);;
   }
+  ptr = tuple_val(tuple);
   src = ADD_BYTE_OFFSET(ptr, I[4]);
   xb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = *src;
   I += 5;
@@ -2550,9 +3170,11 @@ OpCase(test_arity_get_tuple_element_fxAPx):
 
 OpCase(i_get_tuple_element_xPx):
 {
-  Eterm tmp_packed1 = I[1];
+  Eterm tmp_packed1 = I[1],tuple=xb(tmp_packed1&BEAM_LOOSE_MASK);
   BeamInstr next_pf = BeamCodeAddr(I[3]);
-  Eterm* src = ADD_BYTE_OFFSET(tuple_val(xb(tmp_packed1&BEAM_LOOSE_MASK)), I[2]);
+  Eterm* src;
+  if(!tuple_field_range(tuple,I[2],1)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  src = ADD_BYTE_OFFSET(tuple_val(tuple), I[2]);
   xb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = *src;
   I += 3;
   ASSERT(VALID_INSTR(next_pf));
@@ -2561,9 +3183,11 @@ OpCase(i_get_tuple_element_xPx):
 
 OpCase(i_get_tuple_element_xPy):
 {
-  Eterm tmp_packed1 = I[1];
+  Eterm tmp_packed1 = I[1],tuple=xb(tmp_packed1&BEAM_LOOSE_MASK);
   BeamInstr next_pf = BeamCodeAddr(I[3]);
-  Eterm* src = ADD_BYTE_OFFSET(tuple_val(xb(tmp_packed1&BEAM_LOOSE_MASK)), I[2]);
+  Eterm* src;
+  if(!tuple_field_range(tuple,I[2],1)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  src = ADD_BYTE_OFFSET(tuple_val(tuple), I[2]);
   yb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = *src;
   I += 3;
   ASSERT(VALID_INSTR(next_pf));
@@ -2572,9 +3196,11 @@ OpCase(i_get_tuple_element_xPy):
 
 OpCase(i_get_tuple_element_yPx):
 {
-  Eterm tmp_packed1 = I[1];
+  Eterm tmp_packed1 = I[1],tuple=yb(tmp_packed1&BEAM_LOOSE_MASK);
   BeamInstr next_pf = BeamCodeAddr(I[3]);
-  Eterm* src = ADD_BYTE_OFFSET(tuple_val(yb(tmp_packed1&BEAM_LOOSE_MASK)), I[2]);
+  Eterm* src;
+  if(!tuple_field_range(tuple,I[2],1)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  src = ADD_BYTE_OFFSET(tuple_val(tuple), I[2]);
   xb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = *src;
   I += 3;
   ASSERT(VALID_INSTR(next_pf));
@@ -2583,9 +3209,11 @@ OpCase(i_get_tuple_element_yPx):
 
 OpCase(i_get_tuple_element_yPy):
 {
-  Eterm tmp_packed1 = I[1];
+  Eterm tmp_packed1 = I[1],tuple=yb(tmp_packed1&BEAM_LOOSE_MASK);
   BeamInstr next_pf = BeamCodeAddr(I[3]);
-  Eterm* src = ADD_BYTE_OFFSET(tuple_val(yb(tmp_packed1&BEAM_LOOSE_MASK)), I[2]);
+  Eterm* src;
+  if(!tuple_field_range(tuple,I[2],1)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  src = ADD_BYTE_OFFSET(tuple_val(tuple), I[2]);
   yb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = *src;
   I += 3;
   ASSERT(VALID_INSTR(next_pf));
@@ -2594,12 +3222,13 @@ OpCase(i_get_tuple_element_yPy):
 
 OpCase(i_get_tuple_element2_xPx):
 {
-  Eterm tmp_packed1 = I[1];
+  Eterm tmp_packed1 = I[1],tuple=xb(tmp_packed1&BEAM_LOOSE_MASK);
   BeamInstr next_pf = BeamCodeAddr(I[3]);
   Eterm* src;
   Eterm* dst;
   Eterm E1, E2;
-  src = ADD_BYTE_OFFSET(tuple_val(xb(tmp_packed1&BEAM_LOOSE_MASK)), I[2]);
+  if(!tuple_field_range(tuple,I[2],2)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  src = ADD_BYTE_OFFSET(tuple_val(tuple), I[2]);
   dst = &(xb((tmp_packed1>>BEAM_LOOSE_SHIFT)));
   E1 = src[0];
   E2 = src[1];
@@ -2612,12 +3241,13 @@ OpCase(i_get_tuple_element2_xPx):
 
 OpCase(i_get_tuple_element3_xPx):
 {
-  Eterm tmp_packed1 = I[1];
+  Eterm tmp_packed1 = I[1],tuple=xb(tmp_packed1&BEAM_LOOSE_MASK);
   BeamInstr next_pf = BeamCodeAddr(I[3]);
   Eterm* src;
   Eterm* dst;
   Eterm E1, E2, E3;
-  src = ADD_BYTE_OFFSET(tuple_val(xb(tmp_packed1&BEAM_LOOSE_MASK)), I[2]);
+  if(!tuple_field_range(tuple,I[2],3)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  src = ADD_BYTE_OFFSET(tuple_val(tuple), I[2]);
   dst = &(xb((tmp_packed1>>BEAM_LOOSE_SHIFT)));
   E1 = src[0];
   E2 = src[1];
@@ -2632,11 +3262,12 @@ OpCase(i_get_tuple_element3_xPx):
 
 OpCase(i_get_tuple_element2_dst_xPxx):
 {
-  Eterm tmp_packed1 = I[1];
+  Eterm tmp_packed1 = I[1],tuple=xb(tmp_packed1&BEAM_TIGHT_MASK);
   BeamInstr next_pf = BeamCodeAddr(I[3]);
   Eterm* src;
   Eterm E1, E2;
-  src = ADD_BYTE_OFFSET(tuple_val(xb(tmp_packed1&BEAM_TIGHT_MASK)), I[2]);
+  if(!tuple_field_range(tuple,I[2],2)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  src = ADD_BYTE_OFFSET(tuple_val(tuple), I[2]);
   E1 = src[0];
   E2 = src[1];
   xb((tmp_packed1>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK) = E1;
@@ -2648,11 +3279,12 @@ OpCase(i_get_tuple_element2_dst_xPxx):
 
 OpCase(i_get_tuple_element2_dst_xPyy):
 {
-  Eterm tmp_packed1 = I[1];
+  Eterm tmp_packed1 = I[1],tuple=xb(tmp_packed1&BEAM_TIGHT_MASK);
   BeamInstr next_pf = BeamCodeAddr(I[3]);
   Eterm* src;
   Eterm E1, E2;
-  src = ADD_BYTE_OFFSET(tuple_val(xb(tmp_packed1&BEAM_TIGHT_MASK)), I[2]);
+  if(!tuple_field_range(tuple,I[2],2)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  src = ADD_BYTE_OFFSET(tuple_val(tuple), I[2]);
   E1 = src[0];
   E2 = src[1];
   yb((tmp_packed1>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK) = E1;
@@ -2854,7 +3486,9 @@ OpCase(get_hd_xx):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(xb(tmp_packed1&BEAM_LOOSE_MASK));
+  Eterm list=xb(tmp_packed1&BEAM_LOOSE_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   xb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = CAR(tmp_ptr);
   I += 2;
   ASSERT(VALID_INSTR(next_pf));
@@ -2865,7 +3499,9 @@ OpCase(get_hd_xy):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(xb(tmp_packed1&BEAM_LOOSE_MASK));
+  Eterm list=xb(tmp_packed1&BEAM_LOOSE_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   yb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = CAR(tmp_ptr);
   I += 2;
   ASSERT(VALID_INSTR(next_pf));
@@ -2876,7 +3512,9 @@ OpCase(get_hd_yx):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(yb(tmp_packed1&BEAM_LOOSE_MASK));
+  Eterm list=yb(tmp_packed1&BEAM_LOOSE_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   xb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = CAR(tmp_ptr);
   I += 2;
   ASSERT(VALID_INSTR(next_pf));
@@ -2887,7 +3525,9 @@ OpCase(get_hd_yy):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(yb(tmp_packed1&BEAM_LOOSE_MASK));
+  Eterm list=yb(tmp_packed1&BEAM_LOOSE_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   yb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = CAR(tmp_ptr);
   I += 2;
   ASSERT(VALID_INSTR(next_pf));
@@ -2898,7 +3538,9 @@ OpCase(get_tl_xx):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(xb(tmp_packed1&BEAM_LOOSE_MASK));
+  Eterm list=xb(tmp_packed1&BEAM_LOOSE_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   xb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = CDR(tmp_ptr);
   I += 2;
   ASSERT(VALID_INSTR(next_pf));
@@ -2909,7 +3551,9 @@ OpCase(get_tl_xy):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(xb(tmp_packed1&BEAM_LOOSE_MASK));
+  Eterm list=xb(tmp_packed1&BEAM_LOOSE_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   yb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = CDR(tmp_ptr);
   I += 2;
   ASSERT(VALID_INSTR(next_pf));
@@ -2920,7 +3564,9 @@ OpCase(get_tl_yx):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(yb(tmp_packed1&BEAM_LOOSE_MASK));
+  Eterm list=yb(tmp_packed1&BEAM_LOOSE_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   xb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = CDR(tmp_ptr);
   I += 2;
   ASSERT(VALID_INSTR(next_pf));
@@ -2931,7 +3577,9 @@ OpCase(get_tl_yy):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(yb(tmp_packed1&BEAM_LOOSE_MASK));
+  Eterm list=yb(tmp_packed1&BEAM_LOOSE_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   yb((tmp_packed1>>BEAM_LOOSE_SHIFT)) = CDR(tmp_ptr);
   I += 2;
   ASSERT(VALID_INSTR(next_pf));
@@ -2941,7 +3589,9 @@ OpCase(get_tl_yy):
 OpCase(get_list_rry):
 {
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(x(0));
+  Eterm list=x(0);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -2955,7 +3605,9 @@ OpCase(get_list_rry):
 OpCase(get_list_rxr):
 {
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(x(0));
+  Eterm list=x(0);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -2970,7 +3622,9 @@ OpCase(get_list_rxx):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(x(0));
+  Eterm list=x(0);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -2985,7 +3639,9 @@ OpCase(get_list_rxy):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(x(0));
+  Eterm list=x(0);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -2999,7 +3655,9 @@ OpCase(get_list_rxy):
 OpCase(get_list_ryr):
 {
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(x(0));
+  Eterm list=x(0);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -3014,7 +3672,9 @@ OpCase(get_list_xrx):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(xb(tmp_packed1&BEAM_LOOSE_MASK));
+  Eterm list=xb(tmp_packed1&BEAM_LOOSE_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -3029,7 +3689,9 @@ OpCase(get_list_xxx):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(xb(tmp_packed1&BEAM_TIGHT_MASK));
+  Eterm list=xb(tmp_packed1&BEAM_TIGHT_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -3044,7 +3706,9 @@ OpCase(get_list_xxy):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(xb(tmp_packed1&BEAM_TIGHT_MASK));
+  Eterm list=xb(tmp_packed1&BEAM_TIGHT_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -3059,7 +3723,9 @@ OpCase(get_list_xyx):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(xb(tmp_packed1&BEAM_TIGHT_MASK));
+  Eterm list=xb(tmp_packed1&BEAM_TIGHT_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -3074,7 +3740,9 @@ OpCase(get_list_xyy):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(xb(tmp_packed1&BEAM_TIGHT_MASK));
+  Eterm list=xb(tmp_packed1&BEAM_TIGHT_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -3089,7 +3757,10 @@ OpCase(get_list_yxx):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(yb(tmp_packed1&BEAM_TIGHT_MASK));
+  /* Every get_list variant checks the cons tag before dereferencing. */
+  Eterm list = yb(tmp_packed1&BEAM_TIGHT_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -3104,7 +3775,9 @@ OpCase(get_list_yxy):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(yb(tmp_packed1&BEAM_TIGHT_MASK));
+  Eterm list=yb(tmp_packed1&BEAM_TIGHT_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -3119,7 +3792,9 @@ OpCase(get_list_yyx):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(yb(tmp_packed1&BEAM_TIGHT_MASK));
+  Eterm list=yb(tmp_packed1&BEAM_TIGHT_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -3134,7 +3809,9 @@ OpCase(get_list_yyy):
 {
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
-  Eterm* tmp_ptr = list_val(yb(tmp_packed1&BEAM_TIGHT_MASK));
+  Eterm list=yb(tmp_packed1&BEAM_TIGHT_MASK);
+  if (is_not_list(list)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+  Eterm* tmp_ptr = list_val(list);
   Eterm hd, tl;
   hd = CAR(tmp_ptr);
   tl = CDR(tmp_ptr);
@@ -3516,6 +4193,19 @@ OpCase(move3_xxxxxx):
   GotoPF(next_pf);
 }
 
+OpCase(move3_yxyxyx):
+{
+  Eterm tmp_packed1=I[1],tmp_packed2=I[2];
+  Eterm first=yb(tmp_packed1&BEAM_TIGHT_MASK);
+  Eterm second=yb((tmp_packed1>>(2*BEAM_TIGHT_SHIFT))&BEAM_TIGHT_MASK);
+  Eterm third=yb((tmp_packed2>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK);
+  BeamInstr next_pf=BeamCodeAddr(I[3]);
+  xb((tmp_packed1>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK)=first;
+  xb(tmp_packed2&BEAM_TIGHT_MASK)=second;
+  xb((tmp_packed2>>(2*BEAM_TIGHT_SHIFT))&BEAM_TIGHT_MASK)=third;
+  I+=3; ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
+}
+
 OpCase(i_bs_read_integer_8_xx):
 {
   Eterm tmp_packed1 = I[1];
@@ -3537,6 +4227,16 @@ OpCase(i_bs_read_integer_8_xx):
   I += 2;
   ASSERT(VALID_INSTR(next_pf));
   GotoPF(next_pf);
+}
+
+OpCase(move2_par_xxxx):
+{
+  Eterm packed=I[1]; BeamInstr next_pf=BeamCodeAddr(I[2]);
+  Eterm first=xb(packed&BEAM_LOOSE_MASK);
+  Eterm second=xb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK);
+  xb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK)=first;
+  xb((packed>>(3*BEAM_LOOSE_SHIFT)))=second;
+  I+=2; ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
 }
 
 OpCase(move2_par_yxxy):
@@ -3565,6 +4265,16 @@ OpCase(move2_par_yxyx):
   I += 2;
   ASSERT(VALID_INSTR(next_pf));
   GotoPF(next_pf);
+}
+
+OpCase(move2_par_yyyy):
+{
+  Eterm packed=I[1]; BeamInstr next_pf=BeamCodeAddr(I[2]);
+  Eterm first=yb(packed&BEAM_LOOSE_MASK);
+  Eterm second=yb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK);
+  yb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK)=first;
+  yb((packed>>(3*BEAM_LOOSE_SHIFT)))=second;
+  I+=2; ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
 }
 
 OpCase(move2_par_xxxy):
@@ -3600,14 +4310,33 @@ OpCase(move_src_window2_yxx):
   Eterm tmp_packed1 = I[1];
   BeamInstr next_pf = BeamCodeAddr(I[2]);
   Eterm* src = &yb(tmp_packed1&BEAM_TIGHT_MASK);
-  Eterm s1, s2;
-  s1 = src[0];
-  s2 = src[1];
-  xb((tmp_packed1>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK) = s1;
-  xb((tmp_packed1>>(2*BEAM_TIGHT_SHIFT))) = s2;
-  I += 2;
-  ASSERT(VALID_INSTR(next_pf));
-  GotoPF(next_pf);
+  Eterm s1=src[0],s2=src[1];
+  xb((tmp_packed1>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK)=s1;
+  xb((tmp_packed1>>(2*BEAM_TIGHT_SHIFT)))=s2;
+  I+=2; ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
+}
+
+OpCase(move_src_window3_yxxx):
+{
+  Eterm packed=I[1]; BeamInstr next_pf=BeamCodeAddr(I[2]);
+  Eterm* src=&yb(packed&BEAM_TIGHT_MASK);
+  Eterm s1=src[0],s2=src[1],s3=src[2];
+  xb((packed>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK)=s1;
+  xb((packed>>(2*BEAM_TIGHT_SHIFT))&BEAM_TIGHT_MASK)=s2;
+  xb((packed>>(3*BEAM_TIGHT_SHIFT)))=s3;
+  I+=2; ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
+}
+
+OpCase(move_src_window4_yxxxx):
+{
+  Eterm first=I[1],second=I[2]; BeamInstr next_pf=BeamCodeAddr(I[3]);
+  Eterm* src=&yb(first&BEAM_TIGHT_MASK);
+  Eterm s1=src[0],s2=src[1],s3=src[2],s4=src[3];
+  xb((first>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK)=s1;
+  xb(second&BEAM_TIGHT_MASK)=s2;
+  xb((second>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK)=s3;
+  xb((second>>(2*BEAM_TIGHT_SHIFT)))=s4;
+  I+=3; ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
 }
 
 OpCase(move_window5_xxxxxy):
@@ -3630,6 +4359,20 @@ OpCase(move_window5_xxxxxy):
   I += 3;
   ASSERT(VALID_INSTR(next_pf));
   GotoPF(next_pf);
+}
+
+OpCase(move_window4_xxxxy):
+{
+  Eterm tmp_packed1=I[1],tmp_packed2=I[2];
+  BeamInstr next_pf=BeamCodeAddr(I[3]);
+  Eterm xt0=xb(tmp_packed1&BEAM_TIGHT_MASK);
+  Eterm xt1=xb((tmp_packed1>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK);
+  /* The operand packer puts three X sources in I[1], then X4 and Y in I[2]. */
+  Eterm xt2=xb((tmp_packed1>>(2*BEAM_TIGHT_SHIFT))&BEAM_TIGHT_MASK);
+  Eterm xt3=xb(tmp_packed2&BEAM_TIGHT_MASK);
+  Eterm *y=&yb(tmp_packed2>>BEAM_TIGHT_SHIFT);
+  y[0]=xt0; y[1]=xt1; y[2]=xt2; y[3]=xt3;
+  I+=3; ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
 }
 
 OpCase(move_window3_xxxy):
@@ -4751,6 +5494,7 @@ OpCase(remove_message):
   if (msgp->m[1]!=NIL) goto execution_refused;
   if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_RECV_MARKERS)) goto work_failure;
   if(msgp!=c_p->receive_message || lb_message_queue_take(&c_p->messages)!=msgp) goto malformed_code;
+  if(msgp->reply_alias) lb_alias_deactivate(msgp->reply_alias);
   c_p->messages.save=&c_p->messages.first;
   c_p->receive_message=NULL; c_p->receive_root=NIL;
   lb_work_receive_end(c_p,1);
@@ -5922,7 +6666,7 @@ Eterm* orig_htop=HTOP; Eterm* orig_stop=E;
       if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
       if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;
       SWAPIN;
-      if(bf!=lb_bif_abs_1 && bf!=lb_bif_floor_1 && bf!=lb_bif_ceil_1 && bf!=lb_bif_trunc_1 && bf!=lb_bif_round_1 && bf!=lb_bif_float_1 && (orig_htop!=HTOP || orig_stop!=E)) goto malformed_code;
+      if(bf!=lb_bif_abs_1 && bf!=lb_bif_floor_1 && bf!=lb_bif_ceil_1 && bf!=lb_bif_trunc_1 && bf!=lb_bif_round_1 && bf!=lb_bif_float_1 && bf!=lb_bif_binary_part_3 && bf!=lb_bif_band_2 && bf!=lb_bif_bor_2 && bf!=lb_bif_bxor_2 && bf!=lb_bif_bsl_2 && bf!=lb_bif_bsr_2 && bf!=lb_bif_bnot_1 && bf!=lb_bif_div_2 && (orig_htop!=HTOP || orig_stop!=E)) goto malformed_code;
       dst_ptr=REG_TARGET_PTR(dst);
 
 
@@ -6007,7 +6751,7 @@ Eterm* orig_htop=HTOP; Eterm* orig_stop=E;
       if(c_p->status==LB_PROCESS_ENVIRONMENT) goto environment_failure;
       if(c_p->status==LB_PROCESS_INVALID) goto malformed_code;
       SWAPIN;
-      if(bf!=lb_bif_abs_1 && bf!=lb_bif_floor_1 && bf!=lb_bif_ceil_1 && bf!=lb_bif_trunc_1 && bf!=lb_bif_round_1 && bf!=lb_bif_float_1 && (orig_htop!=HTOP || orig_stop!=E)) goto malformed_code;
+      if(bf!=lb_bif_abs_1 && bf!=lb_bif_floor_1 && bf!=lb_bif_ceil_1 && bf!=lb_bif_trunc_1 && bf!=lb_bif_round_1 && bf!=lb_bif_float_1 && bf!=lb_bif_binary_part_3 && bf!=lb_bif_band_2 && bf!=lb_bif_bor_2 && bf!=lb_bif_bxor_2 && bf!=lb_bif_bsl_2 && bf!=lb_bif_bsr_2 && bf!=lb_bif_bnot_1 && bf!=lb_bif_div_2 && (orig_htop!=HTOP || orig_stop!=E)) goto malformed_code;
       dst_ptr=REG_TARGET_PTR(dst);
 
 
@@ -6164,9 +6908,8 @@ Eterm* orig_htop=HTOP; Eterm* orig_stop=E;
     live = tb(tmp_packed1&BEAM_LOOSE_MASK);
 
     if (!is_boxed(context)) {
-      ASSERT(VALID_INSTR(*(I + (Sint)I[3])));
-      I += (Sint)I[3];;
-      Goto(*I);;
+      if(I[3]) { ASSERT(VALID_INSTR(*(I + (Sint)I[3]))); I += (Sint)I[3]; Goto(*I); }
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
     }
 
     header = *boxed_val(context);
@@ -6221,15 +6964,594 @@ Eterm* orig_htop=HTOP; Eterm* orig_stop=E;
 
       *dst_ptr = context;
     } else {
-      ASSERT(VALID_INSTR(*(I + (Sint)I[3])));
-      I += (Sint)I[3];;
-      Goto(*I);;
+      if(I[3]) { ASSERT(VALID_INSTR(*(I + (Sint)I[3]))); I += (Sint)I[3]; Goto(*I); }
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
     }
     I += 4;
     ASSERT(VALID_INSTR(*I));
     Goto(*I);
   }
 
+}
+
+{
+  Eterm context;
+  ErlSubBits *sb;
+  OpCase(i_bs_start_match3_gp_xtjdx): context=xb(I[1]); goto i_bs_start_match3_gp__execute;
+  OpCase(i_bs_start_match3_gp_ytjdx): context=yb(I[1]); goto i_bs_start_match3_gp__execute;
+  i_bs_start_match3_gp__execute:
+  {
+    Eterm packed=I[2],destination=db((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK);
+    Eterm *destination_ptr=REG_TARGET_PTR(destination);
+    Uint live=tb(packed&BEAM_TIGHT_MASK),position_destination=packed>>(2*BEAM_TIGHT_SHIFT),position;
+    Sint fail=(Sint)I[3];
+    Eterm header;
+    if(live>=MAX_REG || position_destination%sizeof(Eterm) || position_destination/sizeof(Eterm)>=MAX_REG) goto malformed_code;
+    if(!is_boxed(context)) {
+      if(!fail) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+      ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I);
+    }
+    header=*boxed_val(context);
+    if(!is_bitstring_header(header)) {
+      if(!fail) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+      ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I);
+    }
+    sb=NULL;
+    if(header==HEADER_SUB_BITS) {
+      sb=(ErlSubBits*)bitstring_val(context);
+      if(!erl_sub_bits_is_match_context(sb)) sb=NULL;
+    }
+    if(!sb) {
+      do {
+        if((Uint)(E-HTOP)<ERL_SUB_BITS_SIZE+S_RESERVED) {
+          SWAPOUT; c_p->i=I; reg[live]=context;
+          if(!lb_process_collect_live(c_p,ERL_SUB_BITS_SIZE,live+1)) goto memory_failure;
+          FCALLS-=(Sint)c_p->last_gc_cost; context=reg[live]; SWAPIN;
+        }
+        HEAP_SPACE_VERIFIED(ERL_SUB_BITS_SIZE);
+      } while(0);
+      HEAP_TOP(c_p)=HTOP;
+#ifdef DEBUG
+      c_p->stop=E;
+#endif
+      sb=lb_bs_start_match(c_p,context);
+      HTOP=HEAP_TOP(c_p); HEAP_SPACE_VERIFIED(0);
+      destination_ptr=REG_TARGET_PTR(destination); context=make_bitstring(sb);
+    }
+    position=sb->start;
+    *destination_ptr=context;
+    xb(position_destination)=make_small(position);
+    I+=4; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
+  Eterm context,packed;
+  ErlSubBits *sb;
+  BeamInstr next_pf;
+  Uint destination;
+  int destination_is_y;
+  OpCase(i_bs_get_position_xx):
+  {
+    packed=I[1]; context=xb(packed&BEAM_LOOSE_MASK); destination_is_y=0;
+    destination=packed>>BEAM_LOOSE_SHIFT;
+  }
+  goto i_bs_get_position__execute;
+  OpCase(i_bs_get_position_xy):
+  {
+    packed=I[1]; context=xb(packed&BEAM_LOOSE_MASK); destination_is_y=1;
+    destination=packed>>BEAM_LOOSE_SHIFT;
+  }
+  goto i_bs_get_position__execute;
+  OpCase(i_bs_get_position_yx):
+  {
+    packed=I[1]; context=yb(packed&BEAM_LOOSE_MASK); destination_is_y=0;
+    destination=packed>>BEAM_LOOSE_SHIFT;
+  }
+  goto i_bs_get_position__execute;
+  OpCase(i_bs_get_position_yy):
+  {
+    packed=I[1]; context=yb(packed&BEAM_LOOSE_MASK); destination_is_y=1;
+    destination=packed>>BEAM_LOOSE_SHIFT;
+  }
+  i_bs_get_position__execute:
+  {
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    sb=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sb) || sb->start>sb->end || sb->start>(Uint)MAX_SMALL) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    if(destination_is_y) yb(destination)=make_small((Sint)sb->start);
+    else xb(destination)=make_small((Sint)sb->start);
+    next_pf=BeamCodeAddr(I[2]); I+=2;
+    ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
+  }
+}
+
+{
+  Eterm context;
+  ErlSubBits *sb;
+  OpCase(bs_get_tail_xdt):
+  {
+    context=xb(I[1]);
+  }
+  goto bs_get_tail__execute;
+  OpCase(bs_get_tail_ydt):
+  {
+    context=yb(I[1]);
+  }
+  bs_get_tail__execute:
+  {
+    Eterm packed=I[2],dst=db(I[2]&BEAM_LOOSE_MASK),result=THE_NON_VALUE;
+    Eterm *dst_ptr=REG_TARGET_PTR(dst);
+    Uint live=tb(packed>>BEAM_LOOSE_SHIFT),need=LB_REFC_BITS_WORDS;
+    BeamInstr next_pf=BeamCodeAddr(I[3]);
+    if(live>=MAX_REG) goto malformed_code;
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    if((E-HTOP)<(Sint)(need+S_RESERVED)) {
+      SWAPOUT; reg[live]=context;
+      if(!lb_process_collect_live(c_p,need,live+1)) goto memory_failure;
+      FCALLS-=(Sint)c_p->last_gc_cost;
+      context=reg[live]; SWAPIN;
+    }
+    HEAP_SPACE_VERIFIED(need);
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    sb=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sb)) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    Eterm *top=HTOP;
+    LbAllocStatus built=lb_bitstring_tail(c_p->entry_module->space->domain,&c_p->off_heap,&top,sb,&result);
+    if(built==LB_ALLOC_WORK_LIMIT) goto work_failure;
+    if(built==LB_ALLOC_LIMIT) goto resource_limit;
+    if(built==LB_ALLOC_NO_MEMORY) goto memory_failure;
+    if(built!=LB_ALLOC_OK) goto malformed_code;
+    HTOP=top; HEAP_TOP(c_p)=HTOP; HEAP_SPACE_VERIFIED(0);
+    dst_ptr=REG_TARGET_PTR(dst); *dst_ptr=result;
+    I+=3; ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
+  }
+}
+
+{
+  Eterm context,size;
+  OpCase(i_bs_skip_bits2_xxft): {
+    Eterm pair=I[1]; context=xb(pair&BEAM_LOOSE_MASK); size=xb(pair>>BEAM_LOOSE_SHIFT);
+    goto lb_skip_bits__execute;
+  }
+  OpCase(i_bs_skip_bits2_xyft): {
+    Eterm pair=I[1]; context=xb(pair&BEAM_LOOSE_MASK); size=yb(pair>>BEAM_LOOSE_SHIFT);
+    goto lb_skip_bits__execute;
+  }
+  OpCase(i_bs_skip_bits2_yxft): {
+    Eterm pair=I[1]; context=yb(pair&BEAM_LOOSE_MASK); size=xb(pair>>BEAM_LOOSE_SHIFT);
+    goto lb_skip_bits__execute;
+  }
+  OpCase(i_bs_skip_bits2_yyft): {
+    Eterm pair=I[1]; context=yb(pair&BEAM_LOOSE_MASK); size=yb(pair>>BEAM_LOOSE_SHIFT);
+    goto lb_skip_bits__execute;
+  }
+  lb_skip_bits__execute: {
+    Eterm packed=I[2]; Uint unit=tb(packed>>BEAM_WIDE_SHIFT);
+    Sint fail=fb(packed&BEAM_WIDE_MASK);
+    if(!unit) goto malformed_code;
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    LbSubBits *cursor=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(cursor) || cursor->start>cursor->end) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
+    if(is_small(size) && signed_val(size)>=0) {
+      Uint count=(Uint)signed_val(size);
+      if(count<=(Uint)-1/unit && count*unit<=cursor->end-cursor->start) {
+        cursor->start+=count*unit;
+        I+=3; ASSERT(VALID_INSTR(*I)); Goto(*I);
+      }
+    }
+    if(fail) { I+=fail; ASSERT(VALID_INSTR(*I)); Goto(*I); }
+    c_p->freason=LB_EXC_BADARG; goto find_func_info;
+  }
+}
+
+{
+  Eterm context,packed;
+  OpCase(i_bs_match_string_xfWW): packed=I[1]; context=xb(packed&BEAM_WIDE_MASK); goto lb_match_string__execute;
+  OpCase(i_bs_match_string_yfWW): packed=I[1]; context=yb(packed&BEAM_WIDE_MASK);
+  lb_match_string__execute:
+  {
+    Uint bits=I[2],bytes=bits/8+(bits%8!=0);
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) goto malformed_code;
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,lb_work_bulk_units(bytes))) goto work_failure;
+    int matched=lb_bs_match_string((LbSubBits *)boxed_val(context),(const unsigned char *)I[3],bits);
+    if(matched<0) goto malformed_code;
+    if(!matched) { I+=(Sint)fb(packed>>BEAM_WIDE_SHIFT); ASSERT(VALID_INSTR(*I)); Goto(*I); }
+    I+=4; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
+  Eterm context,destination;
+  ErlSubBits *sub;
+  Eterm *destination_pointer;
+  OpCase(i_bs_get_tail_xd): context=xb(I[1]); goto i_bs_get_tail__execute;
+  OpCase(i_bs_get_tail_yd): context=yb(I[1]);
+  i_bs_get_tail__execute:
+  {
+    Uint need=LB_BITSTRING_TAIL_HEAP_NEED;
+    Eterm *top=HTOP,result=THE_NON_VALUE;
+    LbAllocStatus built;
+    destination=db(I[2]); destination_pointer=REG_TARGET_PTR(destination);
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    if(c_p->heap_reserved<need || (E-HTOP)<(Sint)(need+S_RESERVED)) goto malformed_code;
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
+    built=lb_bitstring_tail(c_p->entry_module->space->domain,&c_p->off_heap,&top,sub,&result);
+    if(built==LB_ALLOC_WORK_LIMIT) goto work_failure;
+    if(built==LB_ALLOC_LIMIT) goto resource_limit;
+    if(built==LB_ALLOC_NO_MEMORY) goto memory_failure;
+    if(built!=LB_ALLOC_OK) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    if((size_t)(top-HTOP)>need) goto malformed_code;
+    HTOP=top; c_p->heap_reserved-=need; *destination_pointer=result;
+    I+=3; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
+  Eterm context,packed;
+  {
+  Eterm context,destination; Eterm *context_ptr,*destination_ptr; LbSubBits *sub;
+  OpCase(i_bs_get_fixed_binary_xId): context_ptr=&xb(I[1]); goto i_bs_get_fixed_binary__execute;
+  OpCase(i_bs_get_fixed_binary_yId): context_ptr=&yb(I[1]);
+  i_bs_get_fixed_binary__execute: {
+    Eterm packed=I[2],result=THE_NON_VALUE; Uint bits=Ib(packed&BEAM_WIDE_MASK);
+    size_t need; Eterm *top=HTOP; LbAllocStatus built;
+    context=*context_ptr; destination=db(packed>>BEAM_WIDE_SHIFT); destination_ptr=REG_TARGET_PTR(destination);
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end || bits>sub->end-sub->start) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    need=is_boxed(sub->orig) && *boxed_val(sub->orig)==LB_HEADER_BIN_REF?
+        LB_REFC_BITS_WORDS:lb_bitstring_heap_words(bits);
+    if(!need) goto malformed_code;
+    if(c_p->heap_reserved<need || (E-HTOP)<(Sint)(need+S_RESERVED)) {
+      SWAPOUT; c_p->i=I;
+      int reserved=lb_heap_reserve(c_p,need,MAX_REG);
+      SWAPIN; FCALLS-=(Sint)c_p->last_gc_cost;
+      if(!reserved) {
+        LbAllocStatus failure=lb_alloc_domain_failure(c_p->entry_module->space->domain);
+        if(failure==LB_ALLOC_LIMIT) goto resource_limit;
+        if(failure==LB_ALLOC_WORK_LIMIT) goto work_failure;
+        goto memory_failure;
+      }
+      c_p->heap_reserved=need; context=*context_ptr; sub=(LbSubBits *)boxed_val(context);
+      destination_ptr=REG_TARGET_PTR(destination);
+    }
+    top=HTOP;
+    built=lb_bitstring_slice(c_p->entry_module->space->domain,&c_p->off_heap,&top,sub,bits,&result);
+    if(built==LB_ALLOC_WORK_LIMIT) goto work_failure;
+    if(built==LB_ALLOC_LIMIT) goto resource_limit;
+    if(built==LB_ALLOC_NO_MEMORY) goto memory_failure;
+    if(built!=LB_ALLOC_OK || (size_t)(top-HTOP)!=need) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    sub->start+=bits; HTOP=top; c_p->heap_reserved-=need;
+    *destination_ptr=result; I+=3; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
+  Eterm context,destination; Eterm *destination_ptr; LbSubBits *sub;
+  OpCase(i_bs_get_binary2_xftStd): context=xb(I[1]); goto i_bs_get_binary2__execute;
+  OpCase(i_bs_get_binary2_yftStd): context=yb(I[1]);
+  i_bs_get_binary2__execute: {
+    Eterm packed=I[3],result=THE_NON_VALUE,encoded_size=Sb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK);
+    Uint unit=tb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK),live=tb(packed&BEAM_LOOSE_MASK);
+    Sint signed_size; Uint bits; size_t need=LB_BITSTRING_TAIL_HEAP_NEED;
+    Eterm *top; LbAllocStatus built;
+    destination=db(packed>>(3*BEAM_LOOSE_SHIFT)); destination_ptr=REG_TARGET_PTR(destination);
+    if(!is_small(encoded_size) || (signed_size=signed_val(encoded_size))<0 || !unit ||
+       (Uint)signed_size>(Uint)-1/unit) goto i_bs_get_binary2__fail;
+    bits=(Uint)signed_size*unit;
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) goto malformed_code;
+    sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end) goto malformed_code;
+    if(bits>sub->end-sub->start) goto i_bs_get_binary2__fail;
+    if((E-HTOP)<(Sint)(need+S_RESERVED)) {
+      if(!is_nil(c_p->construction_root)) goto malformed_code;
+      c_p->construction_root=context;
+      SWAPOUT; c_p->i=I;
+      int reserved=lb_heap_reserve(c_p,need,live);
+      SWAPIN; context=c_p->construction_root; c_p->construction_root=NIL;
+      if(!reserved) {
+        LbAllocStatus failure=lb_alloc_domain_failure(c_p->entry_module->space->domain);
+        if(failure==LB_ALLOC_LIMIT) goto resource_limit;
+        if(failure==LB_ALLOC_WORK_LIMIT) goto work_failure;
+        goto memory_failure;
+      }
+      destination_ptr=REG_TARGET_PTR(destination); sub=(LbSubBits *)boxed_val(context);
+    }
+    top=HTOP;
+    built=lb_bitstring_slice(c_p->entry_module->space->domain,&c_p->off_heap,&top,sub,bits,&result);
+    if(built==LB_ALLOC_WORK_LIMIT) goto work_failure;
+    if(built==LB_ALLOC_LIMIT) goto resource_limit;
+    if(built==LB_ALLOC_NO_MEMORY) goto memory_failure;
+    if(built==LB_ALLOC_INVALID) goto i_bs_get_binary2__fail;
+    if(built!=LB_ALLOC_OK || (size_t)(top-HTOP)>need) goto malformed_code;
+    sub->start+=bits; HTOP=top; *destination_ptr=result;
+    I+=4; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+  i_bs_get_binary2__fail:
+    ASSERT(VALID_INSTR(*(I+I[2]))); I+=I[2]; Goto(*I);
+}
+
+{
+  Eterm context; LbSubBits *sub; BeamInstr next_pf;
+  OpCase(i_bs_skip_xI): context=xb(I[1]); goto i_bs_skip__execute;
+  OpCase(i_bs_skip_yI): context=yb(I[1]);
+  i_bs_skip__execute: {
+    Uint bits=I[2]; next_pf=BeamCodeAddr(I[3]);
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end || bits>sub->end-sub->start) goto malformed_code;
+    sub->start+=bits; I+=3; ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
+  }
+}
+
+OpCase(i_bs_drop_I): {
+  BeamInstr next_pf=BeamCodeAddr(I[2]); bitdata<<=I[1]; I+=2;
+  ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
+}
+
+OpCase(i_bs_test_unit8_fx): packed=I[1]; context=xb(packed>>BEAM_WIDE_SHIFT); goto i_bs_test_unit8__execute;
+  OpCase(i_bs_test_unit8_fy): packed=I[1]; context=yb(packed>>BEAM_WIDE_SHIFT); goto i_bs_test_unit8__execute;
+  i_bs_test_unit8__execute:
+  {
+    Sint fail=fb(packed&BEAM_WIDE_MASK);
+    int failed=0;
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) failed=1;
+    else {
+      ErlSubBits *sb=(ErlSubBits*)boxed_val(context);
+      if(!lb_is_match_context(sb) || sb->start>sb->end) goto malformed_code;
+      failed=((sb->end-sb->start)&7)!=0;
+    }
+    if(failed) {
+      if(!fail) goto malformed_code;
+      ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I);
+    }
+    I+=2; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
+  Eterm context,destination; Eterm *destination_ptr; LbSubBits *sub; Uint size,flags;
+  const unsigned char *base; Eterm result; size_t digits,words;
+  OpCase(i_bs_get_fixed_integer_xItd): context=xb(I[1]); goto i_bs_get_fixed_integer__execute;
+  OpCase(i_bs_get_fixed_integer_yItd): context=yb(I[1]);
+  i_bs_get_fixed_integer__execute: {
+    size=Ib(I[2]); flags=tb(I[3]); destination=db(I[4]); destination_ptr=REG_TARGET_PTR(destination);
+    if((flags&~(1u|BSF_LITTLE|BSF_SIGNED)) || size>65536) goto malformed_code;
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end || size>sub->end-sub->start) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,lb_work_bulk_units(size))) goto work_failure;
+    digits=size?(size-1)/64+1:0; words=digits+1;
+    if(size<SMALL_BITS) {
+      Uint value=0; base=(const unsigned char *)(sub->base_flags&~(Uint)LB_SUB_WRITABLE);
+      for(Uint bit=0;bit<size;++bit) {
+        Uint position=bit;
+        if(flags&BSF_LITTLE) {
+          Uint byte=bit/8,within=bit%8,chunk=size-byte*8;
+          if(chunk>8) chunk=8;
+          position=byte*8+chunk-1-within;
+        } else position=size-1-bit;
+        value|=(Uint)((base[(sub->start+bit)/8]>>(7-((sub->start+bit)&7)))&1)<<position;
+      }
+      Sint integer=(Sint)value;
+      if((flags&BSF_SIGNED) && size && (value&((Uint)1<<(size-1)))) integer-=(Sint)((Uint)1<<size);
+      result=make_small(integer);
+    } else {
+      if(!size || c_p->heap_reserved<words || (size_t)(E-HTOP)<words+S_RESERVED) goto malformed_code;
+      Eterm *big=HTOP; Uint sign=0; big[0]=_make_header(digits,POS_BIG_SUBTAG);
+      for(size_t i=0;i<digits;++i) big[i+1]=0;
+      base=(const unsigned char *)(sub->base_flags&~(Uint)LB_SUB_WRITABLE);
+      for(Uint bit=0;bit<size;++bit) {
+        Uint position=bit;
+        if(flags&BSF_LITTLE) {
+          Uint byte=bit/8,within=bit%8,chunk=size-byte*8;
+          if(chunk>8) chunk=8;
+          position=byte*8+chunk-1-within;
+        } else position=size-1-bit;
+        if((base[(sub->start+bit)/8]>>(7-((sub->start+bit)&7)))&1)
+          big[1+position/64]|=(Uint)1<<(position%64);
+      }
+      if((flags&BSF_SIGNED) && (big[1+(size-1)/64]&((Uint)1<<((size-1)%64)))) {
+        Uint carry=1; sign=1;
+        for(Uint bit=0;bit<size;++bit) {
+          Uint digit=1+bit/64,mask=(Uint)1<<(bit%64),inverse=(big[digit]&mask)?0:1;
+          Uint result_bit=inverse^carry; carry=inverse&carry;
+          if(result_bit) big[digit]|=mask; else big[digit]&=~mask;
+        }
+      }
+      while(digits>1 && big[digits]==0) --digits;
+      if(digits==1 && big[1]<=(Uint)MAX_SMALL) result=make_small(sign?-(Sint)big[1]:(Sint)big[1]);
+      else {
+        big[0]=_make_header(digits,sign?NEG_BIG_SUBTAG:POS_BIG_SUBTAG); words=digits+1;
+        HTOP+=words; c_p->heap_reserved-=words; result=make_boxed(big);
+      }
+    }
+    sub->start+=size; *destination_ptr=result;
+    I+=5; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
+  Eterm context,size_term,destination; Eterm *destination_ptr; LbSubBits *sub;
+  Uint packed,live,flags_and_unit,flags,unit,size,digits,words;
+  Sint fail;
+  OpCase(i_bs_get_integer_xfttSd): context=xb(I[1]); goto i_bs_get_integer__execute;
+  OpCase(i_bs_get_integer_yfttSd): context=yb(I[1]);
+  i_bs_get_integer__execute: {
+    fail=(Sint)I[2]; packed=I[3];
+    live=tb(packed&BEAM_LOOSE_MASK);
+    flags_and_unit=tb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK);
+    flags=flags_and_unit&7; unit=flags_and_unit>>3;
+    size_term=Sb((packed>>(2*BEAM_LOOSE_SHIFT))&BEAM_LOOSE_MASK);
+    destination=db(packed>>(3*BEAM_LOOSE_SHIFT)); destination_ptr=REG_TARGET_PTR(destination);
+    if(!unit || !is_small(size_term)) goto malformed_code;
+    Sint signed_size=signed_val(size_term);
+    if(signed_size<0 || (Uint)signed_size>UINTPTR_MAX/unit) goto i_bs_get_integer__failure;
+    size=(Uint)signed_size*unit;
+    if(size>SIZE_MAX-63) goto i_bs_get_integer__failure;
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end) goto malformed_code;
+    if(size>sub->end-sub->start) goto i_bs_get_integer__failure;
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,lb_work_bulk_units(size))) goto work_failure;
+    digits=size?(size-1)/64+1:0; words=digits+1;
+    if(size>=SMALL_BITS && (Uint)(E-HTOP)<words+S_RESERVED) {
+      if(live>=MAX_REG) goto malformed_code;
+      SWAPOUT; c_p->i=I; reg[live]=context;
+      if(!lb_process_collect_live(c_p,words,live+1)) goto memory_failure;
+      FCALLS-=(Sint)c_p->last_gc_cost; context=reg[live]; SWAPIN;
+      sub=(LbSubBits *)boxed_val(context); destination_ptr=REG_TARGET_PTR(destination);
+    }
+    if(size>=SMALL_BITS && c_p->heap_reserved<words) goto malformed_code;
+    if(size<SMALL_BITS) {
+      Uint value=0; const unsigned char *base=(const unsigned char *)(sub->base_flags&~(Uint)LB_SUB_WRITABLE);
+      for(Uint bit=0;bit<size;++bit) {
+        Uint position=bit;
+        if(flags&BSF_LITTLE) {
+          Uint byte=bit/8,within=bit%8,chunk=size-byte*8;
+          if(chunk>8) chunk=8;
+          position=byte*8+chunk-1-within;
+        } else position=size-1-bit;
+        value|=(Uint)((base[(sub->start+bit)/8]>>(7-((sub->start+bit)&7)))&1)<<position;
+      }
+      Sint integer=(Sint)value;
+      if((flags&BSF_SIGNED) && size && (value&((Uint)1<<(size-1)))) integer-=(Sint)((Uint)1<<size);
+      *destination_ptr=make_small(integer);
+    } else {
+      Eterm *big=HTOP; Uint sign=0;
+      const unsigned char *base=(const unsigned char *)(sub->base_flags&~(Uint)LB_SUB_WRITABLE);
+      big[0]=_make_header(digits,POS_BIG_SUBTAG);
+      for(Uint i=0;i<digits;++i) big[i+1]=0;
+      for(Uint bit=0;bit<size;++bit) {
+        Uint position=bit;
+        if(flags&BSF_LITTLE) {
+          Uint byte=bit/8,within=bit%8,chunk=size-byte*8;
+          if(chunk>8) chunk=8;
+          position=byte*8+chunk-1-within;
+        } else position=size-1-bit;
+        if((base[(sub->start+bit)/8]>>(7-((sub->start+bit)&7)))&1)
+          big[1+position/64]|=(Uint)1<<(position%64);
+      }
+      if((flags&BSF_SIGNED) && (big[1+(size-1)/64]&((Uint)1<<((size-1)%64)))) {
+        Uint carry=1; sign=1;
+        for(Uint bit=0;bit<size;++bit) {
+          Uint digit=1+bit/64,mask=(Uint)1<<(bit%64),inverse=(big[digit]&mask)?0:1;
+          Uint result=inverse^carry; carry=inverse&carry;
+          if(result) big[digit]|=mask; else big[digit]&=~mask;
+        }
+      }
+      while(digits>1 && big[digits]==0) --digits;
+      if(digits==1 && big[1]<=(Uint)MAX_SMALL) *destination_ptr=make_small(sign?-(Sint)big[1]:(Sint)big[1]);
+      else {
+        words=digits+1; big[0]=_make_header(digits,sign?NEG_BIG_SUBTAG:POS_BIG_SUBTAG);
+        HTOP+=words; c_p->heap_reserved-=words; *destination_ptr=make_boxed(big);
+      }
+    }
+    sub->start+=size; I+=4; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  i_bs_get_integer__failure:
+    if(fail) { ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I); }
+    c_p->freason=LB_EXC_BADARG; goto find_func_info;
+  }
+}
+
+{
+  Eterm context,destination; Eterm *destination_ptr; LbSubBits *sub; Sint fail;
+  OpCase(i_bs_get_utf8_xfd): context=xb(I[1]); goto i_bs_get_utf8__execute;
+  OpCase(i_bs_get_utf8_yfd): context=yb(I[1]);
+  i_bs_get_utf8__execute: {
+    fail=fb(I[2]); Uint value=0,first,needed=0,consumed; Uint bit;
+    const byte *base;
+    destination=db(I[3]); destination_ptr=REG_TARGET_PTR(destination);
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end) goto malformed_code;
+    if(sub->end-sub->start<8) goto i_bs_get_utf8__fail;
+    base=erl_sub_bits_get_base(sub);
+    bit=sub->start;
+    for(Uint i=0;i<8;++i) value=(value<<1)|((base[(bit+i)/8]>>(7-((bit+i)&7)))&1);
+    first=value;
+    if(first<0x80) { needed=1; value=first; }
+    else if(first>=0xc2 && first<=0xdf) { needed=2; value=first&0x1f; }
+    else if(first>=0xe0 && first<=0xef) { needed=3; value=first&0x0f; }
+    else if(first>=0xf0 && first<=0xf4) { needed=4; value=first&0x07; }
+    else goto i_bs_get_utf8__fail;
+    if((Uint)(sub->end-sub->start)<needed*8) goto i_bs_get_utf8__fail;
+    for(Uint j=1;j<needed;++j) {
+      Uint next=0; bit=sub->start+j*8;
+      for(Uint i=0;i<8;++i) next=(next<<1)|((base[(bit+i)/8]>>(7-((bit+i)&7)))&1);
+      if((next&0xc0)!=0x80 || (j==1 && ((first==0xe0 && next<0xa0) || (first==0xed && next>=0xa0) || (first==0xf0 && next<0x90) || (first==0xf4 && next>=0x90)))) goto i_bs_get_utf8__fail;
+      value=(value<<6)|(next&0x3f);
+    }
+    consumed=needed*8;
+    sub->start+=consumed; *destination_ptr=make_small(value);
+    I+=4; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+  i_bs_get_utf8__fail:
+    if(!fail) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I);
+}
+
+{
+  Eterm context,position,packed;
+  ErlSubBits *sb;
+  BeamInstr next_pf;
+  OpCase(bs_set_position_xx):
+  {
+    packed=I[1]; context=xb(packed&BEAM_LOOSE_MASK); position=xb(packed>>BEAM_LOOSE_SHIFT);
+  }
+  goto bs_set_position__execute;
+  OpCase(bs_set_position_xy):
+  {
+    packed=I[1]; context=xb(packed&BEAM_LOOSE_MASK); position=yb(packed>>BEAM_LOOSE_SHIFT);
+  }
+  goto bs_set_position__execute;
+  OpCase(bs_set_position_yx):
+  {
+    packed=I[1]; context=yb(packed&BEAM_LOOSE_MASK); position=xb(packed>>BEAM_LOOSE_SHIFT);
+  }
+  goto bs_set_position__execute;
+  OpCase(bs_set_position_yy):
+  {
+    packed=I[1]; context=yb(packed&BEAM_LOOSE_MASK); position=yb(packed>>BEAM_LOOSE_SHIFT);
+  }
+  bs_set_position__execute:
+  {
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS || !is_small(position)) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    sb=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sb) || sb->start>sb->end || signed_val(position)<0 ||
+       (Uint)signed_val(position)>sb->end) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    sb->start=(Uint)signed_val(position);
+    next_pf=BeamCodeAddr(I[2]); I+=2;
+    ASSERT(VALID_INSTR(next_pf)); GotoPF(next_pf);
+  }
 }
 
 {

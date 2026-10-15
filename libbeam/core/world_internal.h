@@ -8,6 +8,7 @@
 #include "executor.h"
 #include "alloc_internal.h"
 #include "work_budget.h"
+typedef struct LbTimer LbTimer;
 typedef enum { LB_WORLD_LOADING, LB_WORLD_RUNNING, LB_WORLD_STOPPING, LB_WORLD_RECLAIMED } LbWorldPhase;
 struct LbWorld {
     LbEngine *engine;
@@ -17,6 +18,7 @@ struct LbWorld {
     LbWorld *next;
     LbCall *calls;
     LbWorkBudget *budgets;
+    LbTimer *timers; /* owned delayed-message records, canceled before namespace teardown */
     size_t references, outstanding, queued_bytes;
     LbWorldPhase phase;
     int owner_live;
@@ -51,9 +53,11 @@ typedef struct LbSpawnMfa LbSpawnMfa;
 typedef struct LbLink LbLink;
 LbProcessStatus lb_task_spawn_fun_linked_locked(LbWorld *,LbProcess *,Eterm,LbLink *,Eterm *);
 LbProcessStatus lb_task_spawn_mfa_linked_locked(LbWorld *,LbProcess *,const LbSpawnMfa *,LbLink *,Eterm *);
+LbProcessStatus lb_task_spawn_mfa_linked_monitored_locked(LbWorld *,LbProcess *,const LbSpawnMfa *,LbMonitor *,LbLink *,Eterm *);
 LbProcessStatus lb_task_spawn_mfa_monitored_locked(LbWorld *,LbProcess *,const LbSpawnMfa *,LbMonitor *,Eterm *);
 LbProcessStatus lb_task_spawn_fun_monitored_locked(LbWorld *,LbProcess *,Eterm,LbMonitor *,Eterm *);
 LbProcessStatus lb_task_spawn_fun_locked(LbWorld *,LbProcess *,Eterm,Eterm *);
+LbProcessStatus lb_task_spawn_mfa_locked(LbWorld *,LbProcess *,const LbSpawnMfa *,Eterm *);
 /* Internal component seam: use a worker-produced retained closure, without
  * exposing the source process or interpreting on the host control thread. */
 LbProcessStatus lb_task_spawn_result_locked(LbWorld *,LbTask *,Eterm *);

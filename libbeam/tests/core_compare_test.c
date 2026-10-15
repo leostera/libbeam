@@ -35,6 +35,11 @@ static void equal(LbAllocDomain *domain,Eterm a,Eterm b,int expected)
     int same=-1; CHECK(lb_term_equal(domain,a,b,&same)==LB_ALLOC_OK && same==expected);
     same=-1; CHECK(lb_term_equal(domain,b,a,&same)==LB_ALLOC_OK && same==expected);
 }
+static void loose_equal(LbAllocDomain *domain,Eterm a,Eterm b,int expected)
+{
+    int same=-1; CHECK(lb_term_loose_equal(domain,a,b,&same)==LB_ALLOC_OK && same==expected);
+    same=-1; CHECK(lb_term_loose_equal(domain,b,a,&same)==LB_ALLOC_OK && same==expected);
+}
 static void components(void)
 {
     Memory m={0}; LbSystemAllocator allocator={&m,allocate,release}; LbAllocDomain *domain;
@@ -42,6 +47,11 @@ static void components(void)
     Eterm big_a[]={_make_header(1,POS_BIG_SUBTAG),UINT64_C(1)<<63};
     Eterm big_b[]={_make_header(1,POS_BIG_SUBTAG),UINT64_C(1)<<63};
     Eterm float_a[]={_make_header(1,FLOAT_SUBTAG),0},float_b[]={_make_header(1,FLOAT_SUBTAG),0};
+    Eterm float_one[]={_make_header(1,FLOAT_SUBTAG),UINT64_C(0x3ff0000000000000)};
+    Eterm float_fraction[]={_make_header(1,FLOAT_SUBTAG),UINT64_C(0x3ff8000000000000)};
+    Eterm float_two53[]={_make_header(1,FLOAT_SUBTAG),UINT64_C(0x4340000000000000)};
+    Eterm float_negative_zero[]={_make_header(1,FLOAT_SUBTAG),UINT64_C(0x8000000000000000)};
+    Eterm float_nan[]={_make_header(1,FLOAT_SUBTAG),UINT64_C(0x7ff8000000000000)};
     CHECK(lb_alloc_domain_create(&allocator,&domain)==LB_ALLOC_OK);
     equal(domain,NIL,NIL,1); equal(domain,NIL,make_small(0),0);
     equal(domain,make_atom(10),make_atom(10),1); equal(domain,make_atom(10),make_small(10),0);
@@ -50,6 +60,12 @@ static void components(void)
     equal(domain,make_boxed(float_a),make_boxed(float_b),1); float_b[1]=UINT64_C(1)<<63;
     equal(domain,make_boxed(float_a),make_boxed(float_b),0);
     equal(domain,make_small(0),make_boxed(float_a),0);
+    loose_equal(domain,make_small(1),make_boxed(float_one),1);
+    loose_equal(domain,make_small(1),make_boxed(float_fraction),0);
+    loose_equal(domain,make_small(INT64_C(9007199254740992)),make_boxed(float_two53),1);
+    loose_equal(domain,make_small(INT64_C(9007199254740993)),make_boxed(float_two53),0);
+    loose_equal(domain,make_small(0),make_boxed(float_negative_zero),1);
+    loose_equal(domain,make_small(1),make_boxed(float_nan),0);
     CHECK(lb_term_tuple(empty_a,2,NULL,0,&av) && lb_term_tuple(empty_b,2,NULL,0,&bv)); equal(domain,av,bv,1);
     av=CONS(list_a,make_small(1),make_atom(3)); bv=CONS(list_b,make_small(1),make_atom(3));
     equal(domain,av,bv,1); list_b[1]=NIL; equal(domain,av,bv,0);

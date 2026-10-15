@@ -72,9 +72,28 @@ defmodule HelloWorkerFixture do
         end
     end
     {:ok, {^name, [imports: imports]}} = :beam_lib.chunks(bytes, [:imports])
+    {:beam_file, ^name, _, _, _, code} = :beam_disasm.file(bytes)
     dependencies = Enum.map(imports, fn {module, _, _} -> module end)
-    closure(dependencies ++ rest, roots, Map.put(found, name, bytes))
+    external_funs = external_fun_modules(code)
+    closure(external_funs ++ dependencies ++ rest, roots, Map.put(found, name, bytes))
   end
+
+  defp external_fun_modules(term) when is_function(term) do
+    case :erlang.fun_info(term, :type) do
+      {:type, :external} ->
+        case :erlang.fun_info_mfa(term) do
+          {module, _function, _arity} -> [module]
+        end
+      _ -> []
+    end
+  end
+  defp external_fun_modules(term) when is_tuple(term),
+    do: term |> Tuple.to_list() |> external_fun_modules()
+  defp external_fun_modules([head | tail]),
+    do: external_fun_modules(head) ++ external_fun_modules(tail)
+  defp external_fun_modules(term) when is_map(term),
+    do: term |> Map.to_list() |> external_fun_modules()
+  defp external_fun_modules(_term), do: []
 end
 
 [source, output] = System.argv()

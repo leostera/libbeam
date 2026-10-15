@@ -7,6 +7,8 @@
 #include "flatmap.h"
 #include "world_internal.h"
 #include "exit_signal.h"
+#include "message.h"
+#include <stdio.h>
 typedef enum {
     UNIQUE_DEFAULT=0, UNIQUE_POSITIVE=1, UNIQUE_MONOTONIC=2,
     UNIQUE_POSITIVE_MONOTONIC=3
@@ -133,6 +135,30 @@ Eterm lb_bif_group_leader_2(LbProcess *p,Eterm *args,const BeamInstr *instructio
 }
 /* bif.c:send_2 delegates to the same local delivery path as the send
  * instruction. Charge invocation before lookup, allocation or publication. */
+Eterm lb_bif_port_info_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!is_port(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    /* This code space owns no host ports; a well-formed port term therefore
+     * names a closed port, whose native info query is undefined. */
+    return am_undefined;
+}
+Eterm lb_bif_port_info_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!is_port(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    return am_undefined;
+}
+Eterm lb_bif_yield_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)args; (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    p->yield_requested=1; return am_true;
+}
 Eterm lb_bif_send_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)instruction; p->last_native_cost=1;
@@ -141,6 +167,40 @@ Eterm lb_bif_send_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     }
     Eterm result=lb_erl_send(p,args[0],args[1]);
     ++p->last_native_cost; return result;
+}
+Eterm lb_bif_send_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain;
+    p->last_native_cost=0;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++p->last_native_cost; int no_suspend=0,no_connect=0; Eterm options=args[2];
+    while(is_list(options)) {
+        if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost; Eterm option=CAR(list_val(options));
+        if(option==am_nosuspend) no_suspend=1;
+        else if(option==am_noconnect) no_connect=1;
+        else { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+        options=CDR(list_val(options));
+    }
+    if(!is_nil(options)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    Uint validation_cost=p->last_native_cost; Eterm destination=args[0];
+    if(is_external_pid(destination)) {
+        if(no_connect) return am_noconnect;
+        static const LbCapabilityFailure failure={LB_CAPABILITY_DISTRIBUTION,"erlang","send",3,
+            "erlang:send/3 denied: DISTRIBUTION"};
+        Eterm denied=lb_process_deny_capability(p,&failure); (void)denied;
+        p->last_native_cost+=validation_cost; return THE_NON_VALUE;
+    }
+    if(is_port(destination)) {
+        static const LbCapabilityFailure failure={LB_CAPABILITY_HOST_PORT,"erlang","send",3,
+            "erlang:send/3 denied: HOST_PORT"};
+        Eterm denied=lb_process_deny_capability(p,&failure); (void)denied;
+        p->last_native_cost+=validation_cost; return THE_NON_VALUE;
+    }
+    Eterm result=lb_erl_send(p,destination,args[1]);
+    p->last_native_cost+=validation_cost;
+    if(is_non_value(result)) return result;
+    (void)no_suspend; return am_ok;
 }
 /* Collection is transactional: failure precedes every forwarding write.
  * Domain borrowing keeps all work charged to the requesting invocation. */
@@ -180,6 +240,137 @@ Eterm lb_bif_garbage_collect_1(LbProcess *p,Eterm *args,const BeamInstr *instruc
     assert(target==p || !target->running);
     return collect_process(p,target,target==p?1:MAX_REG);
 }
+static Eterm ascii_list(LbProcess *p,const char *text,size_t length)
+{
+    size_t words,need,collections=p->collections;
+    if(!lb_size_mul(length,2,&words) || !lb_size_add(words,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(p->entry_module->space->domain,(Uint)length)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=(Uint)length;
+    if(!lb_heap_reserve(p,need,MAX_REG)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(p->entry_module->space->domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:cause==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    Eterm list=NIL;
+    for(size_t i=length;i>0;--i) {
+        p->htop[0]=make_small((unsigned char)text[i-1]); p->htop[1]=list;
+        list=make_list(p->htop); p->htop+=2;
+    }
+    return list;
+}
+static int ascii_string(LbProcess *p,Eterm value,char *text,size_t capacity,size_t *length)
+{
+    size_t n=0; Eterm tail=value;
+    while(is_list(tail)) {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return 0; }
+        ++p->last_native_cost;
+        Eterm head=CAR(list_val(tail));
+        if(!is_small(head) || signed_val(head)<0 || signed_val(head)>127 || n==capacity) {
+            p->freason=LB_EXC_BADARG; return 0;
+        }
+        text[n++]=(char)signed_val(head); tail=CDR(list_val(tail));
+    }
+    if(!is_nil(tail)) { p->freason=LB_EXC_BADARG; return 0; }
+    *length=n; return 1;
+}
+static int decimal_component(const char *text,size_t length,size_t *offset,char separator,Uint maximum,Uint *value)
+{
+    size_t i=*offset; Uint n=0; size_t digits=0;
+    while(i<length && text[i]>='0' && text[i]<='9') {
+        unsigned digit=(unsigned)(text[i]-'0');
+        if(n>(maximum-digit)/10) return 0;
+        n=n*10+digit; ++i; ++digits;
+    }
+    if(!digits || i>=length || text[i]!=separator) return 0;
+    *offset=i+1; *value=n; return 1;
+}
+Eterm lb_bif_pid_to_list_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!is_pid(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(!is_internal_pid(args[0])) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    Uint number,serial;
+    if(!lb_pid_components(p->entry_module->space->pids,args[0],&number,&serial)) {
+        p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
+    }
+    char text[64]; int length=snprintf(text,sizeof(text),"<0.%u.%u>",(unsigned)number,(unsigned)serial);
+    if(length<=0 || (size_t)length>=sizeof(text)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    return ascii_list(p,text,(size_t)length);
+}
+Eterm lb_bif_list_to_pid_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=0;
+    char text[64]; size_t length=0,offset=0; Uint number,serial; Eterm result;
+    if(!ascii_string(p,args[0],text,sizeof(text),&length)) return THE_NON_VALUE;
+    if(length<7 || text[0]!='<' || text[1]!='0' || text[2]!='.') goto badarg;
+    offset=3;
+    if(!decimal_component(text,length,&offset,'.',(UINT64_C(1)<<28)-1,&number) ||
+       !decimal_component(text,length,&offset,'>',UINT32_MAX,&serial) || offset!=length) goto badarg;
+    if(!lb_pid_from_components(p->entry_module->space->pids,number,serial,&result)) {
+        p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
+    }
+    return result;
+badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_ref_to_list_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    const LbOrdinaryRef *ref=lb_reference(args[0]);
+    if(!ref) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    char text[64]; int length=snprintf(text,sizeof(text),"#Ref<%u.%u.%u>",ref->num[2],ref->num[1],ref->num[0]);
+    if(length<=0 || (size_t)length>=sizeof(text)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    return ascii_list(p,text,(size_t)length);
+}
+Eterm lb_bif_list_to_ref_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=0;
+    char text[64]; size_t length=0,offset=0; Uint first,second,third;
+    if(!ascii_string(p,args[0],text,sizeof(text),&length)) return THE_NON_VALUE;
+    if(length<10 || memcmp(text,"#Ref<",5)) goto badarg;
+    offset=5;
+    if(!decimal_component(text,length,&offset,'.',UINT32_MAX,&first) ||
+       !decimal_component(text,length,&offset,'.',UINT32_MAX,&second) ||
+       !decimal_component(text,length,&offset,'>',UINT32_MAX,&third) || offset!=length) goto badarg;
+    size_t need;
+    if(!lb_size_add(LB_REF_WORDS,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(p->entry_module->space->domain,LB_REF_WORDS)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=LB_REF_WORDS;
+    if(!lb_heap_reserve(p,need,MAX_REG)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(p->entry_module->space->domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:cause==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT;
+        return THE_NON_VALUE;
+    }
+    Eterm result=lb_reference_from_numbers(p->htop,(uint32_t)first,(uint32_t)second,(uint32_t)third);
+    p->htop+=LB_REF_WORDS; return result;
+badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_port_to_list_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!is_port(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(!is_internal_port(args[0])) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    char text[64]; unsigned long long number=(unsigned long long)(args[0]>>_TAG_IMMED1_SIZE);
+    int length=snprintf(text,sizeof(text),"#Port<0.%llu>",number);
+    if(length<=0 || (size_t)length>=sizeof(text)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    return ascii_list(p,text,(size_t)length);
+}
+Eterm lb_bif_list_to_port_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=0;
+    char text[64]; size_t length=0,offset=0; Uint channel,number;
+    if(!ascii_string(p,args[0],text,sizeof(text),&length)) return THE_NON_VALUE;
+    if(length<10 || memcmp(text,"#Port<",6)) goto badarg;
+    offset=6;
+    if(!decimal_component(text,length,&offset,'.',UINT32_MAX,&channel) ||
+       !decimal_component(text,length,&offset,'>',UINT64_MAX>>_TAG_IMMED1_SIZE,&number) || offset!=length) goto badarg;
+    if(channel) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    return (number<<_TAG_IMMED1_SIZE)|_TAG_IMMED1_PORT;
+badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
 Eterm lb_bif_self_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)args; (void)instruction;
@@ -191,15 +382,14 @@ Eterm lb_bif_self_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 /* Ordinary local process monitor: validate before effects, stage the ref and
  * either a pair of monitor halves or an owned immediate noproc notification.
  * The reference counter and heap top commit only after fallible work ends. */
-Eterm lb_bif_monitor_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+static Eterm monitor_process(LbProcess *p,Eterm type,Eterm target,Eterm tag)
 {
-    (void)pc; LbCodeSpace *space=p->entry_module->space; LbEngine *engine=space->engine;
-    LbAllocDomain *domain=space->domain; Eterm target=args[1],name=NIL;
+    LbCodeSpace *space=p->entry_module->space; LbEngine *engine=space->engine;
+    LbAllocDomain *domain=space->domain; Eterm name=NIL;
     p->last_native_cost=1;
-    if(args!=p->reg) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
     if(!lb_work_domain_charge(domain,1)) goto work;
-    if(args[0]!=am_process) {
-        if(args[0]==am_port) {
+    if(type!=am_process) {
+        if(type==am_port) {
             if(is_atom(target) || (target&_TAG_IMMED1_MASK)==_TAG_IMMED1_PORT ||
                (is_boxed(target) && (*boxed_val(target)&_TAG_HEADER_MASK)==EXTERNAL_PORT_SUBTAG)) goto refused;
             if(is_tuple(target)) {
@@ -207,7 +397,7 @@ Eterm lb_bif_monitor_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
                 if(arityval(tuple[0])==2 && is_atom(tuple[1]) && is_atom(tuple[2]) && tuple[2]==space->node_name) goto refused;
             }
         }
-        if(args[0]==am_time_offset && target==am_clock_service) goto refused;
+        if(type==am_time_offset && target==am_clock_service) goto refused;
         goto badarg;
     }
     if(is_tuple(target)) {
@@ -236,12 +426,12 @@ Eterm lb_bif_monitor_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
         if(status!=LB_PROCESS_READY) { if(status==LB_PROCESS_NO_MEMORY) goto memory; p->status=status; return THE_NON_VALUE; }
         LbMonitor *monitor;
         if(lb_monitor_prepare(p,ref,&monitor)!=LB_PROCESS_READY) goto memory;
-        monitor->target_name=name;
+        monitor->target_name=name; monitor->down_tag=tag;
         lb_monitor_publish(monitor,other);
     } else if(!other) {
         Eterm named[3]={make_arityval(2),name,space->node_name};
         Eterm object=is_atom(name)?make_boxed(named):target;
-        Eterm tuple[6]={make_arityval(5),am_DOWN,ref,am_process,object,am_noproc};
+        Eterm tuple[6]={make_arityval(5),tag,ref,am_process,object,am_noproc};
         LbMessage *message; Uint cost=0;
         LbProcessStatus status=lb_message_create(space,make_boxed(tuple),&message,&cost); p->last_native_cost+=cost;
         if(status!=LB_PROCESS_READY) { if(status==LB_PROCESS_NO_MEMORY) goto memory; p->status=status; return THE_NON_VALUE; }
@@ -261,6 +451,29 @@ memory: {
     return THE_NON_VALUE;
 }
 }
+Eterm lb_bif_monitor_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc;
+    if(args!=p->reg) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+    return monitor_process(p,args[0],args[1],am_DOWN);
+}
+Eterm lb_bif_monitor_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc;
+    if(args!=p->reg) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+    Eterm options=args[2],tag=am_DOWN; size_t count=0;
+    while(is_list(options)) {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        if(++count>64) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+        Eterm option=CAR(list_val(options)); options=CDR(list_val(options));
+        if(!is_tuple(option)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+        Eterm *tuple=tuple_val(option);
+        if(arityval(tuple[0])!=2 || tuple[1]!=am_tag || !is_atom(tuple[2])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+        tag=tuple[2];
+    }
+    if(!is_nil(options)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    return monitor_process(p,args[0],args[1],tag);
+}
 Eterm lb_bif_demonitor_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     (void)pc; p->last_native_cost=1;
@@ -269,11 +482,262 @@ Eterm lb_bif_demonitor_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     lb_monitor_demonitor(p,args[0],0);
     return p->status==LB_PROCESS_WORK_LIMIT?THE_NON_VALUE:am_true;
 }
+Eterm lb_bif_spawn_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain;
+    p->last_native_cost=0;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++p->last_native_cost;
+    if(!is_atom(args[0])) goto badarg;
+    const LbFun *fun=lb_fun(args[1]); LbSpawnMfa mfa={0}; int is_fun=0;
+    if(fun) {
+        if(lb_fun_arity(fun)!=0) goto badarg;
+        is_fun=1;
+    } else if(is_tuple(args[1])) {
+        Eterm *tuple=tuple_val(args[1]);
+        if(arityval(tuple[0])!=2 || !is_atom(tuple[1]) || !is_atom(tuple[2])) goto badarg;
+        mfa=(LbSpawnMfa){tuple[1],tuple[2],NIL,0};
+    } else goto badarg;
+    if(args[0]!=p->entry_module->space->node_name) {
+        static const LbCapabilityFailure failure={LB_CAPABILITY_DISTRIBUTION,"erlang","spawn",2,
+            "erlang:spawn/2 denied: DISTRIBUTION"};
+        uint64_t validation_cost=p->last_native_cost;
+        Eterm denied=lb_process_deny_capability(p,&failure); (void)denied;
+        p->last_native_cost+=validation_cost; return THE_NON_VALUE;
+    }
+    if(!p->world || !p->running) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    Eterm pid; LbProcessStatus status=is_fun?lb_task_spawn_fun_locked(p->world,p,args[1],&pid):
+        lb_task_spawn_mfa_locked(p->world,p,&mfa,&pid);
+    if(status==LB_PROCESS_READY) return pid;
+    p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status; return THE_NON_VALUE;
+badarg:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+
 /* Native spawn_3/erl_create_process boundary: atoms and a proper argument
  * list are required. This executable slice owns the erlang:apply(F,[]) startup
  * for local fun/0 only; other valid MFAs/apply shapes refuse infrastructure
  * admission rather than pretending to be badarg or silently changing spawn/1
  * (which remains an Erlang wrapper, not a native BIF identity). */
+static int spawn_mfa_input(LbProcess *,Eterm *,LbSpawnMfa *);
+Eterm lb_bif_hibernate_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)args; (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain;
+    p->last_native_cost=1;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    size_t collections=p->collections;
+    if(!lb_process_collect_live(p,0,MAX_REG)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    /* hibernate/0 retains the live continuation. A queued message means no
+     * sleep is needed; otherwise delivery wakes this process at the next BEAM
+     * instruction without substituting a restart MFA or clearing its stack. */
+    p->hibernating=0; p->waiting=p->messages.first==NULL;
+    p->flags&=~(F_INSLPQUEUE|F_TIMO); p->yield_requested=1;
+    return am_ok;
+}
+Eterm lb_bif_hibernate_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain;
+    p->last_native_cost=0;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++p->last_native_cost;
+    if(!is_atom(args[0]) || !is_atom(args[1])) goto badarg;
+    Eterm restart_args[MAX_ARG],tail=args[2]; size_t arity=0;
+    while(is_list(tail)) {
+        if(!lb_work_domain_charge(domain,2)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        p->last_native_cost+=2;
+        if(arity==MAX_ARG) { p->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE; }
+        Eterm *cell=list_val(tail); restart_args[arity++]=cell[0]; tail=cell[1];
+    }
+    if(!is_nil(tail)) goto badarg;
+    Export *entry=lb_export_find(p->entry_module->space,args[0],args[1],(unsigned)arity);
+    if(!entry || !entry->owner || !entry->dispatch.addresses[0]) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+
+    Eterm saved_regs[MAX_REG]; memcpy(saved_regs,p->reg,sizeof(saved_regs));
+    const BeamInstr *saved_pc=p->i; const LbMFA *saved_current=p->current;
+    Eterm *saved_stack=p->stop; Eterm saved_return=*saved_stack;
+    Uint saved_arity=p->arity; size_t saved_reservation=p->heap_reserved;
+    for(size_t i=0;i<MAX_REG;++i) p->reg[i]=i<arity?restart_args[i]:NIL;
+    p->i=entry->dispatch.addresses[0]; p->current=&entry->info.mfa;
+    p->arity=(Uint)arity; p->heap_reserved=0; p->stop=p->hend-1;
+    *p->stop=(Eterm)lb_host_return;
+    size_t collections=p->collections;
+    if(!lb_process_collect_live(p,0,MAX_REG)) {
+        memcpy(p->reg,saved_regs,sizeof(saved_regs)); p->i=saved_pc; p->current=saved_current;
+        p->arity=saved_arity; p->heap_reserved=saved_reservation; p->stop=saved_stack; *saved_stack=saved_return;
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    p->hibernating=p->messages.first==NULL; p->waiting=p->hibernating;
+    p->flags&=~(F_INSLPQUEUE|F_TIMO);
+    p->status=LB_PROCESS_YIELDED; return THE_NON_VALUE;
+badarg:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_spawn_monitor_4(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction;
+    if(!is_atom(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    LbSpawnMfa start; if(!spawn_mfa_input(p,args+1,&start)) return THE_NON_VALUE;
+    if(args[0]!=p->entry_module->space->node_name) {
+        static const LbCapabilityFailure failure={LB_CAPABILITY_DISTRIBUTION,"erlang","spawn_monitor",4,
+            "erlang:spawn_monitor/4 denied: DISTRIBUTION"};
+        uint64_t validation_cost=p->last_native_cost;
+        Eterm denied=lb_process_deny_capability(p,&failure); (void)denied;
+        p->last_native_cost+=validation_cost; return THE_NON_VALUE;
+    }
+    LbEngine *engine=p->entry_module->space->engine;
+    if(engine->reference_counter==UINT64_MAX) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    size_t need,before=p->collections;
+    if(!lb_size_add(LB_REF_WORDS+3,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_heap_reserve(p,need,MAX_REG)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(p->entry_module->space->domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    Eterm parent_pid; LbProcessStatus status=lb_process_identity(p,&parent_pid);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    Eterm ref=lb_reference_write(p->htop,engine->reference_counter); p->htop+=LB_REF_WORDS;
+    Eterm *uncommitted_heap=p->htop-LB_REF_WORDS;
+    LbMonitor *monitor; status=lb_monitor_prepare(p,ref,&monitor);
+    if(status!=LB_PROCESS_READY) { p->htop=uncommitted_heap; p->status=status; return THE_NON_VALUE; }
+    start.arguments=args[3]; Eterm pid;
+    status=lb_task_spawn_mfa_monitored_locked(p->world,p,&start,monitor,&pid);
+    if(status!=LB_PROCESS_READY) {
+        lb_monitor_discard(monitor); p->htop=uncommitted_heap;
+        p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status; return THE_NON_VALUE;
+    }
+    ++engine->reference_counter;
+    Eterm result=TUPLE2(p->htop,pid,ref); p->htop+=3; return result;
+}
+Eterm lb_bif_spawn_monitor_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain;
+    p->last_native_cost=0;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++p->last_native_cost;
+    if(!is_atom(args[0])) goto badarg;
+    const LbFun *fun=lb_fun(args[1]); LbSpawnMfa mfa={0}; int is_fun=0;
+    if(fun) { if(lb_fun_arity(fun)!=0) goto badarg; is_fun=1; }
+    else if(is_tuple(args[1])) {
+        Eterm *tuple=tuple_val(args[1]);
+        if(arityval(tuple[0])!=2 || !is_atom(tuple[1]) || !is_atom(tuple[2])) goto badarg;
+        mfa=(LbSpawnMfa){tuple[1],tuple[2],NIL,0};
+    } else goto badarg;
+    if(args[0]!=p->entry_module->space->node_name) {
+        static const LbCapabilityFailure failure={LB_CAPABILITY_DISTRIBUTION,"erlang","spawn_monitor",2,
+            "erlang:spawn_monitor/2 denied: DISTRIBUTION"};
+        uint64_t validation_cost=p->last_native_cost;
+        Eterm denied=lb_process_deny_capability(p,&failure); (void)denied;
+        p->last_native_cost+=validation_cost; return THE_NON_VALUE;
+    }
+    if(!p->world || !p->running) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    LbEngine *engine=p->entry_module->space->engine;
+    if(engine->reference_counter==UINT64_MAX) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    size_t need,before=p->collections;
+    if(!lb_size_add(LB_REF_WORDS+3,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_heap_reserve(p,need,MAX_REG)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+    Eterm parent_pid; LbProcessStatus status=lb_process_identity(p,&parent_pid);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    Eterm ref=lb_reference_write(p->htop,engine->reference_counter); p->htop+=LB_REF_WORDS;
+    Eterm *uncommitted_heap=p->htop-LB_REF_WORDS;
+    LbMonitor *monitor; status=lb_monitor_prepare(p,ref,&monitor);
+    if(status!=LB_PROCESS_READY) { p->htop=uncommitted_heap; p->status=status; return THE_NON_VALUE; }
+    Eterm pid; status=is_fun?lb_task_spawn_fun_monitored_locked(p->world,p,args[1],monitor,&pid):
+        lb_task_spawn_mfa_monitored_locked(p->world,p,&mfa,monitor,&pid);
+    if(status!=LB_PROCESS_READY) {
+        lb_monitor_discard(monitor); p->htop=uncommitted_heap;
+        p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status; return THE_NON_VALUE;
+    }
+    ++engine->reference_counter;
+    Eterm result=TUPLE2(p->htop,pid,ref); p->htop+=3; return result;
+badarg:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_spawn_link_4(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction;
+    if(!is_atom(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    LbSpawnMfa start; if(!spawn_mfa_input(p,args+1,&start)) return THE_NON_VALUE;
+    if(args[0]!=p->entry_module->space->node_name) {
+        static const LbCapabilityFailure failure={LB_CAPABILITY_DISTRIBUTION,"erlang","spawn_link",4,
+            "erlang:spawn_link/4 denied: DISTRIBUTION"};
+        uint64_t validation_cost=p->last_native_cost;
+        Eterm denied=lb_process_deny_capability(p,&failure); (void)denied;
+        p->last_native_cost+=validation_cost; return THE_NON_VALUE;
+    }
+    LbLink *link; LbProcessStatus status=lb_link_prepare(p,&link);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    Eterm pid; status=lb_task_spawn_mfa_linked_locked(p->world,p,&start,link,&pid);
+    if(status==LB_PROCESS_READY) return pid;
+    lb_link_discard(link); p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status;
+    return THE_NON_VALUE;
+}
+Eterm lb_bif_spawn_link_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain;
+    p->last_native_cost=0;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++p->last_native_cost;
+    if(!is_atom(args[0])) goto badarg;
+    const LbFun *fun=lb_fun(args[1]); LbSpawnMfa mfa={0}; int is_fun=0;
+    if(fun) { if(lb_fun_arity(fun)!=0) goto badarg; is_fun=1; }
+    else if(is_tuple(args[1])) {
+        Eterm *tuple=tuple_val(args[1]);
+        if(arityval(tuple[0])!=2 || !is_atom(tuple[1]) || !is_atom(tuple[2])) goto badarg;
+        mfa=(LbSpawnMfa){tuple[1],tuple[2],NIL,0};
+    } else goto badarg;
+    if(args[0]!=p->entry_module->space->node_name) {
+        static const LbCapabilityFailure failure={LB_CAPABILITY_DISTRIBUTION,"erlang","spawn_link",2,
+            "erlang:spawn_link/2 denied: DISTRIBUTION"};
+        uint64_t validation_cost=p->last_native_cost;
+        Eterm denied=lb_process_deny_capability(p,&failure); (void)denied;
+        p->last_native_cost+=validation_cost; return THE_NON_VALUE;
+    }
+    if(!p->world || !p->running) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    LbLink *link; LbProcessStatus status=lb_link_prepare(p,&link);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    Eterm pid; status=is_fun?lb_task_spawn_fun_linked_locked(p->world,p,args[1],link,&pid):
+        lb_task_spawn_mfa_linked_locked(p->world,p,&mfa,link,&pid);
+    if(status==LB_PROCESS_READY) return pid;
+    lb_link_discard(link); p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status;
+    return THE_NON_VALUE;
+badarg:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_spawn_4(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction;
+    if(!is_atom(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    LbSpawnMfa start;
+    if(!spawn_mfa_input(p,args+1,&start)) return THE_NON_VALUE;
+    if(args[0]!=p->entry_module->space->node_name) {
+        static const LbCapabilityFailure failure={LB_CAPABILITY_DISTRIBUTION,"erlang","spawn",4,
+            "erlang:spawn/4 denied: DISTRIBUTION"};
+        uint64_t validation_cost=p->last_native_cost;
+        Eterm denied=lb_process_deny_capability(p,&failure); (void)denied;
+        p->last_native_cost+=validation_cost; return THE_NON_VALUE;
+    }
+    Eterm pid; LbProcessStatus status=lb_task_spawn_mfa_locked(p->world,p,&start,&pid);
+    if(status==LB_PROCESS_READY) return pid;
+    p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status; return THE_NON_VALUE;
+}
 Eterm lb_bif_spawn_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)instruction;
@@ -317,6 +781,137 @@ static int spawn_mfa_input(LbProcess *p,Eterm *args,LbSpawnMfa *out)
     *out=(LbSpawnMfa){args[0],args[1],args[2],(unsigned)arity}; return 1;
 badarg: p->freason=LB_EXC_BADARG; return 0;
 work: p->status=LB_PROCESS_WORK_LIMIT; return 0;
+}
+Eterm lb_bif_dt_spread_tag_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(args[0]!=am_true && args[0]!=am_false) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    /* OTP's non-VM-probe build has no dynamic trace tag and returns true. */
+    return am_true;
+}
+Eterm lb_bif_dt_restore_tag_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(args[0]!=am_true) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    return am_true;
+}
+Eterm lb_bif_match_spec_test_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain; p->last_native_cost=1;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(args[2]!=am_table && args[2]!=am_trace) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    Eterm clauses=args[1];
+    for(unsigned i=0;i<5;++i) {
+        if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost;
+    }
+    if(!is_list(clauses) || !is_nil(CDR(list_val(clauses)))) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    Eterm clause=CAR(list_val(clauses));
+    if(!is_tuple(clause) || arityval(*tuple_val(clause))!=3 ||
+       tuple_val(clause)[1]!=am_Underscore || !is_nil(tuple_val(clause)[2]) ||
+       !is_list(tuple_val(clause)[3]) || CAR(list_val(tuple_val(clause)[3]))!=am_DollarUnderscore ||
+       !is_nil(CDR(list_val(tuple_val(clause)[3])))) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    size_t need,collections=p->collections;
+    if(!lb_size_add(5,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(domain,5)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=5;
+    if(!lb_heap_reserve(p,need,MAX_REG)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    Eterm value=args[0]; Eterm *tuple=p->htop; tuple[0]=make_arityval(4);
+    tuple[1]=am_ok; tuple[2]=value; tuple[3]=NIL; tuple[4]=NIL;
+    Eterm result=make_tuple(tuple); p->htop+=5; return result;
+}
+Eterm lb_bif_port_get_data_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)args; (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    /* This runtime owns no host ports or per-port data slots. Consequently no
+     * term can name a live local port, matching the BIF's badarg on a stale or
+     * foreign port rather than inventing an undefined value. */
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_spawn_request_abandon_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) {
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    if(!lb_reference(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    /* Local requests are fully committed, including their reply message, before
+     * spawn_request/5 returns. A later abandonment therefore finds no pending
+     * operation and leaves the ordered success reply intact. */
+    return am_false;
+}
+Eterm lb_bif_spawn_request_5(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbCodeSpace *space=p->entry_module->space; LbAllocDomain *domain=space->domain;
+    static const LbCapabilityFailure remote_spawn={LB_CAPABILITY_DISTRIBUTION,"erlang","spawn_request",5,
+        "erlang:spawn_request/5 remote nodes denied: DISTRIBUTION"};
+    LbSpawnMfa start; p->last_native_cost=0;
+    if(!is_atom(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(args[0]!=space->node_name) return lb_process_deny_capability(p,&remote_spawn);
+    if(!spawn_mfa_input(p,args+1,&start)) return THE_NON_VALUE;
+    if(!is_nil(args[4])) {
+        if(!is_list(args[4])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+        Eterm options=args[4];
+        while(is_list(options)) {
+            if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+            ++p->last_native_cost; options=CDR(list_val(options));
+        }
+        if(!is_nil(options)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+        p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
+    }
+    if(p->messages.mq_len==INTPTR_MAX) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(space->engine->reference_counter==UINT64_MAX) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    Uint input_cost=p->last_native_cost; Eterm sender;
+    LbProcessStatus status=lb_process_identity(p,&sender);
+    if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+    Uint identity_cost=p->last_native_cost; p->last_native_cost=input_cost+identity_cost;
+    if(!lb_work_domain_charge(domain,9+1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=10;
+    size_t need,collections=p->collections;
+    if(!lb_size_add(8,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_heap_reserve(p,need,MAX_REG)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    Uint prepared_cost=p->last_native_cost;
+    if(!spawn_mfa_input(p,args+1,&start)) { p->last_native_cost+=prepared_cost; return THE_NON_VALUE; }
+    p->last_native_cost+=prepared_cost;
+    Eterm *rollback_top=p->htop,*tuple;
+    Eterm reference=lb_reference_write(p->htop,space->engine->reference_counter); p->htop+=LB_REF_WORDS;
+    tuple=p->htop; tuple[0]=make_arityval(4); tuple[1]=am_spawn_reply;
+    tuple[2]=reference; tuple[3]=am_ok; tuple[4]=NIL;
+    Eterm reply=make_boxed(tuple); p->htop+=5;
+    LbMessage *message=NULL; Uint message_cost=0;
+    status=lb_message_create(space,reply,&message,&message_cost);
+    if(status!=LB_PROCESS_READY) {
+        p->htop=rollback_top; p->status=status; return THE_NON_VALUE;
+    }
+    message->m[2]=sender;
+    Eterm child;
+    status=lb_task_spawn_mfa_locked(p->world,p,&start,&child);
+    if(status!=LB_PROCESS_READY) {
+        lb_message_destroy(message); p->htop=rollback_top;
+        p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status; return THE_NON_VALUE;
+    }
+    tuple_val(message->m[0])[4]=child;
+    if(lb_message_deliver(p,message)!=LB_PROCESS_READY) abort();
+    ++space->engine->reference_counter;
+    p->last_native_cost+=message_cost;
+    return reference;
 }
 Eterm lb_bif_spawn_link_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
@@ -444,6 +1039,87 @@ badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
 refused: p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE;
 limit: p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE;
 }
+Eterm lb_bif_spawn_opt_5(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    if(!is_atom(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(args[0]==p->entry_module->space->node_name)
+        return lb_bif_spawn_opt_4(p,args+1,instruction);
+    LbSpawnMfa start; if(!spawn_mfa_input(p,args+1,&start)) return THE_NON_VALUE;
+    int unsupported=0; Eterm options=args[4];
+    while(is_list(options)) {
+        LbAllocDomain *domain=p->entry_module->space->domain;
+        if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost; Eterm option=CAR(list_val(options)); options=CDR(list_val(options));
+        if(option==am_monitor || option==am_link) continue;
+        if(is_atom(option)) {
+            LbBeamBytes name; if(lb_atoms_name(p->entry_module->space->atoms,option,&name)!=LB_ATOM_OK) goto badarg;
+            static const char *valid[]={"sensitive","async_dist"}; int found=0;
+            for(size_t i=0;i<sizeof(valid)/sizeof(*valid);++i)
+                if(name.size==strlen(valid[i]) && !memcmp(name.data,valid[i],name.size)) found=1;
+            if(!found) goto badarg; unsupported=1;
+        } else if(is_tuple(option)) {
+            Eterm *tuple=tuple_val(option);
+            if(arityval(tuple[0])!=2 || !is_atom(tuple[1])) goto badarg;
+            LbBeamBytes name; if(lb_atoms_name(p->entry_module->space->atoms,tuple[1],&name)!=LB_ATOM_OK) goto badarg;
+            static const char *valid[]={"priority","fullsweep_after","min_heap_size","min_bin_vheap_size","max_heap_size","message_queue_data","scheduler"}; int found=0;
+            for(size_t i=0;i<sizeof(valid)/sizeof(*valid);++i)
+                if(name.size==strlen(valid[i]) && !memcmp(name.data,valid[i],name.size)) found=1;
+            if(!found) goto badarg; unsupported=1;
+        } else goto badarg;
+    }
+    if(!is_nil(options)) goto badarg;
+    if(unsupported) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    static const LbCapabilityFailure failure={LB_CAPABILITY_DISTRIBUTION,"erlang","spawn_opt",5,
+        "erlang:spawn_opt/5 denied: DISTRIBUTION"};
+    uint64_t validation_cost=p->last_native_cost;
+    Eterm denied=lb_process_deny_capability(p,&failure); (void)denied;
+    p->last_native_cost+=validation_cost; return THE_NON_VALUE;
+badarg:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
+Eterm lb_bif_spawn_opt_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    if(!is_atom(args[0])) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(args[0]==p->entry_module->space->node_name)
+        return lb_bif_spawn_opt_2(p,args+1,instruction);
+    p->last_native_cost=0;
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++p->last_native_cost;
+    const LbFun *fun=lb_fun(args[1]);
+    if(!fun || lb_fun_arity(fun)!=0) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    Eterm options=args[2]; int linked=0,monitored=0,unsupported=0;
+    while(is_list(options)) {
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost; Eterm option=CAR(list_val(options)); options=CDR(list_val(options));
+        if(option==am_monitor) monitored=1;
+        else if(option==am_link) linked=1;
+        else if(is_atom(option)) {
+            LbBeamBytes name; if(lb_atoms_name(p->entry_module->space->atoms,option,&name)!=LB_ATOM_OK) goto badarg;
+            static const char *valid[]={"sensitive","async_dist"}; int found=0;
+            for(size_t i=0;i<sizeof(valid)/sizeof(*valid);++i)
+                if(name.size==strlen(valid[i]) && !memcmp(name.data,valid[i],name.size)) found=1;
+            if(!found) goto badarg; unsupported=1;
+        } else if(is_tuple(option)) {
+            Eterm *tuple=tuple_val(option);
+            if(arityval(tuple[0])!=2 || !is_atom(tuple[1])) goto badarg;
+            LbBeamBytes name; if(lb_atoms_name(p->entry_module->space->atoms,tuple[1],&name)!=LB_ATOM_OK) goto badarg;
+            static const char *valid[]={"priority","fullsweep_after","min_heap_size","min_bin_vheap_size","max_heap_size","message_queue_data","scheduler"}; int found=0;
+            for(size_t i=0;i<sizeof(valid)/sizeof(*valid);++i)
+                if(name.size==strlen(valid[i]) && !memcmp(name.data,valid[i],name.size)) found=1;
+            if(!found) goto badarg; unsupported=1;
+        } else goto badarg;
+    }
+    if(!is_nil(options)) goto badarg;
+    if(unsupported || (linked&&monitored)) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    static const LbCapabilityFailure failure={LB_CAPABILITY_DISTRIBUTION,"erlang","spawn_opt",3,
+        "erlang:spawn_opt/3 denied: DISTRIBUTION"};
+    uint64_t validation_cost=p->last_native_cost;
+    Eterm denied=lb_process_deny_capability(p,&failure); (void)denied;
+    p->last_native_cost+=validation_cost; return THE_NON_VALUE;
+badarg:
+    p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+}
 Eterm lb_bif_spawn_opt_4(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
     (void)instruction; p->last_native_cost=1;
@@ -465,14 +1141,35 @@ Eterm lb_bif_spawn_opt_4(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     }
     if(!is_nil(options)) goto badarg;
     if(!monitored) goto refused; /* positive spawn_opt/4 result is always {Pid,Ref} */
-    if(args[0]!=am_erlang || args[1]!=am_apply || length!=2 || !p->world || !p->running) goto refused;
+    if(!p->world || !p->running) goto refused;
+    if(args[0]!=am_erlang || args[1]!=am_apply || length!=2) {
+        LbEngine *engine=p->entry_module->space->engine;
+        if(engine->reference_counter==UINT64_MAX) goto limit;
+        size_t need,before=p->collections,live=(size_t)(args-p->reg)+4;
+        if(!lb_size_add(LB_REF_WORDS+3,p->heap_reserved,&need) || !lb_heap_reserve(p,need,live)) goto memory;
+        if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
+        Eterm parent_pid; LbProcessStatus status=lb_process_identity(p,&parent_pid);
+        if(status!=LB_PROCESS_READY) { p->status=status; return THE_NON_VALUE; }
+        Eterm ref=lb_reference_write(p->htop,engine->reference_counter); p->htop+=LB_REF_WORDS;
+        Eterm *uncommitted_heap=p->htop-LB_REF_WORDS;
+        LbMonitor *monitor; status=lb_monitor_prepare(p,ref,&monitor);
+        if(status!=LB_PROCESS_READY) { p->htop=uncommitted_heap; p->status=status; return THE_NON_VALUE; }
+        LbSpawnMfa start={args[0],args[1],args[2],(unsigned)length}; Eterm pid;
+        status=lb_task_spawn_mfa_monitored_locked(p->world,p,&start,monitor,&pid);
+        if(status!=LB_PROCESS_READY) {
+            lb_monitor_discard(monitor); p->htop=uncommitted_heap;
+            p->status=status==LB_PROCESS_INVALID?LB_PROCESS_REFUSED:status; return THE_NON_VALUE;
+        }
+        ++engine->reference_counter;
+        Eterm result=TUPLE2(p->htop,pid,ref); p->htop+=3; return result;
+    }
     Eterm *first=list_val(args[2]),*second=list_val(first[1]);
     const LbFun *fun=lb_fun(first[0]);
     if(!is_nil(second[0]) || !fun || lb_fun_arity(fun)!=0) goto refused;
     LbEngine *engine=p->entry_module->space->engine;
     if(engine->reference_counter==UINT64_MAX) goto limit;
     size_t need,before=p->collections;
-    if(!lb_size_add(LB_REF_WORDS+3,p->heap_reserved,&need) || !lb_heap_reserve(p,need,4)) goto memory;
+    if(!lb_size_add(LB_REF_WORDS+3,p->heap_reserved,&need) || !lb_heap_reserve(p,need,(size_t)(args-p->reg)+4)) goto memory;
     if(p->collections!=before) p->last_native_cost+=p->last_gc_cost;
     Eterm parent_pid;
     LbProcessStatus status=lb_process_identity(p,&parent_pid);
@@ -497,18 +1194,19 @@ Eterm lb_bif_demonitor_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
     (void)instruction; p->last_native_cost=1;
     if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
     if(!is_boxed(args[0]) || boxed_val(args[0])[0]!=LB_REF_HEADER) goto badarg;
-    Eterm options=args[1]; int flush=0;
+    Eterm options=args[1]; int flush=0,info=0;
     while(is_list(options)) {
         if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
         if(++p->last_native_cost>LB_MAX_BINARY_BYTES/sizeof(Eterm)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
         Eterm option=list_val(options)[0]; options=list_val(options)[1];
         if(option==am_flush) flush=1;
-        else if(option==am_info) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+        else if(option==am_info) info=1;
         else goto badarg;
     }
     if(!is_nil(options)) goto badarg;
-    lb_monitor_demonitor(p,args[0],flush);
-    return p->status==LB_PROCESS_WORK_LIMIT?THE_NON_VALUE:am_true;
+    int removed=lb_monitor_demonitor(p,args[0],flush);
+    if(p->status==LB_PROCESS_WORK_LIMIT) return THE_NON_VALUE;
+    return info?(removed?am_true:am_false):am_true;
 badarg: p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
 }
 /* bif.c:process_flag_2. trap_exit is process-local, not inherited by spawn.

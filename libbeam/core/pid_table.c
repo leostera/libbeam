@@ -118,4 +118,28 @@ LbProcess *lb_pid_lookup(LbPidTable *t,Eterm id)
     LbPidEntry *entry=t->slots[(id>>_TAG_IMMED1_SIZE)&t->mask];
     return entry && entry->id==id?entry->process:NULL;
 }
+int lb_pid_components(LbPidTable *t,Eterm id,Uint *number,Uint *serial)
+{
+    if(!t || !number || !serial || !is_internal_pid(id)) return 0;
+    Uint data=id_data(t,id);
+    *number=data&((UINT64_C(1)<<28)-1); *serial=data>>28;
+    return 1;
+}
+int lb_pid_from_components(LbPidTable *t,Uint number,Uint serial,Eterm *out)
+{
+    if(!t || !out || number>=(UINT64_C(1)<<28) || serial>UINT32_MAX) return 0;
+    *out=make_id(t,(serial<<28)|number);
+    return 1;
+}
 size_t lb_pid_count(const LbPidTable *t) { return t?t->count:0; }
+size_t lb_pid_capacity(const LbPidTable *t) { return t?t->capacity:0; }
+LbPidStatus lb_pid_make_list(const LbPidTable *t,Eterm **heap,size_t count,Eterm *out)
+{
+    if(!heap || !*heap || !out || (t && count<t->count)) return LB_PID_INVALID;
+    Eterm list=NIL; size_t made=0;
+    if(t) for(size_t i=0;i<t->capacity;++i) if(t->slots[i]) {
+        list=CONS(*heap,t->slots[i]->id,list); *heap+=2; ++made;
+    }
+    if(made!=count) return LB_PID_INVALID;
+    *out=list; return LB_PID_OK;
+}

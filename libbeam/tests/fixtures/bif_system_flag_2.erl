@@ -2,9 +2,9 @@
 % Copyright 2026 Leandro Ostera <leandro@ostera.io>
 -module(bif_system_flag_2).
 -export([entry/1,identity/1,invoke/3,check/3]).
-entry(Input) ->
-    {F,Mode,V} = erlang:binary_to_term(Input),
-    case check(F,Mode,V) of true -> <<"ok">>; _ -> <<"contract mismatch">> end.
+entry(_Input) ->
+    _ = erlang:'system_flag'(backtrace_depth,42),
+    <<"unexpected success">>.
 identity(Input) -> Input.
 invoke(_F,direct,[A0,A1]) -> erlang:'system_flag'(A0,A1);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).

@@ -3,28 +3,45 @@
  * Native iolist_to_binary/1 over owned lists and binary views. */
 #include "process_internal.h"
 #include "binary_internal.h"
+#include "binary_match.h"
 #include "bit_copy.h"
 #include "iolist_size.h"
+#include "md5.h"
+#include <limits.h>
 #include <stdlib.h>
 
 typedef struct { Eterm term; unsigned allow_byte; } LbIoListItem;
 
-Eterm lb_bif_byte_size_1(LbProcess *process,Eterm *args,const BeamInstr *instruction)
+static int bit_size_of(Eterm value,Uint *bits)
 {
     LbBitstringView view;
+    if(is_boxed(value) && *boxed_val(value)==LB_HEADER_SUB_BITS) {
+        const LbSubBits *context=(const LbSubBits *)boxed_val(value);
+        if(lb_is_match_context(context)) {
+            if(context->start>context->end) return 0;
+            *bits=context->end-context->start; return 1;
+        }
+    }
+    if(!lb_bitstring_view(value,&view)) return 0;
+    *bits=view.bit_size; return 1;
+}
+
+Eterm lb_bif_byte_size_1(LbProcess *process,Eterm *args,const BeamInstr *instruction)
+{
+    Uint bits;
     (void)instruction; process->last_native_cost=1;
-    if(!lb_bitstring_view(args[0],&view)) { process->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
-    return make_small((Sint)((view.bit_size+7)/8));
+    if(!bit_size_of(args[0],&bits)) { process->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    return make_small((Sint)(bits/8+(bits%8!=0)));
 }
 
 Eterm lb_bif_bit_size_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
 {
-    LbBitstringView view; (void)instruction; p->last_native_cost=0;
+    Uint bits; (void)instruction; p->last_native_cost=0;
     _Static_assert(LB_MAX_BINARY_BYTES<=MAX_SMALL/8,"owned bit counts fit small integers");
     if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
     p->last_native_cost=1;
-    if(!lb_bitstring_view(args[0],&view)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
-    return make_small((Sint)view.bit_size);
+    if(!bit_size_of(args[0],&bits)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    return make_small((Sint)bits);
 }
 
 static void allocation_failed(LbProcess *process,LbAllocStatus status)
@@ -86,6 +103,56 @@ Eterm lb_bif_binary_to_list_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 { (void)pc; return binary_list(p,args,1); }
 Eterm lb_bif_binary_to_list_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
 { (void)pc; return binary_list(p,args,3); }
+Eterm lb_bif_bitstring_to_list_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    LbBitstringView view; size_t bits,full,remainder,count,words,tail_words,need,work;
+    size_t collections=p->collections; void *tail_bytes=NULL; Eterm tail=NIL,result; LbAllocStatus status;
+    (void)pc; p->last_native_cost=1;
+    if(args!=p->reg) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!lb_bitstring_view(args[0],&view)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    bits=view.bit_size; full=bits/8; remainder=bits&7; count=full+(remainder?1:0);
+    tail_words=remainder?lb_bitstring_heap_words(remainder):0;
+    if(!lb_size_mul(full,2,&words) || !lb_size_add(words,tail_words,&words) ||
+       (remainder && !lb_size_add(words,2,&words)) ||
+       !lb_size_add(words,p->heap_reserved,&need) || !lb_size_mul(count,3,&work)) {
+        p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE;
+    }
+    if(!lb_work_domain_charge(domain,(Uint)work)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=work;
+    if(remainder) {
+        status=lb_alloc_domain_allocate(domain,1,&tail_bytes);
+        if(status!=LB_ALLOC_OK) { allocation_failed(p,status); return THE_NON_VALUE; }
+    }
+    if(!lb_heap_reserve(p,need,MAX_REG)) {
+        if(tail_bytes && lb_alloc_domain_release(domain,tail_bytes)!=LB_ALLOC_OK) abort();
+        allocation_failed(p,lb_alloc_domain_failure(domain)); return THE_NON_VALUE;
+    }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    if(!lb_bitstring_view(p->reg[0],&view) || view.bit_size!=bits) abort();
+    if(remainder) {
+        size_t source_end;
+        if(!lb_size_add(view.bit_offset,view.bit_size,&source_end) || !lb_size_add(source_end,7,&source_end) ||
+           !lb_bits_copy(view.data,source_end/8,view.bit_offset+full*8,tail_bytes,1,0,remainder)) abort();
+        status=lb_bitstring_build(domain,&p->off_heap,&p->htop,tail_bytes,remainder,0,&tail);
+        if(tail_bytes && lb_alloc_domain_release(domain,tail_bytes)!=LB_ALLOC_OK) abort();
+        if(status!=LB_ALLOC_OK) { allocation_failed(p,status); return THE_NON_VALUE; }
+        p->last_native_cost+=1+lb_work_bulk_units(1);
+        tail=CONS(p->htop,tail,NIL); p->htop+=2;
+    }
+    size_t end;
+    if(!lb_size_add(view.bit_offset,view.bit_size,&end)) abort();
+    result=tail;
+    for(size_t i=full;i>0;--i) {
+        size_t bit=view.bit_offset+(i-1)*8,index=bit/8,shift=bit%8;
+        if(bit>end || end-bit<8) abort();
+        unsigned byte=view.data[index];
+        if(shift) byte=((byte<<shift)|(view.data[index+1]>>(8-shift)))&255u;
+        result=CONS(p->htop,make_small(byte),result); p->htop+=2;
+    }
+    return result;
+}
 
 static LbAllocStatus push_item(LbProcess *process,LbIoListItem **items,size_t *count,
                                size_t *capacity,LbIoListItem item)
@@ -119,6 +186,7 @@ static LbAllocStatus walk_iolist(LbProcess *process,Eterm input,unsigned char *o
     while(count) {
         LbIoListItem item=items[--count]; Eterm term=item.term;
         if(!lb_work_domain_charge(domain,1)) { status=LB_ALLOC_WORK_LIMIT; goto done; }
+        ++process->last_native_cost;
         if(is_nil(term)) continue;
         if(is_list(term)) {
             Eterm *cell=list_val(term);
@@ -139,7 +207,9 @@ static LbAllocStatus walk_iolist(LbProcess *process,Eterm input,unsigned char *o
         if(!lb_bitstring_view(term,&view) || (view.bit_size&7)) goto invalid;
         size_t size=view.bit_size/8;
         if(size>LB_MAX_BINARY_BYTES-total) goto too_large;
-        if(!lb_work_domain_charge(domain,lb_work_bulk_units(size))) { status=LB_ALLOC_WORK_LIMIT; goto done; }
+        Uint bulk=lb_work_bulk_units(size);
+        if(!lb_work_domain_charge(domain,bulk)) { status=LB_ALLOC_WORK_LIMIT; goto done; }
+        process->last_native_cost+=bulk;
         if(output && size) {
             size_t source_bytes;
             if(!lb_size_add(view.bit_offset,view.bit_size,&source_bytes) ||
@@ -158,6 +228,125 @@ too_large:
 done:
     if(lb_alloc_domain_release(domain,items)!=LB_ALLOC_OK) abort();
     return status;
+}
+
+static LbAllocStatus walk_bitstring(LbProcess *process,Eterm input,unsigned char *output,
+                                    size_t output_capacity,size_t *bit_length,int *valid)
+{
+    LbAllocDomain *domain=process->entry_module->space->domain;
+    LbIoListItem *items=NULL; size_t count=0,capacity=16,bytes;
+    LbAllocStatus status=lb_size_mul(capacity,sizeof(*items),&bytes)?LB_ALLOC_OK:LB_ALLOC_LIMIT;
+    size_t total=0,maximum=8u*(size_t)LB_MAX_BINARY_BYTES;
+    *valid=0; *bit_length=0;
+    if(status==LB_ALLOC_OK) status=lb_alloc_domain_allocate(domain,bytes,(void **)&items);
+    if(status!=LB_ALLOC_OK) return status;
+    items[count++]=(LbIoListItem){input,0};
+    while(count) {
+        if(!lb_work_domain_charge(domain,1)) { status=LB_ALLOC_WORK_LIMIT; goto done; }
+        ++process->last_native_cost; LbIoListItem item=items[--count]; Eterm term=item.term;
+        if(is_nil(term)) continue;
+        if(is_list(term)) {
+            Eterm *cell=list_val(term);
+            status=push_item(process,&items,&count,&capacity,(LbIoListItem){cell[1],0});
+            if(status==LB_ALLOC_OK) status=push_item(process,&items,&count,&capacity,(LbIoListItem){cell[0],1});
+            if(status!=LB_ALLOC_OK) goto done;
+            continue;
+        }
+        if(is_small(term)) {
+            Sint byte=signed_val(term);
+            if(!item.allow_byte || byte<0 || byte>255) goto invalid;
+            if(total>maximum-8) goto too_large;
+            if(output) {
+                unsigned char value=(unsigned char)byte;
+                if(!lb_bits_copy(&value,1,0,output,output_capacity,total,8)) { status=LB_ALLOC_INVALID; goto done; }
+            }
+            total+=8; continue;
+        }
+        LbBitstringView view; size_t source_end,source_bytes,segment_bytes;
+        if(!lb_bitstring_view(term,&view)) goto invalid;
+        if(view.bit_size>maximum-total) goto too_large;
+        segment_bytes=(view.bit_size+7)/8;
+        Uint bulk=lb_work_bulk_units(segment_bytes);
+        if(!lb_work_domain_charge(domain,bulk)) { status=LB_ALLOC_WORK_LIMIT; goto done; }
+        process->last_native_cost+=bulk;
+        if(output && view.bit_size) {
+            if(!lb_size_add(view.bit_offset,view.bit_size,&source_end) ||
+               !lb_size_add(source_end,7,&source_end)) { status=LB_ALLOC_LIMIT; goto done; }
+            source_bytes=source_end/8;
+            if(!lb_bits_copy(view.data,source_bytes,view.bit_offset,output,output_capacity,
+                             total,view.bit_size)) { status=LB_ALLOC_INVALID; goto done; }
+        }
+        total+=view.bit_size;
+    }
+    *bit_length=total; *valid=1; status=LB_ALLOC_OK; goto done;
+invalid:
+    *valid=0; status=LB_ALLOC_OK; goto done;
+too_large:
+    *valid=-1; status=LB_ALLOC_OK;
+done:
+    if(lb_alloc_domain_release(domain,items)!=LB_ALLOC_OK) abort();
+    return status;
+}
+
+Eterm lb_bif_list_to_bitstring_1(LbProcess *process,Eterm *args,const BeamInstr *instruction)
+{
+    LbAllocDomain *domain=process->entry_module->space->domain;
+    unsigned char *bytes=NULL; void *memory=NULL; size_t bits=0,copied_bits=0,byte_count,full_bytes,remainder;
+    size_t items,words,need,work,collections=process->collections; int valid=0;
+    Eterm result,tail=NIL; LbAllocStatus status;
+    (void)instruction; process->last_native_cost=0;
+    if(args!=process->reg) { process->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(domain,1)) { process->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++process->last_native_cost;
+    status=walk_bitstring(process,args[0],NULL,0,&bits,&valid);
+    if(status!=LB_ALLOC_OK) { allocation_failed(process,status); return THE_NON_VALUE; }
+    if(valid<0) { process->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE; }
+    if(!valid) { process->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    byte_count=(bits+7)/8; full_bytes=bits/8; remainder=bits&7;
+    if(byte_count) {
+        status=lb_alloc_domain_allocate(domain,byte_count,&memory);
+        if(status!=LB_ALLOC_OK) { allocation_failed(process,status); return THE_NON_VALUE; }
+        bytes=memory;
+    }
+    status=walk_bitstring(process,args[0],bytes,byte_count,&copied_bits,&valid);
+    if(status!=LB_ALLOC_OK || valid!=1 || copied_bits!=bits) {
+        if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        if(status==LB_ALLOC_OK) { process->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+        allocation_failed(process,status); return THE_NON_VALUE;
+    }
+    items=full_bytes+(remainder?1:0);
+    size_t tail_words=remainder?lb_bitstring_heap_words(remainder):0;
+    if(!lb_size_mul(full_bytes,2,&words) || !lb_size_add(words,tail_words,&words) ||
+       !lb_size_add(words,process->heap_reserved,&need) || !lb_size_mul(items,3,&work)) {
+        if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        process->status=LB_PROCESS_LIMIT; return THE_NON_VALUE;
+    }
+    if(!lb_work_domain_charge(domain,(Uint)work)) {
+        if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        process->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    process->last_native_cost+=work;
+    if(!lb_heap_reserve(process,need,MAX_REG)) {
+        if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        allocation_failed(process,lb_alloc_domain_failure(domain)); return THE_NON_VALUE;
+    }
+    if(process->collections!=collections) process->last_native_cost+=process->last_gc_cost;
+    if(remainder) {
+        unsigned char tail_byte=0;
+        if(!lb_bits_copy(bytes,byte_count,full_bytes*8,&tail_byte,1,0,remainder)) abort();
+        status=lb_bitstring_build(domain,&process->off_heap,&process->htop,&tail_byte,remainder,0,&tail);
+        if(status!=LB_ALLOC_OK) {
+            if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+            allocation_failed(process,status); return THE_NON_VALUE;
+        }
+        process->last_native_cost+=1+lb_work_bulk_units(1);
+    }
+    result=tail;
+    for(size_t i=full_bytes;i>0;--i) {
+        result=CONS(process->htop,make_small(bytes[i-1]),result); process->htop+=2;
+    }
+    if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+    return result;
 }
 
 Eterm lb_bif_binary_part_3(LbProcess *process,Eterm *args,const BeamInstr *instruction)
@@ -270,6 +459,49 @@ Eterm lb_bif_iolist_size_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     if(!valid) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
     return lb_iolist_size_result(p,size);
 }
+Eterm lb_bif_list_to_binary_1(LbProcess *process,Eterm *args,const BeamInstr *instruction)
+{ return lb_bif_iolist_to_binary_1(process,args,instruction); }
+Eterm lb_bif_iolist_to_iovec_1(LbProcess *process,Eterm *args,const BeamInstr *instruction)
+{
+    LbAllocDomain *domain=process->entry_module->space->domain;
+    unsigned char *bytes=NULL; size_t size=0,bits,words,need,collections=process->collections;
+    int valid=0; Eterm binary; void *memory=NULL; LbAllocStatus status;
+    (void)instruction; process->last_native_cost=0;
+    status=walk_iolist(process,args[0],NULL,0,&size,&valid);
+    if(status!=LB_ALLOC_OK) { allocation_failed(process,status); return THE_NON_VALUE; }
+    if(valid<0) { process->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE; }
+    if(!valid) { process->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(size==0) return NIL;
+    if(!lb_size_mul(size,8,&bits) || !(words=lb_bitstring_heap_words(bits)) ||
+       !lb_size_add(words,2,&need) || !lb_size_add(need,process->heap_reserved,&need)) {
+        process->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE;
+    }
+    status=lb_alloc_domain_allocate(domain,size,(void **)&memory);
+    if(status!=LB_ALLOC_OK) { allocation_failed(process,status); return THE_NON_VALUE; }
+    bytes=memory; size_t copied=0;
+    status=walk_iolist(process,args[0],bytes,size,&copied,&valid);
+    if(status!=LB_ALLOC_OK || valid!=1 || copied!=size) {
+        if(lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        if(status==LB_ALLOC_OK) { process->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+        allocation_failed(process,status); return THE_NON_VALUE;
+    }
+    if(!lb_work_domain_charge(domain,2)) {
+        if(lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        process->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    process->last_native_cost+=2;
+    if(!lb_heap_reserve(process,need,MAX_REG)) {
+        if(lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        allocation_failed(process,lb_alloc_domain_failure(domain)); return THE_NON_VALUE;
+    }
+    if(process->collections!=collections) process->last_native_cost+=process->last_gc_cost;
+    status=lb_bitstring_build(domain,&process->off_heap,&process->htop,bytes,bits,0,&binary);
+    if(lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+    if(status!=LB_ALLOC_OK) { allocation_failed(process,status); return THE_NON_VALUE; }
+    process->last_native_cost+=1+lb_work_bulk_units(size);
+    process->htop[0]=binary; process->htop[1]=NIL;
+    Eterm result=make_list(process->htop); process->htop+=2; return result;
+}
 Eterm lb_bif_iolist_to_binary_1(LbProcess *process,Eterm *args,const BeamInstr *instruction)
 {
     LbAllocDomain *domain=process->entry_module->space->domain;
@@ -298,14 +530,236 @@ Eterm lb_bif_iolist_to_binary_1(LbProcess *process,Eterm *args,const BeamInstr *
     }
     if(!lb_heap_reserve(process,need,MAX_REG)) {
         if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
-        allocation_failed(process,lb_alloc_domain_failure(domain)==LB_ALLOC_LIMIT?
-                                  LB_ALLOC_LIMIT:LB_ALLOC_NO_MEMORY);
+        allocation_failed(process,lb_alloc_domain_failure(domain));
         return THE_NON_VALUE;
     }
     if(process->collections!=collections) process->last_native_cost+=process->last_gc_cost;
     status=lb_bitstring_build(domain,&process->off_heap,&process->htop,bytes,bits,0,&result);
     if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
     if(status!=LB_ALLOC_OK) { allocation_failed(process,status); return THE_NON_VALUE; }
-    process->last_native_cost+=lb_work_bulk_units(size);
+    process->last_native_cost+=1+lb_work_bulk_units(size);
     return result;
+}
+Eterm lb_bif_decode_packet_3(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain;
+    p->last_native_cost=1;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    unsigned header=0,max_packet=0; int raw=0;
+    if(is_small(args[0])) {
+        Sint type=signed_val(args[0]);
+        if(type==0) raw=1; else if(type==1) header=1; else if(type==2) header=2; else if(type==4) header=4;
+        else { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    } else if(args[0]==am_raw) raw=1;
+    else { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(!lb_is_binary(args[1]) || (!is_list(args[2]) && !is_nil(args[2]))) {
+        p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+    }
+    Eterm options=args[2];
+    while(is_list(options)) {
+        if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost; Eterm option=CAR(list_val(options));
+        if(!is_tuple(option) || arityval(*tuple_val(option))!=2 || tuple_val(option)[1]!=am_packet_size ||
+           !is_small(tuple_val(option)[2]) || signed_val(tuple_val(option)[2])<0 ||
+           (uint64_t)signed_val(tuple_val(option)[2])>UINT_MAX) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+        max_packet=(unsigned)signed_val(tuple_val(option)[2]); options=CDR(list_val(options));
+    }
+    if(!is_nil(options)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    LbBitstringView view;
+    if(!lb_bitstring_view(args[1],&view) || (view.bit_size&7)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(!raw) {
+        if(!lb_work_domain_charge(domain,header)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        p->last_native_cost+=header;
+    }
+    size_t input_size=view.bit_size/8,packet_size=0,body_offset=0,body_size=0;
+    int incomplete=0,invalid=0;
+    if(raw) {
+        if(!input_size) incomplete=1;
+        else { packet_size=input_size; body_size=input_size; }
+    } else if(input_size<header) incomplete=1;
+    else {
+        uint64_t payload=0;
+        for(unsigned i=0;i<header;++i) payload=(payload<<8)|view.data[view.bit_offset/8+i];
+        if(max_packet && payload>max_packet) invalid=1;
+        else if(payload>SIZE_MAX-header) invalid=1;
+        else {
+            packet_size=(size_t)payload+header;
+            if(packet_size>input_size) incomplete=1;
+            else { body_offset=header; body_size=(size_t)payload; }
+        }
+    }
+    size_t need_words=4,body_bits=0,rest_bits=0,words,collections=p->collections;
+    if(incomplete) need_words=3;
+    else if(invalid) need_words=3;
+    else {
+        if(!lb_size_mul(body_size,8,&body_bits) || !lb_size_mul(input_size-packet_size,8,&rest_bits)) {
+            p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE;
+        }
+        size_t body_words=lb_bitstring_heap_words(body_bits),rest_words=lb_bitstring_heap_words(rest_bits);
+        if(!body_words || !rest_words || !lb_size_add(body_words,rest_words,&need_words) ||
+           !lb_size_add(need_words,4,&need_words)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    }
+    Uint tuple_work=incomplete || invalid?3:4;
+    if(!lb_work_domain_charge(domain,tuple_work)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=tuple_work;
+    if(!lb_size_add(need_words,p->heap_reserved,&words)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_heap_reserve(p,words,MAX_REG)) { allocation_failed(p,lb_alloc_domain_failure(domain)); return THE_NON_VALUE; }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    if(incomplete || invalid) {
+        Eterm *tuple=p->htop; tuple[0]=make_arityval(2);
+        tuple[1]=incomplete?am_more:am_error;
+        if(invalid) tuple[2]=am_invalid;
+        else if(input_size<header || packet_size==0) tuple[2]=am_undefined;
+        else tuple[2]=make_small((Sint)packet_size);
+        Eterm result=make_tuple(tuple); p->htop+=3; return result;
+    }
+    if(!lb_bitstring_view(args[1],&view)) abort();
+    const unsigned char *source=view.data+view.bit_offset/8;
+    Eterm *checkpoint=p->htop; LbBinRef *offheap_checkpoint=p->off_heap.first;
+    Eterm body,rest;
+    LbAllocStatus status=lb_bitstring_build(domain,&p->off_heap,&p->htop,source+body_offset,body_bits,0,&body);
+    if(status==LB_ALLOC_OK) p->last_native_cost+=1+lb_work_bulk_units(body_size);
+    if(status==LB_ALLOC_OK) {
+        status=lb_bitstring_build(domain,&p->off_heap,&p->htop,source+packet_size,rest_bits,0,&rest);
+        if(status==LB_ALLOC_OK) p->last_native_cost+=1+lb_work_bulk_units(input_size-packet_size);
+    }
+    if(status!=LB_ALLOC_OK) {
+        p->htop=checkpoint; lb_offheap_rollback(&p->off_heap,offheap_checkpoint);
+        allocation_failed(p,status); return THE_NON_VALUE;
+    }
+    Eterm *tuple=p->htop; tuple[0]=make_arityval(3); tuple[1]=am_ok; tuple[2]=body; tuple[3]=rest;
+    Eterm result=make_tuple(tuple); p->htop+=4; return result;
+}
+static int md5_state_from_term(Eterm term,erts_md5_state *state)
+{
+    LbBitstringView view;
+    if(!lb_is_binary(term) || !lb_bitstring_view(term,&view) ||
+       (view.bit_size&7) || view.bit_size!=sizeof(*state)*8) return 0;
+    memcpy(state,view.data+view.bit_offset/8,sizeof(*state));
+    return state->len<64 && state->tot_len%64==0;
+}
+static Eterm md5_state_binary(LbProcess *p,const erts_md5_state *state)
+{
+    LbAllocDomain *domain=p->entry_module->space->domain; size_t bits,words,need,collections=p->collections;
+    if(!lb_size_mul(sizeof(*state),8,&bits)) { p->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE; }
+    words=lb_bitstring_heap_words(bits);
+    if(!words || !lb_size_add(words,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    Uint work=lb_work_bulk_units(sizeof(*state));
+    if(!lb_work_domain_charge(domain,work)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=work;
+    if(!lb_heap_reserve(p,need,MAX_REG)) { allocation_failed(p,lb_alloc_domain_failure(domain)); return THE_NON_VALUE; }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    Eterm result; LbAllocStatus status=lb_bitstring_build(domain,&p->off_heap,&p->htop,state,bits,0,&result);
+    if(status!=LB_ALLOC_OK) { allocation_failed(p,status); return THE_NON_VALUE; }
+    p->last_native_cost+=1+work; return result;
+}
+Eterm lb_bif_md5_init_0(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)args; (void)instruction; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    erts_md5_state state; memset(&state,0,sizeof(state)); lb_md5_init(&state);
+    return md5_state_binary(p,&state);
+}
+Eterm lb_bif_md5_update_2(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain;
+    unsigned char *bytes=NULL; void *memory=NULL; size_t size=0,copied=0; int valid=0;
+    p->last_native_cost=1;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    erts_md5_state state;
+    if(!md5_state_from_term(args[0],&state)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    LbAllocStatus status=walk_iolist(p,args[1],NULL,0,&size,&valid);
+    if(status!=LB_ALLOC_OK) { allocation_failed(p,status); return THE_NON_VALUE; }
+    if(valid<0) { p->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE; }
+    if(!valid) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(state.tot_len>UINT64_MAX-state.len || size>UINT64_MAX-state.tot_len-state.len) {
+        p->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE;
+    }
+    if(size) {
+        status=lb_alloc_domain_allocate(domain,size,(void **)&memory);
+        if(status!=LB_ALLOC_OK) { allocation_failed(p,status); return THE_NON_VALUE; }
+        bytes=memory;
+    }
+    status=walk_iolist(p,args[1],bytes,size,&copied,&valid);
+    if(status!=LB_ALLOC_OK || valid!=1 || copied!=size) {
+        if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        if(status==LB_ALLOC_OK) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+        allocation_failed(p,status); return THE_NON_VALUE;
+    }
+    Uint work=lb_work_bulk_units(size);
+    if(!lb_work_domain_charge(domain,work)) {
+        if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    p->last_native_cost+=work;
+    static const uint8_t empty=0; lb_md5_update(&state,bytes?bytes:&empty,size);
+    Eterm result=md5_state_binary(p,&state);
+    if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+    return result;
+}
+Eterm lb_bif_md5_final_1(LbProcess *p,Eterm *args,const BeamInstr *instruction)
+{
+    (void)instruction; LbAllocDomain *domain=p->entry_module->space->domain; p->last_native_cost=1;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    erts_md5_state state;
+    if(!md5_state_from_term(args[0],&state)) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    size_t bits=sizeof(uint8_t)*MD5_DIGEST_LENGTH*8,words,need,collections=p->collections;
+    Uint work=lb_work_bulk_units(MD5_DIGEST_LENGTH);
+    if(!lb_work_domain_charge(domain,work)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=work;
+    uint8_t digest[MD5_DIGEST_LENGTH]; lb_md5_finish(digest,&state);
+    words=lb_bitstring_heap_words(bits);
+    if(!words || !lb_size_add(words,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_heap_reserve(p,need,MAX_REG)) { allocation_failed(p,lb_alloc_domain_failure(domain)); return THE_NON_VALUE; }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    Eterm result; LbAllocStatus status=lb_bitstring_build(domain,&p->off_heap,&p->htop,digest,bits,0,&result);
+    if(status!=LB_ALLOC_OK) { allocation_failed(p,status); return THE_NON_VALUE; }
+    p->last_native_cost+=1+work; return result;
+}
+Eterm lb_bif_md5_1(LbProcess *process,Eterm *args,const BeamInstr *instruction)
+{
+    LbAllocDomain *domain=process->entry_module->space->domain;
+    unsigned char *bytes=NULL; void *memory=NULL; size_t size=0,need,words,collections=process->collections;
+    int valid=0; Eterm result; LbAllocStatus status; uint8_t digest[16];
+    (void)instruction; process->last_native_cost=0;
+    if(!lb_work_domain_charge(domain,1)) { process->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++process->last_native_cost;
+    status=walk_iolist(process,args[0],NULL,0,&size,&valid);
+    if(status!=LB_ALLOC_OK) { allocation_failed(process,status); return THE_NON_VALUE; }
+    if(valid<0) { process->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE; }
+    if(!valid) { process->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(size) {
+        status=lb_alloc_domain_allocate(domain,size,(void **)&memory);
+        if(status!=LB_ALLOC_OK) { allocation_failed(process,status); return THE_NON_VALUE; }
+        bytes=memory;
+    }
+    size_t copied=0;
+    status=walk_iolist(process,args[0],bytes,size,&copied,&valid);
+    if(status!=LB_ALLOC_OK || valid!=1 || copied!=size) {
+        if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        if(status==LB_ALLOC_OK) { process->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+        allocation_failed(process,status); return THE_NON_VALUE;
+    }
+    Uint hash_work=lb_work_bulk_units(size);
+    if(!lb_work_domain_charge(domain,hash_work)) {
+        if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        process->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE;
+    }
+    process->last_native_cost+=hash_work;
+    words=lb_bitstring_heap_words(sizeof(digest)*8);
+    if(!words || !lb_size_add(words,process->heap_reserved,&need)) {
+        if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        process->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE;
+    }
+    if(!lb_heap_reserve(process,need,MAX_REG)) {
+        if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+        allocation_failed(process,lb_alloc_domain_failure(domain)); return THE_NON_VALUE;
+    }
+    if(process->collections!=collections) process->last_native_cost+=process->last_gc_cost;
+    static const uint8_t empty=0;
+    lb_md5(bytes?bytes:&empty,size,digest);
+    status=lb_bitstring_build(domain,&process->off_heap,&process->htop,digest,sizeof(digest)*8,0,&result);
+    if(memory && lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+    if(status!=LB_ALLOC_OK) { allocation_failed(process,status); return THE_NON_VALUE; }
+    process->last_native_cost+=1+lb_work_bulk_units(sizeof(digest)); return result;
 }

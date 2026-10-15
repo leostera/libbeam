@@ -6,6 +6,7 @@
  */
 #include "code_internal.h"
 #include "binary_error.h"
+#include "binary.h"
 #include "fun.h"
 #include "flatmap.h"
 #include "map_runtime.h"
@@ -37,7 +38,7 @@ typedef Uint UWord;
 #define ARCH_64 1
 #define BSF_SIGNED 4
 #define BIG_NEED_FOR_BITS(bits) (((bits)-1)/64+2)
-#define BUILD_SUB_BITSTRING_HEAP_NEED 10
+#define BUILD_SUB_BITSTRING_HEAP_NEED LB_BITSTRING_TAIL_HEAP_NEED
 static Uint lb_match_extracted_words(Uint size)
 { return size<=512?2+(size+63)/64:LB_SUB_BITS_WORDS; }
 #define BSF_LITTLE 2
@@ -239,7 +240,9 @@ static int dictionary_hash(LoaderState *st,Eterm key,Sint *out)
 {
     if(is_small(key)) { *out=(Sint)((Uint)key>>_TAG_IMMED1_SIZE); return 1; }
     if(is_atom(key)) { *out=(Sint)atom_val(key); return 1; }
-    st->status=LB_CODE_UNSUPPORTED; return 0;
+    /* Composite keys use the verified generic get/1 BIF path. This hash
+     * specialization is optional; declining it must not reject valid code. */
+    return 0;
 }
 static int lb_load_literal_equal(LoaderState *st,Eterm a,Eterm b)
 {
@@ -265,9 +268,129 @@ static int lb_transform_is_float(Eterm value)
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+static int transform_get_integer2(LoaderState *st,BeamOp *source)
+{
+    BeamOpArg *a=source->a; BeamOp *target; Uint flags,unit,combined;
+    if(source->arity!=7 || a[0].type!=TAG_f ||
+       (a[1].type!=TAG_x && a[1].type!=TAG_y) || a[2].type!=TAG_u ||
+       (a[3].type!=TAG_x && a[3].type!=TAG_y) || a[4].type!=TAG_u || a[4].val<=0 ||
+       a[5].type!=TAG_u || (a[6].type!=TAG_x && a[6].type!=TAG_y)) return TE_UNSUPPORTED;
+    flags=(Uint)a[5].val; unit=(Uint)a[4].val;
+    if(flags&BSF_NATIVE) {
+        flags&=~BSF_NATIVE;
+#if defined(WORDS_BIGENDIAN)
+        flags&=~BSF_LITTLE;
+#else
+        flags|=BSF_LITTLE;
+#endif
+    }
+    if((flags&~(BSF_SIGNED|BSF_LITTLE|1u)) || unit>(UINT32_MAX>>3)) return TE_UNSUPPORTED;
+    combined=(unit<<3)|flags;
+    target=lb_load_new_op(st); if(!target) return TE_NO_MEMORY;
+    target->op=genop_i_bs_get_integer_6; target->arity=6; target->offset=source->offset;
+    target->a[0]=a[1]; target->a[1]=a[0]; target->a[2]=a[2];
+    target->a[3]=(BeamOpArg){TAG_u,(Sint)combined}; target->a[4]=a[3]; target->a[5]=a[6];
+    target->next=source->next; st->genop=target; lb_load_free_op(st,source); return TE_OK;
+}
+static int transform_get_binary2(LoaderState *st,BeamOp *source)
+{
+    BeamOpArg *a=source->a; BeamOp *target;
+    if(source->arity!=7 || (a[1].type!=TAG_x && a[1].type!=TAG_y) ||
+       a[2].type!=TAG_u || a[4].type!=TAG_u || a[4].val<=0 ||
+       !((a[5].type==TAG_n || a[5].type==TAG_q) || (a[5].type==TAG_u && a[5].val==0)) ||
+       (a[6].type!=TAG_x && a[6].type!=TAG_y) ||
+       (a[3].type!=TAG_x && a[3].type!=TAG_y)) return TE_UNSUPPORTED;
+    target=lb_load_new_op(st); if(!target) return TE_NO_MEMORY;
+    target->op=genop_i_bs_get_binary2_6; target->arity=6; target->offset=source->offset;
+    target->a[0]=a[1]; target->a[1]=a[0]; target->a[2]=a[2];
+    target->a[3]=a[3]; target->a[4]=a[4]; target->a[5]=a[6];
+    target->next=source->next; st->genop=target; lb_load_free_op(st,source); return TE_OK;
+}
+static int transform_update_record(LoaderState *st,BeamOp *source)
+{
+    BeamOpArg *a=source->a; BeamOp *first,*previous; size_t count;
+    if(source->arity<7 || a[0].type!=TAG_a || a[1].type!=TAG_u || a[1].val<1 ||
+       (Uint)a[1].val>=MAX_REG-1 || a[4].type!=TAG_u || a[4].val<2 ||
+       (a[4].val&1) || (Uint)a[4].val>2*(Uint)a[1].val || source->arity!=5+(Uint)a[4].val) {
+        st->program->error.stage="update_record operand layout";
+        st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+    }
+    count=(Uint)a[4].val;
+    first=lb_load_new_op(st); if(!first) return TE_NO_MEMORY;
+    first->op=a[0].val==am_inplace?genop_i_update_record_in_place_5:genop_i_update_record_copy_5;
+    first->arity=5; first->offset=source->offset;
+    first->a[0]=a[1]; first->a[1]=a[2]; first->a[2]=a[3];
+    first->a[3]=a[5]; first->a[4]=a[6]; previous=first;
+    for(size_t i=2;i<count;i+=2) {
+        BeamOp *next=lb_load_new_op(st); int same_register;
+        if(!next) return TE_NO_MEMORY;
+        next->op=genop_i_update_record_continue_2; next->arity=2; next->offset=source->offset;
+        next->a[0]=(BeamOpArg){TAG_u,(Sint)((Uint)a[1].val+1-(Uint)a[5+i].val)};
+        same_register=a[5+i+1].type==a[3].type &&
+            ((a[3].type==TAG_x || a[3].type==TAG_y)?
+             (((Uint)a[5+i+1].val&REG_MASK)==((Uint)a[3].val&REG_MASK)):1);
+        next->a[1]=same_register?(BeamOpArg){TAG_x,MAX_REG-1}:a[5+i+1];
+        previous->next=next; previous=next;
+    }
+    if(a[0].val==am_inplace) {
+        BeamOp *done=lb_load_new_op(st); if(!done) return TE_NO_MEMORY;
+        done->op=genop_i_update_record_in_place_done_0; done->arity=0; done->offset=source->offset;
+        previous->next=done; previous=done;
+    }
+    previous->next=source->next; st->genop=first; lb_load_free_op(st,source); return TE_OK;
+}
 int lb_transform(LoaderState *st)
 {
     BeamOp *unary=st->genop;
+    if(unary->op==genop_bs_skip_utf8_4) {
+        BeamOpArg fail,context;
+        if(unary->arity!=4 ||
+           !(unary->a[0].type==TAG_f || (unary->a[0].type==TAG_p && !unary->a[0].val)) ||
+           (unary->a[1].type!=TAG_x && unary->a[1].type!=TAG_y) ||
+           unary->a[2].type!=TAG_u || unary->a[3].type!=TAG_u) {
+            st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+        }
+        fail=unary->a[0]; if(fail.type==TAG_p) fail.type=TAG_f;
+        context=unary->a[1];
+        unary->op=genop_i_bs_get_utf8_3; unary->arity=3;
+        unary->a[0]=context; unary->a[1]=fail; unary->a[2]=(BeamOpArg){TAG_x,MAX_REG-1};
+        return TE_OK;
+    }
+    if(unary->op==genop_bs_get_utf8_5) {
+        BeamOpArg fail,context,destination;
+        if(unary->arity!=5 ||
+           !(unary->a[0].type==TAG_f || (unary->a[0].type==TAG_p && !unary->a[0].val)) ||
+           (unary->a[1].type!=TAG_x && unary->a[1].type!=TAG_y) ||
+           unary->a[2].type!=TAG_u || unary->a[3].type!=TAG_u ||
+           (unary->a[4].type!=TAG_x && unary->a[4].type!=TAG_y)) {
+            st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+        }
+        fail=unary->a[0]; if(fail.type==TAG_p) fail.type=TAG_f;
+        context=unary->a[1]; destination=unary->a[4];
+        unary->op=genop_i_bs_get_utf8_3; unary->arity=3;
+        unary->a[0]=context; unary->a[1]=fail; unary->a[2]=destination;
+        return TE_OK;
+    }
+    if(unary->op==genop_update_record_5) return transform_update_record(st,unary);
+    if(unary->op==genop_bs_get_binary2_7) return transform_get_binary2(st,unary);
+    if(unary->op==genop_bs_get_integer2_7) return transform_get_integer2(st,unary);
+    if(unary->op==genop_i_bif1_4 || unary->op==genop_i_bif1_body_3) return TE_FAIL;
+    if(unary->op==genop_gc_bif1_5 && unary->arity==5 && unary->a[2].type==TAG_u &&
+       (Uint)unary->a[2].val<st->beam.imports.count &&
+       (st->bif_imports[unary->a[2].val]==&st->space->engine->bifs[BIF_bnot_1] ||
+        st->bif_imports[unary->a[2].val]==&st->space->engine->bifs[BIF_list_to_atom_1])) {
+        /* Keep these operations on the owned BIF path: their instruction intrinsics are not
+         * admitted, while the exact imported binding has runtime semantics. */
+        BeamOpArg fail=unary->a[0],source=unary->a[3],destination=unary->a[4],bif=unary->a[2];
+        if(fail.type==TAG_p) {
+            unary->op=genop_i_bif1_body_3; unary->arity=3;
+            unary->a[0]=source; unary->a[1]=bif; unary->a[2]=destination;
+        } else {
+            unary->op=genop_i_bif1_4; unary->arity=4;
+            unary->a[0]=source; unary->a[1]=fail; unary->a[2]=bif; unary->a[3]=destination;
+        }
+        return TE_OK;
+    }
     if(unary->op==genop_gc_bif1_5 && unary->arity==5 && unary->a[2].type==TAG_u &&
        (Uint)unary->a[2].val<st->beam.imports.count &&
        st->bif_imports[unary->a[2].val]==&st->space->engine->bifs[BIF_splus_1]) {
@@ -295,6 +418,54 @@ int lb_transform(LoaderState *st)
     /* These terminal stock rules lack an owned rewrite. Their specific
      * selectors are admitted below with bounded native flatmap handling. */
     if(st->genop->op==genop_new_map_3) return TE_FAIL;
+    if(st->genop->op==genop_has_map_fields_3) {
+        BeamOp *source=st->genop,*target; size_t count;
+        if(source->arity<3 || source->a[2].type!=TAG_u || source->a[2].val<0 ||
+           (Uint)source->a[2].val>LB_FLATMAP_MAX_SIZE || source->arity!=3+(Uint)source->a[2].val) {
+            st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+        }
+        count=(Uint)source->a[2].val;
+        target=lb_load_new_op(st); if(!target) return TE_NO_MEMORY;
+        target->next=source->next; target->op=genop_get_map_elements_3; target->arity=3+2*count;
+        target->offset=source->offset;
+        if(target->arity>sizeof(target->def_args)/sizeof(*target->def_args)) {
+            target->a=lb_palloc(st->program,target->arity,sizeof(*target->a));
+            if(!target->a) return TE_NO_MEMORY;
+        }
+        target->a[0]=source->a[0]; target->a[1]=source->a[1];
+        target->a[2]=(BeamOpArg){TAG_u,(Sint)(2*count)};
+        for(size_t i=0;i<count;++i) {
+            target->a[3+2*i]=source->a[3+i];
+            target->a[4+2*i]=(BeamOpArg){TAG_x,MAX_REG-1}; /* required OTP scratch register */
+        }
+        st->genop=target; lb_load_free_op(st,source); return TE_OK;
+    }
+    if(st->genop->op==genop_gc_bif2_6 && st->genop->arity==6 &&
+       st->genop->a[2].type==TAG_u && (Uint)st->genop->a[2].val<st->beam.imports.count &&
+       st->bif_imports[st->genop->a[2].val]==&st->space->engine->bifs[BIF_div_2]) {
+        BeamOp *op=st->genop;
+        /* i_bif2 fetches its encoded source operands in reverse order into the
+         * BIF argument vector; swap the gc_bif source order here. */
+        BeamOpArg fail=op->a[0],left=op->a[4],right=op->a[3],bif=op->a[2],destination=op->a[5];
+        if(fail.type==TAG_p) {
+            op->op=genop_i_bif2_body_4; op->arity=4;
+            op->a[0]=left; op->a[1]=right; op->a[2]=bif; op->a[3]=destination;
+        } else {
+            op->op=genop_i_bif2_5; op->arity=5;
+            op->a[0]=left; op->a[1]=right; op->a[2]=fail; op->a[3]=bif; op->a[4]=destination;
+        }
+        return TE_OK;
+    }
+    if(st->genop->op==genop_gc_bif2_6 && st->genop->arity==6 &&
+       st->genop->a[2].type==TAG_u && (Uint)st->genop->a[2].val<st->beam.imports.count &&
+       st->bif_imports[st->genop->a[2].val]==&st->space->engine->bifs[BIF_bxor_2]) {
+        /* Keep XOR on the owned generic BIF path: OTP's small-integer-specific
+         * instruction is not part of this runtime's native dispatch surface. */
+        BeamOp *op=st->genop;
+        op->op=genop_bif2_5; op->arity=5;
+        op->a[1]=op->a[2]; op->a[2]=op->a[3]; op->a[3]=op->a[4]; op->a[4]=op->a[5];
+        return TE_OK;
+    }
     if(st->genop->op==genop_get_map_elements_3) {
         BeamOp *source=st->genop,*target; size_t count;
         if(source->arity<3 || source->a[2].type!=TAG_u || source->a[2].val<0 ||

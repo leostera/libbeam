@@ -3,6 +3,7 @@
  * C-owned world/admission/completion state over the real loader and worker.
  */
 #include "world_internal.h"
+#include "timer.h"
 #include "binary.h"
 #include "bit_copy.h"
 #include "work_budget_internal.h"
@@ -353,6 +354,7 @@ static void close_admission(LbWorld *world)
 {
     LbCall *call,*next;
     world->phase=LB_WORLD_STOPPING;
+    lb_timer_cancel_world(world);
     for(call=world->calls;call;call=next) {
         next=call->next;
         if(call->status==LB_WORLD_PENDING) lb_task_cancel_locked(call->task);

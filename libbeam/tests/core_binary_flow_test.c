@@ -51,11 +51,13 @@ static BeamOp *binary(Program *p,Eterm kind,BeamOpArg src,BeamOpArg dst,BeamOpAr
     return ADD(p,bs_create_bin_6,fail,U(3),U(live),U(1),dst,U(12),
         A(kind),U(0),U(1),N,src,A(am_all),A(am_integer),U(1),U(1),N,I(7),I(8));
 }
+static unsigned verify_case;
 static LbCodeStatus verify(LbCodeSpace *space,Program *input,LbCodeStatus expected)
 {
+    ++verify_case;
     LbBeamProgram p={.ops=input->ops}; LoaderState st={.space=space,.program=&p,.label_count=12};
     LbCodeStatus status=lb_verify_program(&st);
-    if(status!=expected) fprintf(stderr,"status=%d expected=%d stage=%s\n",status,expected,p.error.stage);
+    if(status!=expected) fprintf(stderr,"case=%u status=%d expected=%d stage=%s\n",verify_case,status,expected,p.error.stage);
     CHECK(status==expected);
     if(status==LB_CODE_OK) for(size_t i=0;i<input->count;++i) for(size_t j=0;j<input->ops[i].arity;++j) {
         BeamOpArg a=input->ops[i].a[j]; if(a.type==TAG_x || a.type==TAG_y) CHECK((Uint)a.val<MAX_REG);
@@ -102,7 +104,8 @@ static void consumption(LbCodeSpace *space)
         if(mode==4) op->a[17]=X(1<<10);
         if(mode==5) { op->a[10]=A(am_false); }
         if(mode==6) { op->a[2]=U(2); }
-        ret(&p); verify(space,&p,mode?LB_CODE_FORMAT:LB_CODE_OK);
+        ret(&p); verify(space,&p,(mode==0 || mode==1)?LB_CODE_OK:LB_CODE_FORMAT);
+        if(mode==1) CHECK(op->a[6].val==am_append); /* Missing writable init uses the checked copy path. */
     }
     begin(&p); init(&p); binary(&p,am_private_append,X(0),X(1),P,1);
     ADD(&p,move_2,X(1),X(0)); ret(&p); verify(space,&p,LB_CODE_OK);
@@ -137,20 +140,29 @@ static void joins_and_revocation(LbCodeSpace *space)
         ADD(&p,label_1,U(4)); ret(&p); verify(space,&p,consume?LB_CODE_FORMAT:LB_CODE_OK);
     }
     for(unsigned overwrite=0;overwrite<2;++overwrite) {
-        begin(&p); init(&p); ADD(&p,label_1,U(3)); binary(&p,am_private_append,X(0),X(0),P,1);
+        begin(&p); init(&p); ADD(&p,label_1,U(3));
+        BeamOp *op=binary(&p,am_private_append,X(0),X(0),P,1);
         if(overwrite) ADD(&p,move_2,N,X(0));
-        ADD(&p,jump_1,F(3)); verify(space,&p,overwrite?LB_CODE_FORMAT:LB_CODE_OK);
+        ADD(&p,jump_1,F(3)); verify(space,&p,LB_CODE_OK);
+        if(overwrite) CHECK(op->a[6].val==am_append);
     }
     /* Normal append can revoke the old header. Only its new destination keeps
      * the append representation fact, and an arbitrary call loses Y facts. */
     for(unsigned old=0;old<2;++old) {
         begin(&p); init(&p); binary(&p,am_append,X(0),X(1),P,1);
-        binary(&p,am_private_append,X(old?0:1),X(0),P,2); ret(&p);
-        verify(space,&p,old?LB_CODE_FORMAT:LB_CODE_OK);
+        BeamOp *op=binary(&p,am_private_append,X(old?0:1),X(0),P,2); ret(&p);
+        verify(space,&p,LB_CODE_OK);
+        if(old) CHECK(op->a[6].val==am_append);
     }
     begin(&p); ADD(&p,allocate_2,U(1),U(2)); ADD(&p,move_2,N,Y(0)); init(&p); ADD(&p,move_2,X(0),Y(0));
-    ADD(&p,call_2,U(1),F(8)); binary(&p,am_private_append,Y(0),X(0),P,1); ADD(&p,deallocate_1,U(1)); ret(&p);
+    ADD(&p,call_2,U(1),F(8)); BeamOp *after_call=binary(&p,am_private_append,Y(0),X(0),P,1); ADD(&p,deallocate_1,U(1)); ret(&p);
     ADD(&p,int_func_start_5,U(7),U(0),A(am_erlang),A(am_binary),U(1)); ADD(&p,label_1,U(8)); ret(&p);
+    verify(space,&p,LB_CODE_OK); CHECK(after_call->a[6].val==am_append);
+    /* A callback that receives the writable value can retain it. A later
+     * private append through a saved Y root must not inherit stale authority. */
+    begin(&p); ADD(&p,allocate_2,U(1),U(2)); ADD(&p,move_2,N,Y(0)); init(&p);
+    ADD(&p,move_2,X(0),Y(0)); ADD(&p,call_fun_1,U(1));
+    binary(&p,am_private_append,Y(0),X(0),P,1); ADD(&p,deallocate_1,U(1)); ret(&p);
     verify(space,&p,LB_CODE_FORMAT);
     /* This proof is NOT uniqueness. Runtime checks must still refuse another
      * surviving reference, including one hidden in a constructed compound. */
@@ -174,7 +186,8 @@ static void fixture(LbCodeSpace *space,const char *path)
     while(op && op->op!=genop_bs_create_bin_6) op=op->next; CHECK(op);
     BeamOpArg saved=op->a[2]; op->a[2]=U(0); CHECK(lb_verify_program(&st)==LB_CODE_FORMAT); op->a[2]=saved;
     saved=op->a[4]; op->a[4]=Y(0); CHECK(lb_verify_program(&st)==LB_CODE_FORMAT); op->a[4]=saved;
-    saved=op->a[6]; op->a[6]=A(am_private_append); CHECK(lb_verify_program(&st)==LB_CODE_FORMAT); op->a[6]=saved;
+    saved=op->a[6]; op->a[6]=A(am_private_append);
+    CHECK(lb_verify_program(&st)==LB_CODE_OK && op->a[6].val==am_append); op->a[6]=saved;
     CHECK(lb_verify_program(&st)==LB_CODE_OK); lb_beam_program_destroy(p);
     CHECK(lb_code_load(space,data,(size_t)size,&module,&error)==LB_CODE_OK && module);
     CHECK(lb_code_unload(module)==LB_CODE_OK && !space->modules); free(data);

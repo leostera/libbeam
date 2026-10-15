@@ -62,12 +62,26 @@ int main(int argc,char **argv)
         }
         lb_process_destroy(p);
     }
+    {
+        LbProcess *p=execute(space,module,"catch_unwind",LB_PROCESS_EXCEPTION);
+        CHECK(lb_exception_class(p->freason)==am_error); payload(p->exception_value);
+        LbRaisedTrace trace; CHECK(lb_raise_trace_unpack(p->ftrace,&trace));
+        CHECK(is_list(trace.symbolic) && list_val(trace.symbolic)[1]==NIL);
+        Eterm *frame=tuple_val(list_val(trace.symbolic)[0]);
+        CHECK(arityval(frame[0])==4 && frame[1]==module->name &&
+              frame[2]==atom(space,"catch_unwind") && frame[3]==make_small(1));
+        for(size_t r=0;r<MAX_REG;++r) p->reg[r]=NIL;
+        CHECK(lb_process_collect(p,0)==LB_PROCESS_EXCEPTION);
+        payload(p->exception_value); CHECK(lb_raise_trace_unpack(p->ftrace,&trace));
+        CHECK(is_list(trace.symbolic) && list_val(trace.symbolic)[1]==NIL);
+        lb_process_destroy(p);
+    }
     for(size_t i=0;i<2;++i) {
         LbProcess *p=execute(space,module,i?"invalid_trace":"invalid_class",LB_PROCESS_DONE);
         CHECK(lb_process_result(p)==am_badarg && p->ftrace==NIL); lb_process_destroy(p);
     }
     CHECK(lb_code_unload_all(space)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
-    puts("CORE_RAISE_EXECUTION_OK supplied_trace=true classes=true nocatch=true badarg_return=true fun_frame=true gc=true monitor_reason=true catch_unwind=false");
+    puts("CORE_RAISE_EXECUTION_OK supplied_trace=true classes=true nocatch=true badarg_return=true fun_frame=true gc=true monitor_reason=true raw_raise=true catch_unwind=true");
     return 0;
 }

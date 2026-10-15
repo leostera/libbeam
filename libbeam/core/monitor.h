@@ -27,11 +27,12 @@ typedef struct LbMonitor {
     /* Owner pointers are borrowed only while their corresponding half links. */
     LbProcess *origin_process,*target_process;
     Eterm target_name; /* NIL or an immutable namespace atom; never a moving root */
+    Eterm down_tag; /* immediate monitor signal tag, default am_DOWN */
 } LbMonitor;
 _Static_assert(sizeof(LbMonitorNode)==6*sizeof(Eterm),"native monitor node");
 LbProcessStatus lb_monitor_prepare(LbProcess *,Eterm,LbMonitor **);
 void lb_monitor_discard(LbMonitor *);
 void lb_monitor_publish(LbMonitor *,LbProcess *);
-void lb_monitor_demonitor(LbProcess *,Eterm,int flush);
+int lb_monitor_demonitor(LbProcess *,Eterm,int flush);
 void lb_monitor_exit(LbProcess *,int notify);
 #endif

@@ -1,6 +1,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 %% Copyright 2026 Leandro Ostera <leandro@ostera.io>
-%% Loader-generator witness only; this module remains execution-unadmitted.
+%% Generator and strict private-append proof witness; execution is checked separately.
 -module(binary_create_slice).
 -export([mixed/5, string/1, append/2, private/1, sized/2, literal/1]).
 mixed(B, I, F, C, S) ->

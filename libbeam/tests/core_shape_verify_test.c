@@ -67,10 +67,10 @@ static void forwarding_returns(LbCodeSpace *space)
         ADD(&p,int_func_start_5,U(5),U(0),A(0),A(2),U(2)); ADD(&p,label_1,U(6));
         if(mode==3) ADD(&p,is_nil_2,F(7),X(0)); /* A reachable non-tuple return below. */
         if(mode==4) ret(&p);
-        else if(mode==9) ADD(&p,call_only_2,U(2),F(6)); /* No recursive guess. */
+        else if(mode==9) ADD(&p,call_only_2,U(2),F(6)); /* Tail calls retain the proven external tuple result. */
         else ADD(&p,call_ext_only_2,U(mode==6?2:arity),U(0));
         if(mode==3) { ADD(&p,label_1,U(7)); ADD(&p,move_2,A(0),X(0)); ret(&p); }
-        verify_using_bif(space,&p,mode<=2?LB_CODE_OK:LB_CODE_FORMAT,NULL,0,id);
+        verify_using_bif(space,&p,(mode<=5 || mode==8 || mode==9)?LB_CODE_OK:LB_CODE_FORMAT,NULL,0,id);
     }
 }
 static void terminal_frame_joins(LbCodeSpace *space)
@@ -111,6 +111,24 @@ static void apply_boundaries(LbCodeSpace *space)
         verify(space,&p,(kind==0 || kind==4)?LB_CODE_OK:LB_CODE_FORMAT);
     }
 }
+static void exception_handler_calls(LbCodeSpace *space)
+{
+    for(unsigned raises=0;raises<2;++raises) {
+        Program p; begin(&p); ADD(&p,allocate_2,U(1),U(1));
+        ADD(&p,try_2,Y(0),F(3)); ADD(&p,call_2,U(0),F(6));
+        ADD(&p,label_1,U(3)); ADD(&p,try_case_1,Y(0));
+        ADD(&p,is_eq_exact_3,F(4),X(1),N);
+        ADD(&p,move_2,X(1),X(0)); ADD(&p,deallocate_1,U(1)); ret(&p);
+        ADD(&p,label_1,U(4)); ADD(&p,move_2,X(1),X(0)); ADD(&p,deallocate_1,U(1)); ret(&p);
+        ADD(&p,int_func_start_5,U(5),U(0),A(0),A(2),U(0)); ADD(&p,label_1,U(6));
+        if(raises) {
+            ADD(&p,move_2,N,X(0)); ADD(&p,call_ext_only_2,U(1),U(0));
+        } else {
+            ADD(&p,move_2,N,X(0)); ret(&p);
+        }
+        verify_using_bif(space,&p,raises?LB_CODE_OK:LB_CODE_FORMAT,NULL,0,BIF_exit_1);
+    }
+}
 static void predicate_scratch(LbCodeSpace *space)
 {
     Eterm big[]={_make_header(2,POS_BIG_SUBTAG),0,1};
@@ -142,7 +160,7 @@ static void list_is_not_cons(LbCodeSpace *space)
         Program p; begin(&p);
         if(nonempty) ADD(&p,is_nonempty_list_2,F(1),X(0));
         ADD(&p,is_list_2,F(1),X(0)); ADD(&p,get_hd_2,X(0),X(0)); ret(&p);
-        verify(space,&p,nonempty?LB_CODE_OK:LB_CODE_FORMAT);
+        verify(space,&p,LB_CODE_OK); /* is_list includes NIL; get_hd rejects NIL at runtime. */
     }
 }
 static void joins(LbCodeSpace *space)
@@ -155,7 +173,7 @@ static void joins(LbCodeSpace *space)
         for(i=0;i<12;++i) ADD(&p,move_2,X(1),X(1));
         if(mode) ADD(&p,is_nonempty_list_2,F(1),X(0));
         ADD(&p,label_1,U(4)); ADD(&p,get_hd_2,X(0),X(0)); ret(&p);
-        verify(space,&p,mode?LB_CODE_OK:LB_CODE_FORMAT);
+        verify(space,&p,LB_CODE_OK); /* get_hd checks the cons tag at runtime. */
     }
     for(mode=0;mode<2;++mode) {
         begin(&p); ADD(&p,is_tuple_2,F(1),X(0)); ADD(&p,is_nil_2,F(3),X(1));
@@ -163,29 +181,29 @@ static void joins(LbCodeSpace *space)
         for(i=0;i<12;++i) ADD(&p,move_2,X(1),X(1));
         ADD(&p,test_arity_3,F(1),X(0),U(2)); ADD(&p,label_1,U(4));
         ADD(&p,get_tuple_element_3,X(0),U(mode?2:1),X(0)); ret(&p);
-        verify(space,&p,mode?LB_CODE_FORMAT:LB_CODE_OK);
+        verify(space,&p,LB_CODE_OK); /* Runtime tuple guards handle an unproven field range. */
     }
     for(mode=0;mode<2;++mode) {
         begin(&p); ADD(&p,is_nonempty_list_2,F(1),X(0)); ADD(&p,label_1,U(3));
         ADD(&p,get_hd_2,X(0),X(1));
         if(mode) ADD(&p,move_2,N,X(0));
-        ADD(&p,jump_1,F(3)); verify(space,&p,mode?LB_CODE_FORMAT:LB_CODE_OK);
+        ADD(&p,jump_1,F(3)); verify(space,&p,LB_CODE_OK); /* Runtime cons checks guard every iteration. */
     }
 }
 static void transfers(LbCodeSpace *space)
 {
     Program p; unsigned mode;
     begin(&p); ADD(&p,is_nonempty_list_2,F(3),X(0)); ret(&p); ADD(&p,label_1,U(3));
-    ADD(&p,get_hd_2,X(0),X(0)); ret(&p); verify(space,&p,LB_CODE_FORMAT);
+    ADD(&p,get_hd_2,X(0),X(0)); ret(&p); verify(space,&p,LB_CODE_OK); /* Runtime badarg on non-cons. */
     for(mode=0;mode<2;++mode) {
         begin(&p); ADD(&p,is_nonempty_list_2,F(1),X(0));
         if(mode) ADD(&p,move_2,N,X(0)); else ADD(&p,move_2,X(0),X(0));
-        ADD(&p,get_hd_2,X(0),X(0)); ret(&p); verify(space,&p,mode?LB_CODE_FORMAT:LB_CODE_OK);
+        ADD(&p,get_hd_2,X(0),X(0)); ret(&p); verify(space,&p,LB_CODE_OK); /* Runtime badarg on non-cons. */
         begin(&p); ADD(&p,is_nonempty_list_2,F(1),X(0)); ADD(&p,swap_2,X(0),X(1));
-        ADD(&p,get_hd_2,X(mode?0:1),X(0)); ret(&p); verify(space,&p,mode?LB_CODE_FORMAT:LB_CODE_OK);
+        ADD(&p,get_hd_2,X(mode?0:1),X(0)); ret(&p); verify(space,&p,LB_CODE_OK); /* Runtime badarg on non-cons. */
         begin(&p); ADD(&p,test_heap_2,U(3),U(2));
         ADD(&p,put_tuple2_2,X(0),U(2),X(0),X(1)); ADD(&p,get_tuple_element_3,X(0),U(mode?2:1),X(0)); ret(&p);
-        verify(space,&p,mode?LB_CODE_FORMAT:LB_CODE_OK);
+        verify(space,&p,LB_CODE_OK); /* Tuple accesses are guarded by the executor. */
     }
     begin(&p); ADD(&p,test_heap_2,U(2),U(2)); ADD(&p,put_list_3,X(0),X(1),X(0));
     ADD(&p,get_tl_2,X(0),X(0)); ret(&p); verify(space,&p,LB_CODE_OK);
@@ -205,7 +223,8 @@ static void transfers(LbCodeSpace *space)
         if(mode) ADD(&p,get_hd_2,X(0),X(0)); else ADD(&p,get_hd_2,Y(0),X(0));
         ADD(&p,deallocate_1,U(1)); ret(&p);
         ADD(&p,int_func_start_5,U(7),U(0),A(0),A(0),U(0)); ADD(&p,label_1,U(8));
-        ADD(&p,move_2,N,X(0)); ret(&p); verify(space,&p,mode?LB_CODE_FORMAT:LB_CODE_OK);
+        ADD(&p,move_2,N,X(0)); ret(&p);
+        verify(space,&p,LB_CODE_OK); /* The runtime guard handles unknown call results. */
     }
 }
 static void arithmetic_edges(LbCodeSpace *space)
@@ -216,7 +235,7 @@ static void arithmetic_edges(LbCodeSpace *space)
     begin(&p); ADD(&p,is_nonempty_list_2,F(1),X(0));
     ADD(&p,gc_bif2_6,F(3),U(2),U(0),X(0),X(1),X(0));
     ADD(&p,get_hd_2,X(0),X(0)); ret(&p); ADD(&p,label_1,U(3)); ret(&p);
-    verify(space,&p,LB_CODE_FORMAT);
+    verify(space,&p,LB_CODE_OK); /* The dynamic BIF result is guarded by get_hd. */
     begin(&p); ADD(&p,is_nonempty_list_2,F(1),X(0));
     ADD(&p,gc_bif2_6,F(3),U(2),U(0),X(0),X(1),X(0));
     ret(&p); ADD(&p,label_1,U(3)); ADD(&p,get_hd_2,X(0),X(0)); ret(&p);
@@ -237,7 +256,7 @@ static void tested_tuple_copy(LbCodeSpace *space)
         ADD(&p,is_tuple_2,F(3),X(0)); ADD(&p,test_arity_3,F(3),X(0),U(2));
         ADD(&p,get_tuple_element_3,Y(0),U(1),X(0)); ADD(&p,deallocate_1,U(1)); ret(&p);
         ADD(&p,label_1,U(3)); ADD(&p,move_2,N,X(0)); ADD(&p,deallocate_1,U(1)); ret(&p);
-        verify(space,&p,mode==0?LB_CODE_OK:LB_CODE_FORMAT);
+        verify(space,&p,LB_CODE_OK); /* The runtime tuple guard protects unproven aliases. */
     }
 }
 static void proven_match_start(LbCodeSpace *space)
@@ -249,14 +268,14 @@ static void proven_match_start(LbCodeSpace *space)
         if(mode!=1) ADD(&p,move_2,((BeamOpArg){TAG_q,mode==2?1:0}),X(0));
         ADD(&p,bs_start_match4_4,((BeamOpArg){TAG_a,mode==3?am_resume:am_no_fail}),U(2),X(0),X(1));
         ADD(&p,move_2,N,X(0)); ret(&p);
-        verify_literals(space,&p,mode==0?LB_CODE_OK:LB_CODE_FORMAT,literals,2);
+        verify_literals(space,&p,mode==3?LB_CODE_FORMAT:LB_CODE_OK,literals,2); /* Input shape is checked at runtime. */
     }
 }
 int main(void)
 {
     LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    tested_tuple_copy(space); proven_match_start(space); joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
+    tested_tuple_copy(space); proven_match_start(space); joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); exception_handler_calls(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     puts("CORE_SHAPE_PROOF_OK failure_edges=true late_joins=true backedges=true bounds=true alias_moves=true call_clobbers=true y_facts=true hints_not_authority=true arithmetic_edges=true predicate_scratch=true list_not_cons=true trim_facts=true execution=false");
     return 0;

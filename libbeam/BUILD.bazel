@@ -1071,7 +1071,7 @@ cc_library(
 
 test_suite(
   name = "bif_denial_tests",
-  tests = ["bif_call_on_load_function_1_test", "bif_delete_module_1_test", "bif_display_1_test", "bif_display_string_1_test", "bif_display_string_2_test", "bif_dist_ctrl_put_data_2_test", "bif_finish_after_on_load_2_test", "bif_finish_loading_1_test", "bif_halt_0_test", "bif_halt_1_test", "bif_halt_2_test", "bif_has_prepared_code_on_load_1_test", "bif_load_nif_2_test", "bif_monitor_node_2_test", "bif_monitor_node_3_test", "bif_open_port_2_test", "bif_port_close_1_test", "bif_port_command_2_test", "bif_port_command_3_test", "bif_port_connect_2_test", "bif_port_control_3_test", "bif_port_set_data_2_test", "bif_prepare_loading_2_test", "bif_process_display_2_test", "bif_purge_module_1_test", "bif_set_cookie_2_test", "bif_setnode_2_test"],
+  tests = ["bif_call_on_load_function_1_test", "bif_delete_module_1_test", "bif_disconnect_node_1_test", "bif_display_1_test", "bif_display_string_1_test", "bif_display_string_2_test", "bif_dist_ctrl_put_data_2_test", "bif_finish_after_on_load_2_test", "bif_finish_loading_1_test", "bif_halt_0_test", "bif_halt_1_test", "bif_halt_2_test", "bif_has_prepared_code_on_load_1_test", "bif_load_nif_2_test", "bif_monitor_node_2_test", "bif_monitor_node_3_test", "bif_open_port_2_test", "bif_port_close_1_test", "bif_port_command_2_test", "bif_port_command_3_test", "bif_port_connect_2_test", "bif_port_control_3_test", "bif_port_set_data_2_test", "bif_prepare_loading_2_test", "bif_process_display_2_test", "bif_purge_module_1_test", "bif_set_cookie_2_test", "bif_setnode_2_test", "bif_system_flag_2_test", "bif_trace_3_test", "bif_trace_info_2_test", "bif_trace_pattern_3_test"],
 )
 
 genrule(
@@ -1085,9 +1085,9 @@ genrule(
 cc_test(
   name = "bif_disconnect_node_1_test",
   size = "small",
-  args = ["$(rootpath :bif_disconnect_node_1_fixture)", "bif_disconnect_node_1", "disconnect_node"],
+  args = ["$(rootpath :bif_disconnect_node_1_fixture)", "bif_disconnect_node_1", "disconnect_node/1", "DISTRIBUTION"],
   data = ["bif_disconnect_node_1_fixture"],
-  deps = ["bif_execution_test_main"],
+  deps = ["bif_denial_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
@@ -2390,7 +2390,7 @@ cc_test(
 
 test_suite(
   name = "bif_mfa_tests",
-  tests = ["bif_alias_0_test", "bif_alias_1_test", "bif_and_2_test", "bif_apply_2_test", "bif_binary_to_integer_2_test", "bif_binary_to_list_1_test", "bif_binary_to_list_3_test", "bif_bit_size_1_test", "bif_bitstring_to_list_1_test", "bif_bump_reductions_1_test", "bif_call_on_load_function_1_test", "bif_cancel_timer_1_test", "bif_cancel_timer_2_test", "bif_ceil_1_test", "bif_convert_time_unit_3_test", "bif_decode_packet_3_test", "bif_delete_module_1_test", "bif_demonitor_1_test", "bif_disconnect_node_1_test", "bif_display_1_test", "bif_display_string_1_test", "bif_display_string_2_test", "bif_dist_ctrl_put_data_2_test", "bif_divide_2_test", "bif_dt_restore_tag_1_test", "bif_dt_spread_tag_1_test", "bif_erase_0_test", "bif_exit_1_test", "bif_external_size_1_test", "bif_finish_after_on_load_2_test", "bif_finish_loading_1_test", "bif_float_1_test", "bif_float_to_list_1_test", "bif_float_to_list_2_test", "bif_fun_info_1_test", "bif_fun_info_2_test", "bif_fun_info_mfa_1_test", "bif_fun_to_list_1_test", "bif_garbage_collect_0_test", "bif_garbage_collect_1_test", "bif_get_0_test", "bif_get_cookie_0_test", "bif_get_keys_0_test", "bif_get_keys_1_test", "bif_group_leader_0_test", "bif_group_leader_2_test", "bif_halt_0_test", "bif_halt_1_test", "bif_halt_2_test", "bif_has_prepared_code_on_load_1_test", "bif_hibernate_0_test", "bif_hibernate_3_test", "bif_insert_element_3_test", "bif_integer_to_list_1_test", "bif_integer_to_list_2_test", "bif_iolist_size_1_test", "bif_iolist_to_iovec_1_test", "bif_is_alive_0_test", "bif_is_bitstring_1_test", "bif_is_boolean_1_test", "bif_is_builtin_3_test", "bif_is_float_1_test", "bif_is_map_1_test", "bif_is_number_1_test", "bif_is_pid_1_test", "bif_is_port_1_test", "bif_is_process_alive_1_test", "bif_is_reference_1_test", "bif_is_tuple_1_test", "bif_link_1_test", "bif_list_to_atom_1_test", "bif_list_to_binary_1_test", "bif_list_to_bitstring_1_test", "bif_list_to_existing_atom_1_test", "bif_list_to_float_1_test", "bif_list_to_integer_2_test", "bif_list_to_pid_1_test", "bif_list_to_port_1_test", "bif_list_to_ref_1_test", "bif_load_module_2_test", "bif_load_nif_2_test", "bif_loaded_0_test", "bif_localtime_0_test", "bif_localtime_to_universaltime_1_test", "bif_localtime_to_universaltime_2_test", "bif_make_fun_3_test", "bif_match_spec_test_3_test", "bif_md5_1_test", "bif_md5_final_1_test", "bif_md5_init_0_test", "bif_md5_update_2_test", "bif_memory_0_test", "bif_memory_1_test", "bif_monitor_2_test", "bif_monitor_3_test", "bif_monitor_node_2_test", "bif_monitor_node_3_test", "bif_monotonic_time_0_test", "bif_monotonic_time_1_test", "bif_nif_error_1_test", "bif_node_1_test", "bif_nodes_0_test", "bif_nodes_1_test", "bif_nodes_2_test", "bif_open_port_2_test", "bif_or_2_test", "bif_phash2_1_test", "bif_phash2_2_test", "bif_phash_2_test", "bif_pid_to_list_1_test", "bif_port_close_1_test", "bif_port_command_2_test", "bif_port_command_3_test", "bif_port_connect_2_test", "bif_port_control_3_test", "bif_port_get_data_1_test", "bif_port_info_1_test", "bif_port_info_2_test", "bif_port_set_data_2_test", "bif_port_to_list_1_test", "bif_ports_0_test", "bif_posixtime_to_universaltime_1_test", "bif_pre_loaded_0_test", "bif_prepare_loading_2_test", "bif_process_display_2_test", "bif_process_flag_2_test", "bif_process_flag_3_test", "bif_process_info_1_test", "bif_processes_0_test", "bif_processes_iterator_0_test", "bif_processes_next_1_test", "bif_purge_module_1_test", "bif_read_timer_1_test", "bif_ref_to_list_1_test", "bif_registered_0_test", "bif_round_1_test", "bif_send_2_test", "bif_send_3_test", "bif_send_after_3_test", "bif_send_after_4_test", "bif_set_cookie_2_test", "bif_setnode_2_test", "bif_spawn_2_test", "bif_spawn_4_test", "bif_spawn_link_1_test", "bif_spawn_link_2_test", "bif_spawn_link_3_test", "bif_spawn_link_4_test", "bif_spawn_monitor_2_test", "bif_spawn_monitor_3_test", "bif_spawn_monitor_4_test", "bif_spawn_opt_2_test", "bif_spawn_opt_3_test", "bif_spawn_opt_5_test", "bif_spawn_request_5_test", "bif_spawn_request_abandon_1_test", "bif_start_timer_3_test", "bif_start_timer_4_test", "bif_statistics_1_test", "bif_system_flag_2_test", "bif_system_info_1_test", "bif_system_time_0_test", "bif_system_time_1_test", "bif_term_to_binary_1_test", "bif_term_to_binary_2_test", "bif_time_offset_0_test", "bif_time_offset_1_test", "bif_timestamp_0_test", "bif_trace_3_test", "bif_trace_info_2_test", "bif_trace_pattern_3_test", "bif_trunc_1_test", "bif_tuple_size_1_test", "bif_unalias_1_test", "bif_unary_plus_1_test", "bif_unique_integer_0_test", "bif_unique_integer_1_test", "bif_universaltime_0_test", "bif_universaltime_to_localtime_1_test", "bif_universaltime_to_posixtime_1_test", "bif_unlink_1_test", "bif_unregister_1_test", "bif_whereis_1_test", "bif_xor_2_test", "bif_yield_0_test"],
+  tests = ["bif_alias_0_test", "bif_alias_1_test", "bif_and_2_test", "bif_apply_2_test", "bif_binary_to_integer_2_test", "bif_binary_to_list_1_test", "bif_binary_to_list_3_test", "bif_bit_size_1_test", "bif_bitstring_to_list_1_test", "bif_bump_reductions_1_test", "bif_call_on_load_function_1_test", "bif_cancel_timer_1_test", "bif_cancel_timer_2_test", "bif_ceil_1_test", "bif_convert_time_unit_3_test", "bif_decode_packet_3_test", "bif_delete_module_1_test", "bif_demonitor_1_test", "bif_disconnect_node_1_test", "bif_display_1_test", "bif_display_string_1_test", "bif_display_string_2_test", "bif_dist_ctrl_put_data_2_test", "bif_divide_2_test", "bif_dt_restore_tag_1_test", "bif_dt_spread_tag_1_test", "bif_erase_0_test", "bif_exit_1_test", "bif_external_size_1_test", "bif_finish_after_on_load_2_test", "bif_finish_loading_1_test", "bif_float_1_test", "bif_float_to_list_1_test", "bif_float_to_list_2_test", "bif_fun_info_1_test", "bif_fun_info_2_test", "bif_fun_info_mfa_1_test", "bif_fun_to_list_1_test", "bif_garbage_collect_0_test", "bif_garbage_collect_1_test", "bif_get_0_test", "bif_get_cookie_0_test", "bif_get_keys_0_test", "bif_get_keys_1_test", "bif_group_leader_0_test", "bif_group_leader_2_test", "bif_halt_0_test", "bif_halt_1_test", "bif_halt_2_test", "bif_has_prepared_code_on_load_1_test", "bif_hibernate_0_test", "bif_hibernate_3_test", "bif_insert_element_3_test", "bif_integer_to_list_1_test", "bif_integer_to_list_2_test", "bif_iolist_size_1_test", "bif_iolist_to_iovec_1_test", "bif_is_alive_0_test", "bif_is_bitstring_1_test", "bif_is_boolean_1_test", "bif_is_builtin_3_test", "bif_is_float_1_test", "bif_is_map_1_test", "bif_is_number_1_test", "bif_is_pid_1_test", "bif_is_port_1_test", "bif_is_process_alive_1_test", "bif_is_reference_1_test", "bif_is_tuple_1_test", "bif_link_1_test", "bif_list_to_atom_1_test", "bif_list_to_binary_1_test", "bif_list_to_bitstring_1_test", "bif_list_to_existing_atom_1_test", "bif_list_to_float_1_test", "bif_list_to_integer_2_test", "bif_list_to_pid_1_test", "bif_list_to_port_1_test", "bif_list_to_ref_1_test", "bif_load_module_2_test", "bif_load_nif_2_test", "bif_loaded_0_test", "bif_localtime_0_test", "bif_localtime_to_universaltime_1_test", "bif_localtime_to_universaltime_2_test", "bif_make_fun_3_test", "bif_match_spec_test_3_test", "bif_md5_1_test", "bif_md5_final_1_test", "bif_md5_init_0_test", "bif_md5_update_2_test", "bif_memory_0_test", "bif_memory_1_test", "bif_monitor_2_test", "bif_monitor_3_test", "bif_monitor_node_2_test", "bif_monitor_node_3_test", "bif_monotonic_time_0_test", "bif_monotonic_time_1_test", "bif_nif_error_1_test", "bif_node_1_test", "bif_nodes_0_test", "bif_nodes_1_test", "bif_nodes_2_test", "bif_open_port_2_test", "bif_or_2_test", "bif_phash2_1_test", "bif_phash2_2_test", "bif_phash_2_test", "bif_pid_to_list_1_test", "bif_port_close_1_test", "bif_port_command_2_test", "bif_port_command_3_test", "bif_port_connect_2_test", "bif_port_control_3_test", "bif_port_get_data_1_test", "bif_port_info_1_test", "bif_port_info_2_test", "bif_port_set_data_2_test", "bif_port_to_list_1_test", "bif_ports_0_test", "bif_posixtime_to_universaltime_1_test", "bif_pre_loaded_0_test", "bif_prepare_loading_2_test", "bif_process_display_2_test", "bif_process_flag_2_test", "bif_process_flag_3_test", "bif_process_info_1_test", "bif_processes_0_test", "bif_processes_iterator_0_test", "bif_processes_next_1_test", "bif_purge_module_1_test", "bif_read_timer_1_test", "bif_ref_to_list_1_test", "bif_registered_0_test", "bif_round_1_test", "bif_send_2_test", "bif_send_3_test", "bif_send_after_3_test", "bif_send_after_4_test", "bif_set_cookie_2_test", "bif_setnode_2_test", "bif_spawn_2_test", "bif_spawn_4_test", "bif_spawn_link_1_test", "bif_spawn_link_2_test", "bif_spawn_link_3_test", "bif_spawn_link_4_test", "bif_spawn_monitor_2_test", "bif_spawn_monitor_3_test", "bif_spawn_monitor_4_test", "bif_spawn_opt_2_test", "bif_spawn_opt_3_test", "bif_spawn_opt_5_test", "bif_spawn_request_5_test", "bif_spawn_request_abandon_1_test", "bif_start_timer_3_test", "bif_start_timer_4_test", "bif_statistics_1_test", "bif_system_info_1_test", "bif_system_time_0_test", "bif_system_time_1_test", "bif_term_to_binary_1_test", "bif_term_to_binary_2_test", "bif_time_offset_0_test", "bif_time_offset_1_test", "bif_timestamp_0_test", "bif_trunc_1_test", "bif_tuple_size_1_test", "bif_unalias_1_test", "bif_unary_plus_1_test", "bif_unique_integer_0_test", "bif_unique_integer_1_test", "bif_universaltime_0_test", "bif_universaltime_to_localtime_1_test", "bif_universaltime_to_posixtime_1_test", "bif_unlink_1_test", "bif_unregister_1_test", "bif_whereis_1_test", "bif_xor_2_test", "bif_yield_0_test"],
 )
 
 genrule(
@@ -3526,9 +3526,9 @@ genrule(
 cc_test(
   name = "bif_system_flag_2_test",
   size = "small",
-  args = ["$(rootpath :bif_system_flag_2_fixture)", "bif_system_flag_2", "system_flag"],
+  args = ["$(rootpath :bif_system_flag_2_fixture)", "bif_system_flag_2", "system_flag/2", "HOST_CONTROL"],
   data = ["bif_system_flag_2_fixture"],
-  deps = ["bif_execution_test_main"],
+  deps = ["bif_denial_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
@@ -3679,9 +3679,9 @@ genrule(
 cc_test(
   name = "bif_trace_3_test",
   size = "small",
-  args = ["$(rootpath :bif_trace_3_fixture)", "bif_trace_3", "trace"],
+  args = ["$(rootpath :bif_trace_3_fixture)", "bif_trace_3", "trace/3", "HOST_CONTROL"],
   data = ["bif_trace_3_fixture"],
-  deps = ["bif_execution_test_main"],
+  deps = ["bif_denial_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
@@ -3696,9 +3696,9 @@ genrule(
 cc_test(
   name = "bif_trace_info_2_test",
   size = "small",
-  args = ["$(rootpath :bif_trace_info_2_fixture)", "bif_trace_info_2", "trace_info"],
+  args = ["$(rootpath :bif_trace_info_2_fixture)", "bif_trace_info_2", "trace_info/2", "HOST_CONTROL"],
   data = ["bif_trace_info_2_fixture"],
-  deps = ["bif_execution_test_main"],
+  deps = ["bif_denial_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
@@ -3713,9 +3713,9 @@ genrule(
 cc_test(
   name = "bif_trace_pattern_3_test",
   size = "small",
-  args = ["$(rootpath :bif_trace_pattern_3_fixture)", "bif_trace_pattern_3", "trace_pattern"],
+  args = ["$(rootpath :bif_trace_pattern_3_fixture)", "bif_trace_pattern_3", "trace_pattern/3", "HOST_CONTROL"],
   data = ["bif_trace_pattern_3_fixture"],
-  deps = ["bif_execution_test_main"],
+  deps = ["bif_denial_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
@@ -4075,6 +4075,30 @@ cc_test(
   data = ["binary_flow_slice_fixture"],
   deps = ["core_binary_flow_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
+  name = "opcode_profile_exclusions",
+  srcs = ["tests/opcode_profile_test.c"],
+  copts = ["-std=c11"],
+  deps = ["core"],
+)
+
+cc_test(
+  name = "bs_match_equality_admission",
+  args = ["$(rootpath :bs_match_equality_slice_fixture)"],
+  data = ["bs_match_equality_slice_fixture"],
+  srcs = ["tests/core_bs_match_equality_test.c"],
+  copts = ["-std=c11"],
+  deps = ["core"],
+)
+
+genrule(
+  name = "bs_match_equality_slice_fixture",
+  srcs = ["tests/fixtures/bs_match_equality_slice.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/bs_match_equality_slice_fixture/bs_match_equality_slice.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/bs_match_equality_slice.erl)",
 )
 
 genrule(
@@ -5154,6 +5178,31 @@ cc_library(
   name = "core_div_test_main",
   testonly = True,
   srcs = ["tests/core_div_test.c"],
+  copts = ["-std=c11"],
+  deps = ["core"],
+)
+
+genrule(
+  name = "gc_bif_forms_fixture",
+  srcs = ["tests/fixtures/gc_bif_forms.S"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/gc_bif_forms_fixture/gc_bif_forms.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/gc_bif_forms.S)",
+)
+
+cc_test(
+  name = "core_gc_bif_forms",
+  size = "small",
+  args = ["$(rootpath :gc_bif_forms_fixture)"],
+  data = ["gc_bif_forms_fixture"],
+  deps = ["core_gc_bif_forms_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_library(
+  name = "core_gc_bif_forms_test_main",
+  testonly = True,
+  srcs = ["tests/core_gc_bif_forms_test.c"],
   copts = ["-std=c11"],
   deps = ["core"],
 )
@@ -7757,14 +7806,6 @@ cc_library(
   deps = ["@googletest//:gtest"],
 )
 
-genrule(
-  name = "refused_exception_fixture",
-  srcs = ["tests/fixtures/refused_exception.erl"],
-  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
-  outs = ["fixtures/refused_exception_fixture/refused_exception.beam"],
-  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic  -o $(@D) $(location tests/fixtures/refused_exception.erl)",
-)
-
 cc_test(
   name = "rem_reference",
   size = "small",
@@ -7916,7 +7957,7 @@ cc_test(
   name = "runner_test",
   size = "small",
   srcs = ["tests/runner_test.cpp", "tests/test_process.hpp"],
-  data = ["run_beam", "engine_lifecycle", "two_isolates", "probe_a_fixture", "probe_b_fixture", "batch_alpha_fixture", "batch_beta_fixture", "batch_unsupported_fixture", "map_slice_fixture", "code_peer_fixture", "first_slice_fixture", "refused_exception_fixture", "async_slice_fixture", "fun_slice_fixture", "shape_slice_fixture", "decimal_slice_fixture", "tests/fixtures/malformed-beam.txt", "tests/fixtures/application-input.txt"],
+  data = ["run_beam", "engine_lifecycle", "two_isolates", "probe_a_fixture", "probe_b_fixture", "batch_alpha_fixture", "batch_beta_fixture", "batch_unsupported_fixture", "map_slice_fixture", "code_peer_fixture", "first_slice_fixture", "module_on_load_refused_fixture", "async_slice_fixture", "fun_slice_fixture", "shape_slice_fixture", "decimal_slice_fixture", "tests/fixtures/malformed-beam.txt", "tests/fixtures/application-input.txt"],
   copts = ["-std=c++17"],
   deps = ["@googletest//:gtest_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),

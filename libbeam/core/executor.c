@@ -6,6 +6,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "executor.h"
 #include "receive.h"
+#include "timer.h"
 #include <time.h>
 #include <errno.h>
 #include "code_internal.h"
@@ -198,12 +199,14 @@ static void *worker_main(void *context)
     LbEngine *engine=context;
     checked(pthread_mutex_lock(&engine->mutex));
     while(!engine->worker_stop) {
+        lb_timer_poll_engine(engine);
         int retired=lb_world_retire_step(engine);
         LbTask *task=runnable(engine);
         if(!task && !retired) {
             int timed=0;
             for(LbTask *pending=engine->tasks;pending;pending=pending->next)
                 if(pending->status==LB_TASK_PENDING && (pending->process->flags&F_INSLPQUEUE)) timed=1;
+            if(lb_timer_engine_pending(engine)) timed=1;
             if(timed) {
                 struct timespec until;
                 if(clock_gettime(CLOCK_REALTIME,&until)) {
@@ -343,8 +346,18 @@ LbProcessStatus lb_task_spawn_mfa_linked_locked(LbWorld *world,LbProcess *parent
     SpawnEntry entry={.kind=SPAWN_MFA_ENTRY,.value.mfa=*mfa};
     return spawn_locked(world,parent,&entry,NULL,link,SPAWN_CHILD,out);
 }
+LbProcessStatus lb_task_spawn_mfa_linked_monitored_locked(LbWorld *world,LbProcess *parent,const LbSpawnMfa *mfa,LbMonitor *monitor,LbLink *link,Eterm *out)
+{
+    SpawnEntry entry={.kind=SPAWN_MFA_ENTRY,.value.mfa=*mfa};
+    return spawn_locked(world,parent,&entry,monitor,link,SPAWN_CHILD,out);
+}
 LbProcessStatus lb_task_spawn_fun_locked(LbWorld *world,LbProcess *parent,Eterm fun,Eterm *out)
 { return lb_task_spawn_fun_monitored_locked(world,parent,fun,NULL,out); }
+LbProcessStatus lb_task_spawn_mfa_locked(LbWorld *world,LbProcess *parent,const LbSpawnMfa *mfa,Eterm *out)
+{
+    SpawnEntry entry={.kind=SPAWN_MFA_ENTRY,.value.mfa=*mfa};
+    return spawn_locked(world,parent,&entry,NULL,NULL,SPAWN_CHILD,out);
+}
 LbProcessStatus lb_task_spawn_result_locked(LbWorld *world,LbTask *source,Eterm *out)
 {
     if(!out) return LB_PROCESS_INVALID; *out=THE_NON_VALUE;

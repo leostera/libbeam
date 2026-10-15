@@ -27,7 +27,7 @@ std::string digest(const std::string& bytes) {
 TEST(AtomInputs, ReviewedOtpSourcesRetainExactIdentity) {
     const char* expected[] = {
         "4503d68bd345492db8127aad8c3ce584319a8355e3e1dafbbed2b680eb20d953",
-        "4e6da90ce1effb6d922e01da32dcefd399366fb287b13d04924504d90e4fd309",
+        "5398fdc324c31ef664c7db603b9a6265258266582d34c3009c09f49a2e2a3ade",
         "39f32210feb58f9c60482d7b97db10d21c53a988207fd7a81221ff3506331564",
     };
     for (unsigned i = 0; i < 3; ++i) {

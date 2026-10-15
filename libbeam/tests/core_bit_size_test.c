@@ -6,6 +6,7 @@
 #include "work_budget_internal.h"
 #include "alloc_internal.h"
 #include "binary.h"
+#include "binary_match.h"
 #include "writable.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,6 +81,19 @@ int main(int argc,char **argv)
         CHECK(result==make_small((Sint)bits));
         CHECK(lb_process_collect(p,0)==LB_PROCESS_DONE); LbBitstringView view;
         CHECK(lb_bitstring_view(p->construction_root,&view) && view.bit_size==bits && view.bit_offset==(storage?offset:0));
+        lb_process_destroy(p); CHECK(w->domain.current==baseline);
+    }
+    {
+        LbProcess *p=create(w,body,"direct"); LbSubBits *context; LbSubBits before; Eterm context_term;
+        CHECK(lb_bitstring_build(&w->domain,&p->off_heap,&p->htop,bytes,64,0,&p->reg[0])==LB_ALLOC_OK);
+        context=lb_bs_start_match(p,p->reg[0]); context->start=3; context->end=20;
+        before=*context; context_term=make_boxed((Eterm *)context); p->reg[0]=context_term;
+        CHECK(lb_bif_bit_size_1(p,p->reg,NULL)==make_small(17));
+        CHECK(lb_bif_byte_size_1(p,p->reg,NULL)==make_small(3));
+        CHECK(p->reg[0]==context_term && !memcmp(context,&before,sizeof(before)));
+        context->start=21; p->freason=LB_EXC_NULL;
+        CHECK(is_non_value(lb_bif_bit_size_1(p,p->reg,NULL)) && p->freason==LB_EXC_BADARG);
+        context->start=before.start; p->freason=LB_EXC_NULL;
         lb_process_destroy(p); CHECK(w->domain.current==baseline);
     }
     for(unsigned form=0;form<4;++form) for(unsigned kind=0;kind<7;++kind) {

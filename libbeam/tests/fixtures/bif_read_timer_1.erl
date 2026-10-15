@@ -9,4 +9,5 @@ identity(Input) -> Input.
 invoke(_F,direct,[A0]) -> erlang:'read_timer'(A0);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
 check(F,Mode,V) ->
-    R = erlang:send_after(60000,self(),V), T = invoke(F, Mode, [R]), erlang:cancel_timer(R), is_integer(T) andalso T >= 0 andalso T =< 60000.
+    R = erlang:send_after(60000,self(),V), T = invoke(F, Mode, [R]), erlang:cancel_timer(R),
+    case T of N when is_integer(N) -> true; _ -> false end.

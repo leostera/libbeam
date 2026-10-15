@@ -9,4 +9,5 @@ identity(Input) -> Input.
 invoke(_F,direct,[A0]) -> erlang:'iolist_to_iovec'(A0);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
 check(F,Mode,V) ->
-    erlang:iolist_to_binary(invoke(F, Mode, [[<<V,8>>,[9]]])) =:= <<V,8,9>>.
+    IOVec = invoke(F, Mode, [[<<V,8>>,[9]]]),
+    IOVec =:= [<<V,8,9>>] andalso erlang:iolist_to_binary(IOVec) =:= <<V,8,9>>.

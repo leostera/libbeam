@@ -6,6 +6,9 @@
 #include "fun.h"
 #include "flatmap.h"
 #include "big.h"
+#include "binary.h"
+#include "atoms.h"
+#include <stdio.h>
 
 /* beam_common.c is_function2 and erl_bif_op.c erl_is_function, restricted to
  * owned local funs. The cold guard retains native badarg pending flags; it
@@ -26,6 +29,76 @@ Eterm lb_fun_test_arity(LbProcess *p,Eterm value,Eterm argument)
 error:
     p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
 }
+static int fun_name_is_plain(LbBeamBytes name,int allow_dot)
+{
+    for(size_t i=0;i<name.size;++i) {
+        unsigned char c=name.data[i];
+        if(!((c>='a'&&c<='z') || (c>='A'&&c<='Z') || (c>='0'&&c<='9') ||
+             c=='_' || c=='@' || (allow_dot && c=='.'))) return 0;
+    }
+    return name.size!=0;
+}
+Eterm lb_bif_fun_to_list_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; LbAllocDomain *domain=p->entry_module->space->domain; p->last_native_cost=1;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    const LbFun *fun=lb_fun(args[0]);
+    if(!fun) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    LbBeamBytes module={0},function={0}; int written;
+    if(lb_fun_is_external(fun)) {
+        const Export *exported=fun->entry.exp;
+        if(!exported || lb_atoms_name(p->entry_module->space->atoms,exported->info.mfa.module,&module)!=LB_ATOM_OK ||
+           lb_atoms_name(p->entry_module->space->atoms,exported->info.mfa.function,&function)!=LB_ATOM_OK) {
+            p->status=LB_PROCESS_INVALID; return THE_NON_VALUE;
+        }
+        if(!fun_name_is_plain(module,1) || !fun_name_is_plain(function,0)) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    } else {
+        const LbFunEntry *entry=fun->entry.fun;
+        if(!entry || lb_atoms_name(p->entry_module->space->atoms,entry->module,&module)!=LB_ATOM_OK) {
+            p->status=LB_PROCESS_INVALID; return THE_NON_VALUE;
+        }
+        if(!fun_name_is_plain(module,1)) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    }
+    char text[512];
+    if(lb_fun_is_external(fun)) {
+        written=snprintf(text,sizeof(text),"fun %.*s:%.*s/%u",(int)module.size,(const char *)module.data,
+                         (int)function.size,(const char *)function.data,(unsigned)fun->entry.exp->info.mfa.arity);
+    } else {
+        const LbFunEntry *entry=fun->entry.fun;
+        written=snprintf(text,sizeof(text),"#Fun<%.*s.%d.%d>",(int)module.size,(const char *)module.data,
+                         entry->old_index,entry->old_uniq);
+    }
+    if(written<0 || (size_t)written>=sizeof(text)) { p->status=LB_PROCESS_REFUSED; return THE_NON_VALUE; }
+    if(lb_fun_is_external(fun)) {
+        LbAllocStatus retained=lb_fun_retain_export(p->entry_module->space,&p->fun_leases,
+                                                     fun->entry.exp,&p->last_native_cost);
+        if(retained!=LB_ALLOC_OK) {
+            p->status=retained==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+                retained==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:
+                retained==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_REFUSED;
+            return THE_NON_VALUE;
+        }
+    }
+    size_t words,need,collections=p->collections;
+    if(!lb_size_mul((size_t)written,2,&words) || !lb_size_add(words,p->heap_reserved,&need)) {
+        p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE;
+    }
+    if(!lb_work_domain_charge(domain,words)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=words;
+    if(!lb_heap_reserve(p,need,MAX_REG)) {
+        LbAllocStatus cause=lb_alloc_domain_failure(domain);
+        p->status=cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+            cause==LB_ALLOC_LIMIT?LB_PROCESS_LIMIT:LB_PROCESS_NO_MEMORY;
+        return THE_NON_VALUE;
+    }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    Eterm result=NIL;
+    for(size_t i=(size_t)written;i>0;--i) {
+        p->htop[0]=make_small((unsigned char)text[i-1]); p->htop[1]=result;
+        result=make_list(p->htop); p->htop+=2;
+    }
+    return result;
+}
 Eterm lb_bif_is_function_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     (void)p; (void)pc; return lb_fun(args[0])?am_true:am_false;
@@ -33,6 +106,155 @@ Eterm lb_bif_is_function_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 Eterm lb_bif_is_function_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     (void)pc; return lb_fun_test_arity(p,args[0],args[1]);
+}
+static LbProcessStatus fun_info_allocation_failure(LbAllocStatus cause)
+{
+    return cause==LB_ALLOC_WORK_LIMIT?LB_PROCESS_WORK_LIMIT:
+        cause==LB_ALLOC_NO_MEMORY?LB_PROCESS_NO_MEMORY:LB_PROCESS_LIMIT;
+}
+Eterm lb_bif_fun_info_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=0; LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++p->last_native_cost;
+    const LbFun *fun=lb_fun(args[0]);
+    if(!fun) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    int external=lb_fun_is_external(fun); size_t free_count=external?0:lb_fun_free(fun);
+    size_t field_count=external?5:9, words,need;
+    if(!lb_size_mul(field_count,5,&words) || !lb_size_add(words,2*free_count,&words) ||
+       (!external && !lb_size_add(words,lb_bitstring_heap_words(128),&words)) ||
+       !lb_size_add(words,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    uint64_t work=(uint64_t)field_count*5+2*(uint64_t)free_count;
+    if(!lb_work_domain_charge(domain,work)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=work; size_t collections=p->collections;
+    if(!lb_heap_reserve(p,need,MAX_REG)) { p->status=fun_info_allocation_failure(lb_alloc_domain_failure(domain)); return THE_NON_VALUE; }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    fun=lb_fun(args[0]); external=lb_fun_is_external(fun); const LbFunEntry *local=external?NULL:fun->entry.fun;
+    const Export *export=external?fun->entry.exp:NULL; free_count=local?lb_fun_free(fun):0;
+    Eterm keys[9]={am_type,am_env,am_arity,am_name,am_uniq,am_index,am_new_uniq,am_new_index,am_module};
+    Eterm values[9]={external?am_external:am_local,NIL,make_small(lb_fun_arity(fun)),
+        external?export->info.mfa.function:local->function,
+        local?make_small(local->old_uniq):am_undefined,
+        local?make_small(local->old_index):am_undefined,
+        am_undefined,local?make_small(local->index):am_undefined,
+        external?export->info.mfa.module:local->module};
+    if(local) {
+        for(size_t i=free_count;i>0;--i) {
+            p->htop[0]=fun->env[i-1]; p->htop[1]=values[1];
+            values[1]=make_list(p->htop); p->htop+=2;
+        }
+        LbAllocStatus status=lb_bitstring_build(domain,&p->off_heap,&p->htop,local->uniq,128,0,&values[6]);
+        if(status!=LB_ALLOC_OK) { p->status=fun_info_allocation_failure(status); return THE_NON_VALUE; }
+    }
+    Eterm result=NIL;
+    for(size_t i=0;i<9;++i) {
+        if(values[i]==am_undefined) continue;
+        Eterm pair=TUPLE2(p->htop,keys[i],values[i]); p->htop+=3;
+        result=CONS(p->htop,pair,result); p->htop+=2;
+    }
+    return result;
+}
+Eterm lb_bif_fun_info_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=0; LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++p->last_native_cost;
+    const LbFun *fun=lb_fun(args[0]); Eterm item=args[1];
+    if(!fun) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    int external=lb_fun_is_external(fun); const LbFunEntry *local=external?NULL:fun->entry.fun;
+    const Export *export=external?fun->entry.exp:NULL;
+    size_t free_count=local?lb_fun_free(fun):0,required=3+2*free_count;
+    if(item!=am_type && item!=am_module && item!=am_new_index && item!=am_new_uniq &&
+       item!=am_index && item!=am_uniq && item!=am_env && item!=am_refc &&
+       item!=am_arity && item!=am_name) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    if(item==am_new_uniq && local) {
+        size_t binary_words=lb_bitstring_heap_words(128);
+        if(!binary_words || !lb_size_add(required,binary_words,&required)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    }
+    size_t need,collections=p->collections;
+    if(!lb_size_add(required,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_heap_reserve(p,need,MAX_REG)) { p->status=fun_info_allocation_failure(lb_alloc_domain_failure(domain)); return THE_NON_VALUE; }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    fun=lb_fun(args[0]); external=lb_fun_is_external(fun); local=external?NULL:fun->entry.fun; export=external?fun->entry.exp:NULL;
+    Eterm value=THE_NON_VALUE;
+    if(item==am_type) value=external?am_external:am_local;
+    else if(item==am_module) value=external?export->info.mfa.module:local->module;
+    else if(item==am_name) value=external?export->info.mfa.function:local->function;
+    else if(item==am_arity) value=make_small(lb_fun_arity(fun));
+    else if(item==am_env) {
+        value=NIL;
+        for(size_t i=free_count;i>0;--i) {
+            if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+            p->last_native_cost++;
+            p->htop[0]=fun->env[i-1]; p->htop[1]=value; value=make_list(p->htop); p->htop+=2;
+        }
+    } else if(item==am_refc) value=external?am_undefined:make_small(1);
+    else if(item==am_index) value=local?make_small(local->old_index):am_undefined;
+    else if(item==am_uniq) value=local?make_small(local->old_uniq):am_undefined;
+    else if(item==am_new_index) value=local?make_small(local->index):am_undefined;
+    else if(item==am_new_uniq) {
+        if(!local) value=am_undefined;
+        else {
+            if(!lb_work_domain_charge(domain,sizeof(local->uniq))) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+            p->last_native_cost+=sizeof(local->uniq);
+            LbAllocStatus status=lb_bitstring_build(domain,&p->off_heap,&p->htop,local->uniq,128,0,&value);
+            if(status!=LB_ALLOC_OK) { p->status=fun_info_allocation_failure(status); return THE_NON_VALUE; }
+        }
+    }
+    if(!lb_work_domain_charge(domain,2)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=2;
+    Eterm result=TUPLE2(p->htop,item,value); p->htop+=3; return result;
+}
+Eterm lb_bif_make_fun_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=0; LbCodeSpace *space=p->entry_module->space;
+    if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++p->last_native_cost;
+    if(!is_atom(args[0]) || !is_atom(args[1]) || !is_small(args[2]) || signed_val(args[2])<0) {
+        p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+    }
+    if((Uint)signed_val(args[2])>MAX_ARG) { p->freason=LB_EXC_SYSTEM_LIMIT; return THE_NON_VALUE; }
+    unsigned arity=(unsigned)signed_val(args[2]); Export *export=NULL;
+    for(Export *candidate=space->exports;candidate;candidate=candidate->next) {
+        if(!lb_work_domain_charge(space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost;
+        if(candidate->info.mfa.module==args[0] && candidate->info.mfa.function==args[1] &&
+           (unsigned)candidate->info.mfa.arity==arity) { export=candidate; break; }
+    }
+    if(!export) { p->freason=LB_EXC_UNDEF; return THE_NON_VALUE; }
+    size_t need;
+    if(!lb_size_add(LB_FUN_WORDS,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    if(!lb_work_domain_charge(space->domain,LB_FUN_WORDS)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=LB_FUN_WORDS;
+    size_t collections=p->collections;
+    if(!lb_heap_reserve(p,need,MAX_REG)) { p->status=fun_info_allocation_failure(lb_alloc_domain_failure(space->domain)); return THE_NON_VALUE; }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    LbAllocStatus retained=lb_fun_retain_export(space,&p->fun_leases,export,&p->last_native_cost);
+    if(retained!=LB_ALLOC_OK) { p->status=fun_info_allocation_failure(retained); return THE_NON_VALUE; }
+    LbFun *fun=(LbFun *)p->htop;
+    fun->thing_word=LB_FUN_HEADER(arity,0)|((Uint)1<<LB_FUN_KIND_SHIFT);
+    fun->entry.exp=export; p->htop+=LB_FUN_WORDS;
+    return make_boxed((const Eterm *)fun);
+}
+Eterm lb_bif_fun_info_mfa_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=0; LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    ++p->last_native_cost;
+    const LbFun *fun=lb_fun(args[0]);
+    if(!fun) { p->freason=LB_EXC_BADARG; return THE_NON_VALUE; }
+    size_t need;
+    if(!lb_size_add(4,p->heap_reserved,&need)) { p->status=LB_PROCESS_LIMIT; return THE_NON_VALUE; }
+    size_t collections=p->collections;
+    if(!lb_heap_reserve(p,need,MAX_REG)) { p->status=fun_info_allocation_failure(lb_alloc_domain_failure(domain)); return THE_NON_VALUE; }
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    fun=lb_fun(args[0]); Eterm module,function;
+    if(lb_fun_is_external(fun)) { module=fun->entry.exp->info.mfa.module; function=fun->entry.exp->info.mfa.function; }
+    else { module=fun->entry.fun->module; function=fun->entry.fun->function; }
+    if(!lb_work_domain_charge(domain,4)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=4;
+    Eterm result=TUPLE3(p->htop,module,function,make_small(lb_fun_arity(fun)));
+    p->htop+=4; return result;
 }
 static LbAllocStatus retain(LbCodeSpace *space,LbFunLease **leases,const LbFunEntry *entry)
 {

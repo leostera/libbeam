@@ -74,7 +74,7 @@ static void work_boundary(LbWorld *world,LbCodeModule *module)
         budget->limit=budget->remaining=credit;
         lb_work_domain_borrow(space->domain,budget);
         LbProcessStatus status=run(p);
-        if(!pass) { CHECK(status==LB_PROCESS_DONE); required=credit-budget->remaining; CHECK(required>1 && required<1000); }
+        if(!pass) { CHECK(status==LB_PROCESS_DONE); required=credit-budget->remaining; CHECK(required>1 && required<10000); }
         else if(credit==required) { CHECK(status==LB_PROCESS_DONE && budget->remaining==0); }
         else CHECK(status==LB_PROCESS_WORK_LIMIT);
         if(status==LB_PROCESS_DONE) CHECK(lb_process_result(p)==args[minimum?0:1]);

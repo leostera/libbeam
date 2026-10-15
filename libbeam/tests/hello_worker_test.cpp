@@ -197,10 +197,22 @@ TEST(HelloArtifact, ExactApplicationIdentityAndCompleteStaticClosure) {
 class HelloWorker : public testing::Test {
 protected:
     void SetUp() override {
-        engine.emplace(take(libbeam::Engine::create()));
-        isolate.emplace(take(engine->create_isolate()));
-        const auto loaded = load(*isolate);
-        ASSERT_FALSE(loaded) << (loaded ? loaded->message : "");
+        if (shared_load_error) GTEST_SKIP() << shared_load_error->message;
+        if (!shared_engine) shared_engine.emplace(take(libbeam::Engine::create()));
+        if (!shared_isolate) {
+            // Keep closure admission diagnostics separate from the public
+            // default-budget gate; this explicit finite override changes no defaults.
+            shared_isolate.emplace(take(shared_engine->create_isolate(libbeam::ResourceOverrides{
+                .memory_limit_bytes = 512u * 1024u * 1024u})));
+        }
+        if (!shared_loaded) {
+            const auto loaded = load(*shared_isolate);
+            if (loaded) shared_load_error = *loaded;
+            ASSERT_FALSE(loaded) << (loaded ? loaded->message : "");
+            shared_loaded = true;
+        }
+        engine = &*shared_engine;
+        isolate = &*shared_isolate;
     }
     static libbeam::Status load(libbeam::Isolate& target) {
         // The real loader must retain code after all caller-owned buffers die.
@@ -226,16 +238,36 @@ protected:
         const auto usage = take(target.resource_usage());
         EXPECT_TRUE(usage.closed);
         EXPECT_EQ(usage.memory_current, 0u);
-        EXPECT_EQ(usage.limits.memory_limit_bytes, 256u * 1024u * 1024u);
+        EXPECT_EQ(usage.limits.memory_limit_bytes, 512u * 1024u * 1024u);
         EXPECT_EQ(usage.limits.invocation_work_limit, 10000000u);
     }
-    void TearDown() override {
-        if (isolate) { reclaim(*isolate); isolate.reset(); }
-        if (engine) EXPECT_FALSE(engine->shutdown(deadline()));
+    void TearDown() override {}
+public:
+    static bool shutdown_shared() {
+        try {
+            if (shared_isolate) {
+                auto receipt = take(shared_isolate->stop());
+                if (receipt.wait_until(deadline())) return false;
+                const auto usage = take(shared_isolate->resource_usage());
+                if (!usage.closed || usage.memory_current != 0) return false;
+                shared_isolate.reset();
+            }
+            if (shared_engine) {
+                if (shared_engine->shutdown(deadline())) return false;
+                shared_engine.reset();
+            }
+            return true;
+        } catch (...) { return false; }
     }
-    std::optional<libbeam::Engine> engine;
-    std::optional<libbeam::Isolate> isolate;
-    bool started = false;
+protected:
+    inline static std::optional<libbeam::Engine> shared_engine;
+    inline static std::optional<libbeam::Isolate> shared_isolate;
+    inline static bool shared_loaded = false;
+    inline static std::optional<libbeam::Error> shared_load_error;
+    inline static bool sdk_loaded = false;
+    inline static bool started = false;
+    libbeam::Engine* engine = nullptr;
+    libbeam::Isolate* isolate = nullptr;
     std::string entry_module = "Elixir.HelloWorker";
 };
 TEST_F(HelloWorker, DefaultGreeting) {
@@ -348,10 +380,13 @@ class SdkBoundary : public HelloWorker {
 protected:
     void SetUp() override {
         HelloWorker::SetUp();
-        if (HasFatalFailure()) return;
-        const auto beam = read_file(sdk_fixture_path);
-        const auto loaded = isolate->load_module(view(beam));
-        ASSERT_FALSE(loaded) << (loaded ? loaded->message : "");
+        if (HasFatalFailure() || shared_load_error) return;
+        if (!sdk_loaded) {
+            const auto beam = read_file(sdk_fixture_path);
+            const auto loaded = isolate->load_module(view(beam));
+            ASSERT_FALSE(loaded) << (loaded ? loaded->message : "");
+            sdk_loaded = true;
+        }
         entry_module = "Elixir.BoundaryWorker";
     }
 };
@@ -366,7 +401,8 @@ TEST_F(SdkBoundary, InvalidCallbackResponseBecomes500AndAllowsReuse) {
 TEST_F(SdkBoundary, RescueCannotConvertHostDenialInto500) {
     const auto bytes = request("GET", "/deny");
     {
-        auto call = take(isolate->start(entry_module, "__midgard_call__", view(bytes)));
+        auto call = take(started ? isolate->call(entry_module, "__midgard_call__", view(bytes))
+                                 : isolate->start(entry_module, "__midgard_call__", view(bytes)));
         started = true;
         const auto result = call.wait_until(deadline());
         const auto* error = std::get_if<libbeam::Error>(&result);
@@ -384,5 +420,6 @@ int main(int argc, char** argv) {
     fixture_path = runfile(argv[1]);
     repeat_fixture_path = runfile(argv[2]);
     sdk_fixture_path = runfile(argv[3]);
-    return RUN_ALL_TESTS();
+    const int result = RUN_ALL_TESTS();
+    return HelloWorker::shutdown_shared() ? result : 1;
 }

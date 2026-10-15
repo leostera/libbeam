@@ -42,7 +42,10 @@ TEST(ProcessContract, RealEffectsSingleCompletionAndPeerSurvival) {
             auto pending = take(isolate.start("process_contracts", function, payload));
             auto other = take(peer.start("process_contracts", "identity", payload));
             EXPECT_EQ(take(other.wait_until(deadline())), input);
-            EXPECT_EQ(take(pending.wait_until(deadline())), (Bytes{'o','k'}));
+            const auto completed = pending.wait_until(deadline());
+            const auto* completed_error = std::get_if<Error>(&completed);
+            ASSERT_EQ(completed_error, nullptr) << (completed_error ? completed_error->message : "");
+            EXPECT_EQ(std::get<Bytes>(completed), (Bytes{'o','k'}));
             const auto consumed = pending.wait_until(deadline());
             const auto* error = std::get_if<Error>(&consumed);
             ASSERT_NE(error, nullptr);

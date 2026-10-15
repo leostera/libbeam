@@ -11,6 +11,19 @@
 #include "flatmap.h"
 #include "reference.h"
 #define H UINT32_C(0x9e3779b9)
+#define PHASH_F1 UINT32_C(268440163)
+#define PHASH_F2 UINT32_C(268439161)
+#define PHASH_F3 UINT32_C(268435459)
+#define PHASH_F4 UINT32_C(268436141)
+#define PHASH_F5 UINT32_C(268438633)
+#define PHASH_F6 UINT32_C(268437017)
+#define PHASH_F8 UINT32_C(268437511)
+#define PHASH_F9 UINT32_C(268439627)
+#define PHASH_F10 UINT32_C(268440479)
+#define PHASH_F11 UINT32_C(268440577)
+#define PHASH_F12 UINT32_C(268440581)
+#define PHASH_F13 UINT32_C(268440593)
+#define PHASH_F14 UINT32_C(268440611)
 static void mix_state(uint32_t *ap,uint32_t *bp,uint32_t *cp)
 {
     uint32_t a=*ap,b=*bp,c=*cp;
@@ -29,7 +42,8 @@ static uint32_t mix(uint32_t a,uint32_t b,uint32_t c)
 { mix_state(&a,&b,&c); return c; }
 static uint32_t hash_words(uint32_t hash,uint32_t a,uint32_t b,uint32_t multiplier)
 { uint32_t constant=H*multiplier; return mix(constant+a,constant+b,hash); }
-typedef enum { HASH_TERM, HASH_MAP_NODE, HASH_PAIR_END, HASH_MAP_END } HashKind;
+typedef enum { HASH_TERM, HASH_MAP_NODE, HASH_PAIR_END, HASH_MAP_END,
+               HASH_PHASH_TUPLE_END, HASH_PHASH_LIST_END } HashKind;
 typedef struct { HashKind kind; Eterm term; uint32_t hash,pairs; } HashFrame;
 typedef struct {
     LbProcess *process;
@@ -203,12 +217,115 @@ static int hash_term(HashStack *s,Eterm input,uint32_t *out)
     }
     *out=hash; return 1;
 }
+static void phash_integer_step(uint32_t *hash,uint32_t value,uint32_t prime)
+{
+    for(unsigned byte=0;byte<4;++byte) { *hash=*hash*prime+(value&UINT32_C(0xff)); value>>=8; }
+}
+static uint32_t phash_binary(const LbBitstringView *view,uint32_t hash)
+{
+    size_t bytes=view->bit_size/8; unsigned tail=(unsigned)(view->bit_size%8);
+    for(size_t i=0;i<bytes;++i) hash=hash*PHASH_F1+bits(view,i*8,8);
+    if(tail) hash=(hash*PHASH_F1+bits(view,bytes*8,tail))*PHASH_F12+tail;
+    return hash*PHASH_F4+(uint32_t)bytes;
+}
+static int hash_legacy(HashStack *s,Eterm input,uint32_t *out)
+{
+    uint32_t hash=0; LbProcess *p=s->process;
+    if(!push_term(s,input)) return 0;
+    while(s->count) {
+        HashFrame frame=s->frames[--s->count]; Eterm term=frame.term;
+        if(!charge(s,1)) return 0;
+        if(frame.kind==HASH_PHASH_TUPLE_END) { hash=hash*PHASH_F9+frame.pairs; continue; }
+        if(frame.kind==HASH_PHASH_LIST_END) { hash*=PHASH_F8; continue; }
+        if(is_nil(term)) hash=hash*PHASH_F3+1;
+        else if(is_atom(term)) hash=hash*PHASH_F1+atom_hash(p,term);
+        else if(is_small(term)) {
+            Sint signed_value=signed_val(term); Uint value=signed_value<0?-(Uint)signed_value:(Uint)signed_value;
+            phash_integer_step(&hash,(uint32_t)value,PHASH_F2);
+            if(value>>32) phash_integer_step(&hash,(uint32_t)(value>>32),PHASH_F2);
+            hash*=signed_value<0?PHASH_F4:PHASH_F3;
+        } else if(lb_is_big(term)) {
+            Eterm *big=boxed_val(term); size_t count=lb_big_size(term); int negative=(*big&_TAG_HEADER_MASK)==NEG_BIG_SUBTAG;
+            for(size_t i=0;i<count;++i) {
+                Uint digit=big[i+1]; unsigned bytes=sizeof(Uint);
+                if(i+1==count && sizeof(Uint)>4 && !(digit>>32)) bytes=4;
+                if(!charge(s,bytes)) return 0;
+                for(unsigned j=0;j<bytes;++j) { hash=hash*PHASH_F2+(uint8_t)digit; digit>>=8; }
+            }
+            hash*=negative?PHASH_F4:PHASH_F3;
+        } else if(is_boxed(term) && (*boxed_val(term)&_TAG_HEADER_MASK)==FLOAT_SUBTAG) {
+            uint64_t value=boxed_val(term)[1]; if((value<<1)==0) value=0;
+            hash=hash*PHASH_F6+((uint32_t)value^(uint32_t)(value>>32));
+        } else if(is_list(term)) {
+            while(is_list(term) && is_small(CAR(list_val(term))) &&
+                  signed_val(CAR(list_val(term)))>=0 && signed_val(CAR(list_val(term)))<=255) {
+                if(!charge(s,1)) return 0;
+                hash=hash*PHASH_F2+(uint32_t)signed_val(CAR(list_val(term)));
+                term=CDR(list_val(term));
+            }
+            if(is_list(term)) {
+                Eterm *cell=list_val(term);
+                if(!push(s,(HashFrame){.kind=HASH_PHASH_LIST_END}) ||
+                   !push_term(s,CDR(cell)) || !push_term(s,CAR(cell))) return 0;
+            } else if(!push(s,(HashFrame){.kind=HASH_PHASH_LIST_END}) || !push_term(s,term)) return 0;
+        } else if(is_tuple(term)) {
+            Eterm *tuple=tuple_val(term); size_t arity=arityval(tuple[0]);
+            if(arity>UINT32_MAX || !push(s,(HashFrame){.kind=HASH_PHASH_TUPLE_END,.pairs=(uint32_t)arity})) return 0;
+            for(size_t i=arity;i;i--) if(!push_term(s,tuple[i])) return 0;
+        } else if(is_internal_pid(term)) {
+            uint32_t number=(uint32_t)((term>>_TAG_IMMED1_SIZE)&UINT32_C(0x7fff));
+            phash_integer_step(&hash,number,PHASH_F5); hash*=PHASH_F6;
+        } else {
+            LbBitstringView view; const LbOrdinaryRef *ref; const LbFun *fun;
+            if(lb_bitstring_view(term,&view)) {
+                uint64_t cost=(uint64_t)(view.bit_size/8)+(view.bit_size%8!=0)+1;
+                if(!charge(s,cost)) return 0;
+                hash=phash_binary(&view,hash);
+            } else if((ref=lb_reference(term))) {
+                phash_integer_step(&hash,ref->num[0],PHASH_F9); hash*=PHASH_F10;
+            } else if((fun=lb_fun(term))) {
+                if(lb_fun_is_external(fun)) {
+                    const LbMFA *mfa=&fun->entry.exp->info.mfa;
+                    hash=hash*PHASH_F11+mfa->arity;
+                    hash=hash*PHASH_F1+atom_hash(p,mfa->module);
+                    hash=hash*PHASH_F1+atom_hash(p,mfa->function);
+                } else {
+                    const LbFunEntry *entry=fun->entry.fun; size_t count=lb_fun_free(fun);
+                    hash=hash*PHASH_F10+(uint32_t)count;
+                    hash=hash*PHASH_F1+atom_hash(p,entry->module);
+                    hash=hash*PHASH_F2+(uint32_t)entry->index;
+                    hash=hash*PHASH_F2+entry->old_uniq;
+                    for(size_t i=count;i;i--) if(!push_term(s,fun->env[i-1])) return 0;
+                }
+            } else if(is_boxed(term) && (*boxed_val(term)&_HEADER_SUBTAG_MASK)==MAP_SUBTAG) {
+                HashStack nested={.process=p,.capacity=64}; nested.frames=nested.local;
+                uint32_t map_hash; int ok=hash_term(&nested,term,&map_hash);
+                if(nested.frames!=nested.local) lb_release(p->entry_module->space->domain,nested.frames);
+                if(!ok) return 0;
+                hash=hash*PHASH_F13+PHASH_F14+map_hash;
+            } else { p->status=LB_PROCESS_REFUSED; return 0; }
+        }
+    }
+    *out=hash; return 1;
+}
 static Eterm phash2(LbProcess *p,Eterm term,uint64_t range)
 {
     HashStack stack={.process=p,.capacity=64}; stack.frames=stack.local;
     uint32_t hash; int ok=hash_term(&stack,term,&hash);
     if(stack.frames!=stack.local) lb_release(p->entry_module->space->domain,stack.frames);
     return ok?make_small((Sint)(hash%range)):THE_NON_VALUE;
+}
+Eterm lb_bif_phash_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=1;
+    if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    if(!is_small(args[1]) || signed_val(args[1])<1 || (uint64_t)signed_val(args[1])>(UINT64_C(1)<<32)) {
+        p->freason=LB_EXC_BADARG; return THE_NON_VALUE;
+    }
+    HashStack stack={.process=p,.capacity=64}; stack.frames=stack.local; uint32_t hash;
+    int ok=hash_legacy(&stack,args[0],&hash);
+    if(stack.frames!=stack.local) lb_release(p->entry_module->space->domain,stack.frames);
+    return ok?make_small((Sint)(1+(uint64_t)hash%(uint64_t)signed_val(args[1]))):THE_NON_VALUE;
 }
 Eterm lb_bif_phash2_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {

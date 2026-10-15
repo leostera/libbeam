@@ -1,12 +1,8 @@
 % SPDX-License-Identifier: Apache-2.0
 % Copyright 2026 Leandro Ostera <leandro@ostera.io>
 -module(bif_trace_pattern_3).
--export([entry/1,identity/1,invoke/3,check/3]).
-entry(Input) ->
-    {F,Mode,V} = erlang:binary_to_term(Input),
-    case check(F,Mode,V) of true -> <<"ok">>; _ -> <<"contract mismatch">> end.
+-export([entry/1,identity/1]).
+entry(_Input) ->
+    _ = erlang:trace_pattern({?MODULE,identity,1},true,[local]),
+    <<"unexpected success">>.
 identity(Input) -> Input.
-invoke(_F,direct,[A0,A1,A2]) -> erlang:'trace_pattern'(A0,A1,A2);
-invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
-check(F,Mode,V) ->
-    1 = invoke(F, Mode, [{?MODULE,identity,1},true,[local]]), erlang:trace_info({?MODULE,identity,1},traced) =:= {traced,local}.

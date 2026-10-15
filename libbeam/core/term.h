@@ -101,6 +101,9 @@ static inline Uint atom_val(Eterm x) { assert(is_atom(x)); return x >> _TAG_IMME
 #define is_header(x) (((x) & _TAG_PRIMARY_MASK) == TAG_PRIMARY_HEADER)
 #define is_boxed(x) (((x) & _TAG_PRIMARY_MASK) == TAG_PRIMARY_BOXED)
 #define is_internal_pid(x) (((x) & _TAG_IMMED1_MASK) == _TAG_IMMED1_PID)
+#define is_internal_port(x) (((x) & _TAG_IMMED1_MASK) == _TAG_IMMED1_PORT)
+#define is_external_port(x) (is_boxed(x) && ((*boxed_val(x) & _TAG_HEADER_MASK)==EXTERNAL_PORT_SUBTAG))
+#define is_port(x) (is_internal_port(x) || is_external_port(x))
 /* Native predicates; recognizing a header grants no external-PID consumer or
  * distribution admission. Arguments must be valid owned terms. */
 #define is_external_pid(x) (is_boxed(x) && ((*boxed_val(x) & _TAG_HEADER_MASK)==EXTERNAL_PID_SUBTAG))

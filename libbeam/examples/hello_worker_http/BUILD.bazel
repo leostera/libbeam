@@ -1,0 +1,216 @@
+# Local-only smoke bridge for the unmodified HelloWorker BEAM fixture.
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_test")
+
+cc_binary(
+    name = "bridge",
+    srcs = ["bridge.cpp"],
+    data = ["//libbeam:hello_worker_fixture"],
+    copts = ["-std=c++17"],
+    deps = ["//libbeam:libbeam"],
+)
+
+cc_test(
+    name = "codec_test",
+    size = "small",
+    srcs = ["codec_test.cpp"],
+    data = [":bridge"],
+    copts = ["-std=c++17"],
+)
+
+cc_test(
+    name = "append_inference_test",
+    size = "small",
+    srcs = ["append_inference_test.cpp"],
+    data = ["//libbeam:binary_create_slice_fixture"],
+    args = ["$(location //libbeam:binary_create_slice_fixture)"],
+    copts = ["-std=c++17"],
+    deps = ["//libbeam:libbeam"],
+)
+
+genrule(
+    name = "callback_append_fixture",
+    srcs = ["callback_append_slice.erl"],
+    tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+    outs = ["callback_append_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location callback_append_slice.erl)",
+)
+
+cc_test(
+    name = "callback_append_execution_test",
+    size = "small",
+    srcs = ["append_inference_test.cpp"],
+    data = [":callback_append_fixture"],
+    args = ["$(location :callback_append_fixture)"],
+    copts = ["-std=c++17", "-DLB_CALLBACK_APPEND_FIXTURE"],
+    deps = ["//libbeam:libbeam"],
+)
+
+genrule(
+    name = "remote_append_fixture",
+    srcs = ["remote_append_slice.erl"],
+    tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+    outs = ["remote_append_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location remote_append_slice.erl)",
+)
+
+cc_test(
+    name = "remote_append_execution_test",
+    size = "small",
+    srcs = ["append_inference_test.cpp"],
+    data = [":remote_append_fixture"],
+    args = ["$(location :remote_append_fixture)"],
+    copts = ["-std=c++17", "-DLB_REMOTE_APPEND_FIXTURE"],
+    deps = ["//libbeam:libbeam"],
+)
+
+genrule(
+    name = "match_string_fixture",
+    srcs = ["match_string_slice.erl"],
+    tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+    outs = ["match_string_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location match_string_slice.erl)",
+)
+
+cc_test(
+    name = "match_string_test",
+    size = "small",
+    srcs = ["match_string_test.cpp"],
+    data = [":match_string_fixture"],
+    args = ["$(location :match_string_fixture)"],
+    copts = ["-std=c++17"],
+    deps = ["//libbeam:libbeam"],
+)
+
+genrule(
+    name = "float_sub_fixture",
+    srcs = ["float_sub_slice.erl"],
+    tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+    outs = ["float_sub_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location float_sub_slice.erl)",
+)
+
+genrule(
+    name = "float_load_fixture",
+    srcs = ["float_load_slice.erl"],
+    tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+    outs = ["float_load_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location float_load_slice.erl)",
+)
+
+cc_test(
+    name = "float_execution_test",
+    size = "small",
+    srcs = ["float_execution_test.cpp"],
+    data = [":float_sub_fixture", ":float_load_fixture"],
+    args = ["$(location :float_sub_fixture)", "$(location :float_load_fixture)"],
+    copts = ["-std=c++17"],
+    deps = ["//libbeam:libbeam"],
+)
+
+genrule(
+    name = "checked_list_fixture",
+    srcs = ["checked_list_slice.S"],
+    tools = ["assemble_unchecked_list.escript", "@libbeam_host//:otp", "@libbeam_host//:otp/bin/escript"],
+    outs = ["checked_list_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/escript) $(location assemble_unchecked_list.escript) $(location checked_list_slice.S) $@",
+)
+
+cc_test(
+    name = "checked_list_test",
+    size = "small",
+    srcs = ["checked_list_test.cpp"],
+    data = [":checked_list_fixture"],
+    args = ["$(location :checked_list_fixture)"],
+    copts = ["-std=c++17"],
+    deps = ["//libbeam:libbeam"],
+)
+
+genrule(
+    name = "checked_list_x_fixture",
+    srcs = ["checked_list_slice.S"],
+    tools = ["assemble_unchecked_list.escript", "@libbeam_host//:otp", "@libbeam_host//:otp/bin/escript"],
+    outs = ["checked_list_x_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/escript) $(location assemble_unchecked_list.escript) $(location checked_list_slice.S) $@ x",
+)
+
+cc_test(
+    name = "checked_list_x_test",
+    size = "small",
+    srcs = ["checked_list_test.cpp"],
+    data = [":checked_list_x_fixture"],
+    args = ["$(location :checked_list_x_fixture)"],
+    copts = ["-std=c++17"],
+    deps = ["//libbeam:libbeam"],
+)
+
+genrule(
+    name = "checked_list_rxr_fixture",
+    srcs = ["checked_list_slice.S"],
+    tools = ["assemble_unchecked_list.escript", "@libbeam_host//:otp", "@libbeam_host//:otp/bin/escript"],
+    outs = ["checked_list_rxr_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/escript) $(location assemble_unchecked_list.escript) $(location checked_list_slice.S) $@ rxr",
+)
+
+cc_test(
+    name = "checked_list_rxr_test",
+    size = "small",
+    srcs = ["checked_list_test.cpp"],
+    data = [":checked_list_rxr_fixture"],
+    args = ["$(location :checked_list_rxr_fixture)"],
+    copts = ["-std=c++17"],
+    deps = ["//libbeam:libbeam"],
+)
+
+genrule(
+    name = "checked_list_tl_fixture",
+    srcs = ["checked_list_slice.S"],
+    tools = ["assemble_unchecked_list.escript", "@libbeam_host//:otp", "@libbeam_host//:otp/bin/escript"],
+    outs = ["checked_list_tl_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/escript) $(location assemble_unchecked_list.escript) $(location checked_list_slice.S) $@ tl",
+)
+
+cc_test(
+    name = "checked_list_tl_test",
+    size = "small",
+    srcs = ["checked_list_test.cpp"],
+    data = [":checked_list_tl_fixture"],
+    args = ["$(location :checked_list_tl_fixture)"],
+    copts = ["-std=c++17"],
+    deps = ["//libbeam:libbeam"],
+)
+
+genrule(
+    name = "skip_bits_fixture",
+    srcs = ["skip_bits_slice.erl"],
+    tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+    outs = ["skip_bits_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location skip_bits_slice.erl)",
+)
+
+cc_test(
+    name = "skip_bits_test",
+    size = "small",
+    srcs = ["skip_bits_test.cpp"],
+    data = [":skip_bits_fixture"],
+    args = ["$(location :skip_bits_fixture)"],
+    copts = ["-std=c++17"],
+    deps = ["//libbeam:libbeam"],
+)
+
+genrule(
+    name = "bor_fixture",
+    srcs = ["bor_slice.erl"],
+    tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+    outs = ["bor_slice.beam"],
+    cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location bor_slice.erl)",
+)
+
+cc_test(
+    name = "bor_test",
+    size = "small",
+    srcs = ["bor_test.cpp"],
+    data = [":bor_fixture"],
+    args = ["$(location :bor_fixture)"],
+    copts = ["-std=c++17"],
+    deps = ["//libbeam:libbeam"],
+)

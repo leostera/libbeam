@@ -144,6 +144,7 @@ TEST(InventoryParsing, WrapperPlanCoverageIsExact) {
 TEST(InventorySources, DenialDeclarationsMatchPolicy) {
     const std::map<std::string, std::string> policy = {
         {"call_on_load_function/1", "CODE_LOADING"}, {"delete_module/1", "CODE_LOADING"},
+        {"disconnect_node/1", "DISTRIBUTION"},
         {"display/1", "HOST_OUTPUT"}, {"display_string/1", "HOST_OUTPUT"}, {"display_string/2", "HOST_OUTPUT"},
         {"dist_ctrl_put_data/2", "DISTRIBUTION"}, {"finish_after_on_load/2", "CODE_LOADING"},
         {"finish_loading/1", "CODE_LOADING"}, {"halt/0", "HOST_CONTROL"}, {"halt/1", "HOST_CONTROL"},
@@ -154,6 +155,8 @@ TEST(InventorySources, DenialDeclarationsMatchPolicy) {
         {"port_set_data/2", "HOST_PORT"}, {"prepare_loading/2", "CODE_LOADING"},
         {"process_display/2", "HOST_OUTPUT"}, {"purge_module/1", "CODE_LOADING"},
         {"set_cookie/2", "DISTRIBUTION"}, {"setnode/2", "DISTRIBUTION"},
+        {"system_flag/2", "HOST_CONTROL"}, {"trace/3", "HOST_CONTROL"},
+        {"trace_info/2", "HOST_CONTROL"}, {"trace_pattern/3", "HOST_CONTROL"},
     };
     std::set<Mfa> expected, actual;
     std::set<std::string> identities;

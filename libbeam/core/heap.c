@@ -95,6 +95,7 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
     move_root(p,&p->ftrace,&top);
     move_root(p,&p->construction_root,&top);
     move_root(p,&p->native_time_root,&top);
+    move_root(p,&p->caught_trace,&top);
     move_root(p,&p->receive_root,&top);
     for(i=0;i<dict_roots;++i) move_root(p,&p->dictionary->data[i],&top);
     for(i=0;i<stack;++i) move_root(p,&stop[i],&top); /* CP words are primary headers */

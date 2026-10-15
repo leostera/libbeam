@@ -8,5 +8,5 @@ entry(Input) ->
 identity(Input) -> Input.
 invoke(_F,direct,[A0]) -> erlang:'fun_to_list'(A0);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
-check(F,Mode,V) ->
-    case invoke(F, Mode, [fun ?MODULE:identity/1]) of [$#,$F,$u,$n,$<|Tail] -> is_list(Tail); _ -> false end.
+check(F,Mode,_V) ->
+    invoke(F, Mode, [fun ?MODULE:identity/1]) =:= "fun bif_fun_to_list_1:identity/1".

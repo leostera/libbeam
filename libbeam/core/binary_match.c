@@ -5,6 +5,7 @@
  */
 #include "process_internal.h"
 #include "binary_match.h"
+#include <string.h>
 LbSubBits *lb_bs_start_match(LbProcess *p,Eterm value)
 {
     /* Whole native start-match dispatch reserves and reloads before entry.
@@ -20,4 +21,32 @@ LbSubBits *lb_bs_start_match(LbProcess *p,Eterm value)
     sub->start=view.bit_offset; sub->end=view.bit_offset+view.bit_size;
     sub->orig=orig;
     return sub;
+}
+
+int lb_bs_match_string(LbSubBits *sub,const unsigned char *literal,size_t bits)
+{
+    if(!sub || !lb_is_match_context(sub) || sub->start>sub->end ||
+       (bits && !literal)) return -1;
+    if(bits>sub->end-sub->start) return 0;
+    const unsigned char *base=(const unsigned char *)(sub->base_flags&~(Uint)LB_SUB_WRITABLE);
+    size_t offset=sub->start,whole=bits/8,tail=bits&7;
+    if(!base) return -1;
+    if(!(offset&7)) {
+        const unsigned char *actual=base+offset/8;
+        if(whole && memcmp(actual,literal,whole)) return 0;
+        if(tail && ((actual[whole]^literal[whole])&(0xffu<<(8-tail)))) return 0;
+    } else {
+        size_t byte=offset/8,shift=offset&7;
+        for(size_t i=0;i<whole;++i) {
+            unsigned actual=(unsigned)base[byte+i]<<shift | base[byte+i+1]>>(8-shift);
+            if((unsigned char)actual!=literal[i]) return 0;
+        }
+        if(tail) {
+            unsigned actual=(unsigned)base[byte+whole]<<shift;
+            if(shift+tail>8) actual|=base[byte+whole+1]>>(8-shift);
+            if(((actual^literal[whole])&(0xffu<<(8-tail)))) return 0;
+        }
+    }
+    sub->start+=bits;
+    return 1;
 }

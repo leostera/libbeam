@@ -8,5 +8,8 @@ entry(Input) ->
 identity(Input) -> Input.
 invoke(_F,direct,[A0]) -> erlang:'bump_reductions'(A0);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
-check(F,Mode,V) ->
-    invoke(F, Mode, [V]) =:= true.
+check(F,Mode,_V) ->
+    {Before,_} = erlang:statistics(reductions),
+    true = invoke(F, Mode, [5000]),
+    {After,_} = erlang:statistics(reductions),
+    After >= 4000 andalso After > Before.

@@ -154,7 +154,7 @@ int main(int argc,char **argv)
     CHECK(remaining(call)==0); consume(call); retire(exact);
     LbWorld *below=make(engine,beam,pure_cost-1); call=invoke(below,"pure",1);
     LbBytesView out; CHECK(poll(call,&out)==LB_WORLD_WORK_LIMIT); consume(call); retire(below);
-    LbWorld *world=make(engine,beam,4096),*peer=make(engine,beam,4096);
+    LbWorld *world=make(engine,beam,20000),*peer=make(engine,beam,20000);
     LbCall *waiting=invoke(world,"waiting",1); tick(); uint64_t idle=remaining(waiting);
     for(unsigned i=0;i<8;++i) tick(); CHECK(remaining(waiting)==idle);
     call=invoke(world,"loop",0); CHECK(poll(call,&out)==LB_WORLD_WORK_LIMIT); consume(call);

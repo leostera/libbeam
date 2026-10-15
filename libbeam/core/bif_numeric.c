@@ -95,7 +95,7 @@ static int number_to_double(Eterm term,double *value)
     if(is_float_term(term)) { memcpy(value,boxed_val(term)+1,sizeof(*value)); return isfinite(*value); }
     return 0;
 }
-typedef enum { FLOAT_ADD, FLOAT_SUBTRACT, FLOAT_MULTIPLY } FloatOperation;
+typedef enum { FLOAT_ADD, FLOAT_SUBTRACT, FLOAT_MULTIPLY, FLOAT_DIVIDE } FloatOperation;
 static Eterm float_arithmetic(LbProcess *p,Eterm a,Eterm b,FloatOperation operation)
 {
     fenv_t previous; double left,right,sum=0; Eterm words[2]; int valid;
@@ -111,7 +111,8 @@ static Eterm float_arithmetic(LbProcess *p,Eterm a,Eterm b,FloatOperation operat
     if(fesetenv(FE_DFL_ENV)) { (void)fesetenv(&previous); goto environment_failure; }
     valid=number_to_double(a,&left) && number_to_double(b,&right);
     if(valid) {
-        sum=operation==FLOAT_MULTIPLY?left*right:operation==FLOAT_SUBTRACT?left-right:left+right;
+        sum=operation==FLOAT_MULTIPLY?left*right:operation==FLOAT_DIVIDE?left/right:
+            operation==FLOAT_SUBTRACT?left-right:left+right;
         valid=isfinite(sum);
     }
     if(fesetenv(&previous)) goto environment_failure;
@@ -129,6 +130,8 @@ Eterm lb_mixed_plus(LbProcess *p,Eterm a,Eterm b)
     if(is_float_term(a) || is_float_term(b)) return float_arithmetic(p,a,b,FLOAT_ADD);
     return fail(p,LB_EXC_BADARITH);
 }
+Eterm lb_bif_div_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; p->last_native_cost=0; return float_arithmetic(p,args[0],args[1],FLOAT_DIVIDE); }
 Eterm lb_bif_plus_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     (void)pc; return lb_mixed_plus(p,args[0],args[1]);
@@ -522,6 +525,35 @@ static Eterm integer_from_radix_view(LbProcess *p,LbBitstringView view,unsigned 
     if(lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
     return result;
 }
+Eterm lb_bif_list_to_integer_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    Eterm tail=args[0]; size_t bytes=0; unsigned char *text; void *memory=NULL;
+    (void)pc; p->last_native_cost=0;
+    if(!lb_work_domain_charge(domain,1)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    ++p->last_native_cost;
+    if(!is_small(args[1]) || signed_val(args[1])<2 || signed_val(args[1])>36)
+        return fail(p,LB_EXC_BADARG);
+    unsigned radix=(unsigned)signed_val(args[1]);
+    while(is_list(tail)) {
+        if(!lb_work_domain_charge(domain,1)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+        ++p->last_native_cost;
+        Eterm head=CAR(list_val(tail));
+        if(!is_small(head) || signed_val(head)<0 || signed_val(head)>127 || bytes==LB_MAX_BINARY_BYTES)
+            return fail(p,LB_EXC_BADARG);
+        ++bytes; tail=CDR(list_val(tail));
+    }
+    if(!is_nil(tail) || !bytes) return fail(p,LB_EXC_BADARG);
+    if(!lb_work_domain_charge(domain,bytes)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    p->last_native_cost+=bytes;
+    LbAllocStatus status=lb_alloc_domain_allocate(domain,bytes,(void **)&memory);
+    if(status!=LB_ALLOC_OK) return allocation_failure(p,status);
+    text=memory; tail=args[0];
+    for(size_t i=0;i<bytes;++i) { text[i]=(unsigned char)signed_val(CAR(list_val(tail))); tail=CDR(list_val(tail)); }
+    Eterm result=integer_from_radix_view(p,(LbBitstringView){text,0,bytes*8},radix);
+    if(lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+    return result;
+}
 Eterm lb_bif_binary_to_integer_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     LbBitstringView view; (void)pc; p->last_native_cost=0;
@@ -582,15 +614,14 @@ Eterm lb_bif_list_to_integer_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     Eterm result=integer_from_radix_view(p,(LbBitstringView){bytes,0,count*8},10);
     lb_release(domain,bytes); return result;
 }
-Eterm lb_bif_binary_to_float_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+static Eterm binary_float_view(LbProcess *p,LbBitstringView view)
 {
     LbAllocDomain *domain=p->entry_module->space->domain;
-    LbBitstringView view; size_t bytes,buffer_size,work; char *buffer,*end;
+    size_t bytes,buffer_size,work; char *buffer,*end;
     void *memory=NULL; LbAllocStatus status; fenv_t previous; locale_t previous_locale;
     double value; int parse_errno;
     Eterm words[2];
-    (void)pc; p->last_native_cost=0;
-    if(!lb_bitstring_view(args[0],&view) || (view.bit_size&7) || !view.bit_size) return fail(p,LB_EXC_BADARG);
+    if((view.bit_size&7) || !view.bit_size) return fail(p,LB_EXC_BADARG);
     bytes=view.bit_size/8;
     if(bytes==SIZE_MAX || !lb_size_mul(bytes,2,&work) || !lb_size_add(work,1+lb_work_bulk_units(bytes),&work))
         return fail(p,LB_EXC_SYSTEM_LIMIT);
@@ -639,6 +670,36 @@ badarg:
 infrastructure_error:
     if(lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
     p->status=LB_PROCESS_EXCEPTION; return fail(p,LB_EXC_NOTSUP);
+}
+Eterm lb_bif_binary_to_float_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    LbBitstringView view; (void)pc; p->last_native_cost=0;
+    if(!lb_bitstring_view(args[0],&view)) return fail(p,LB_EXC_BADARG);
+    return binary_float_view(p,view);
+}
+Eterm lb_bif_list_to_float_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    Eterm tail=args[0]; size_t bytes=0; unsigned char *text; void *memory=NULL;
+    (void)pc; p->last_native_cost=0;
+    while(is_list(tail)) {
+        if(!lb_work_domain_charge(domain,1)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+        ++p->last_native_cost;
+        Eterm head=CAR(list_val(tail));
+        if(!is_small(head) || signed_val(head)<0 || signed_val(head)>127 || bytes==LB_MAX_BINARY_BYTES)
+            return fail(p,LB_EXC_BADARG);
+        ++bytes; tail=CDR(list_val(tail));
+    }
+    if(!is_nil(tail) || !bytes) return fail(p,LB_EXC_BADARG);
+    if(!lb_work_domain_charge(domain,bytes)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    p->last_native_cost+=bytes;
+    LbAllocStatus status=lb_alloc_domain_allocate(domain,bytes,(void **)&memory);
+    if(status!=LB_ALLOC_OK) return allocation_failure(p,status);
+    text=memory; tail=args[0];
+    for(size_t i=0;i<bytes;++i) { text[i]=(unsigned char)signed_val(CAR(list_val(tail))); tail=CDR(list_val(tail)); }
+    Eterm result=binary_float_view(p,(LbBitstringView){text,0,bytes*8});
+    if(lb_alloc_domain_release(domain,memory)!=LB_ALLOC_OK) abort();
+    return result;
 }
 static Eterm binary_to_atom(LbProcess *p,Eterm *args,int existing)
 {
@@ -931,6 +992,76 @@ Eterm lb_bif_float_to_binary_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 float_infrastructure_error:
     p->status=LB_PROCESS_EXCEPTION; return fail(p,LB_EXC_NOTSUP);
 }
+static Eterm float_to_list(LbProcess *p,Eterm number,Eterm opts)
+{
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    char output[512]; size_t option_count=0,output_size,heap_words,need,work;
+    int mode=0,compact=0,decimals=20; double value; fenv_t previous;
+    void *locale_saved; p->last_native_cost=0;
+    if(!is_float_term(number)) return fail(p,LB_EXC_BADARG);
+    memcpy(&value,boxed_val(number)+1,sizeof(value));
+    while(is_list(opts)) {
+        Eterm option=CAR(list_val(opts));
+        if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++option_count; ++p->last_native_cost;
+        if(option==am_compact) compact=1;
+        else if(option==am_short) mode=1;
+        else if(is_tuple(option)) {
+            Eterm *tuple=tuple_val(option);
+            if(arityval(tuple[0])!=2 || !is_small(tuple[2])) return fail(p,LB_EXC_BADARG);
+            Sint precision=signed_val(tuple[2]);
+            if(precision<INT_MIN || precision>255) return fail(p,LB_EXC_BADARG);
+            if(tuple[1]==am_decimals) { mode=2; decimals=(int)precision; }
+            else if(tuple[1]==am_scientific) { mode=3; decimals=(int)precision; }
+            else return fail(p,LB_EXC_BADARG);
+        } else return fail(p,LB_EXC_BADARG);
+        opts=CDR(list_val(opts));
+    }
+    if(!is_nil(opts) || (mode==2 && decimals<0)) return fail(p,LB_EXC_BADARG);
+    if(!lb_work_domain_charge(domain,1+option_count+512)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=1+option_count+512;
+    if(fegetenv(&previous)) goto float_list_environment_error;
+    if(fesetenv(FE_DFL_ENV)) { (void)fesetenv(&previous); goto float_list_environment_error; }
+    locale_saved=uselocale((locale_t)p->entry_module->space->engine->numeric_locale);
+    if(locale_saved==(void *)0) { (void)fesetenv(&previous); goto float_list_environment_error; }
+    if(mode==1) {
+        int length=float_short_text(value,output,sizeof(output)); output_size=length>0?(size_t)length:0;
+    } else {
+        int length=mode==2?snprintf(output,sizeof(output),"%.*f",decimals,value):
+            mode==3? (decimals<0?snprintf(output,sizeof(output),"%e",value):snprintf(output,sizeof(output),"%.*e",decimals,value)):
+                    snprintf(output,sizeof(output),"%.*e",20,value);
+        output_size=length>0 && (size_t)length<sizeof(output)?(size_t)length:0;
+        if(mode==2 && compact && decimals>0) {
+            while(output_size && output[output_size-1]=='0') --output_size;
+            if(output_size && output[output_size-1]=='.') --output_size;
+            output[output_size]='\0';
+        }
+    }
+    if(uselocale((locale_t)locale_saved)==(locale_t)0) { (void)fesetenv(&previous); goto float_list_environment_error; }
+    if(fesetenv(&previous)) goto float_list_environment_error;
+    if(!output_size) return fail(p,LB_EXC_BADARG);
+    if(!lb_size_mul(output_size,2,&heap_words) || !lb_size_add(heap_words,p->heap_reserved,&need) ||
+       !lb_size_mul(output_size,2,&work)) return fail(p,LB_EXC_SYSTEM_LIMIT);
+    if(!lb_work_domain_charge(domain,(Uint)work)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost+=work;
+    size_t collections=p->collections;
+    if(!lb_heap_reserve(p,need,MAX_REG)) return allocation_failure(p,lb_alloc_domain_failure(domain));
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    Eterm result=NIL;
+    for(size_t i=output_size;i;--i) {
+        Eterm *cell=p->htop; cell[0]=make_small((unsigned char)output[i-1]); cell[1]=result;
+        result=make_list(cell); p->htop+=2;
+    }
+    return result;
+float_list_environment_error:
+    p->status=LB_PROCESS_EXCEPTION; return fail(p,LB_EXC_NOTSUP);
+}
+Eterm lb_bif_float_to_list_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; Eterm options=NIL; return float_to_list(p,args[0],options);
+}
+Eterm lb_bif_float_to_list_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{ (void)pc; return float_to_list(p,args[0],args[1]); }
 typedef enum { INTEGER_TEXT_BINARY, INTEGER_TEXT_LIST } IntegerTextKind;
 static Eterm integer_text(LbProcess *p,Eterm value,Eterm radix,IntegerTextKind kind)
 {
@@ -1523,6 +1654,29 @@ Eterm lb_bif_setelement_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
     memcpy(result,tuple_val(p->reg[1]),words*sizeof(Eterm));
     result[index]=p->reg[2]; p->htop+=words;
     return make_tuple(result);
+}
+Eterm lb_bif_insert_element_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=1;
+    if(args!=p->reg) { p->status=LB_PROCESS_INVALID; return THE_NON_VALUE; }
+    if(!is_small(args[0]) || !is_tuple(args[1])) return fail(p,LB_EXC_BADARG);
+    Sint index=signed_val(args[0]); size_t old_arity=arityval(*tuple_val(args[1]));
+    if(index<1 || (Uint)index>old_arity+1 || old_arity==MAX_ARITYVAL) return fail(p,LB_EXC_BADARG);
+    size_t new_arity=old_arity+1,words,need,collections=p->collections;
+    if(!lb_size_add(new_arity,1,&words) || !lb_size_add(words,p->heap_reserved,&need))
+        return allocation_failure(p,LB_ALLOC_LIMIT);
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    uint64_t cost=words+lb_work_bulk_units(words);
+    if(!lb_work_domain_charge(domain,cost)) return allocation_failure(p,LB_ALLOC_WORK_LIMIT);
+    p->last_native_cost=cost;
+    if(!lb_heap_reserve(p,need,MAX_REG)) return allocation_failure(p,lb_alloc_domain_failure(domain));
+    if(p->collections!=collections) p->last_native_cost+=p->last_gc_cost;
+    const Eterm *source=tuple_val(p->reg[1]); Eterm *result=p->htop;
+    result[0]=make_arityval(new_arity);
+    for(size_t i=1;i<(size_t)index;++i) result[i]=source[i];
+    result[index]=p->reg[2];
+    for(size_t i=(size_t)index+1;i<=new_arity;++i) result[i]=source[i-1];
+    p->htop+=words; return make_tuple(result);
 }
 Eterm lb_bif_abs_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {

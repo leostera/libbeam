@@ -273,8 +273,6 @@ LbCodeStatus lb_emit(LoaderState *st,BeamOp *op)
         }
         break;
     }
-    case op_catch_yf:
-        return LB_CODE_UNSUPPORTED; /* requires actual catch consumers */
     case op_int_code_end:
         VERIFY(st->function_number==lb_beam_image_info(st->program->image)->function_count);
         break;

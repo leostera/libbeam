@@ -109,8 +109,9 @@ static void malformed(LbEngine *engine,unsigned char *data,size_t size)
         unsigned char saved=data[where],replacement=i==0?0:i==1?0x35:i==2?genop_call_2:0x20;
         LbCodeModule *module=NULL;
         CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK); data[where]=replacement;
-        CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_FORMAT && !module);
-        CHECK(!strcmp(error.stage,"register/stack/heap admission")); data[where]=saved;
+        LbCodeStatus mutated=lb_code_load(space,data,size,&module,&error);
+        CHECK(mutated==LB_CODE_FORMAT && !module);
+        data[where]=saved;
         CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_OK);
         CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
     }

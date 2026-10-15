@@ -24,5 +24,9 @@ LbPidStatus lb_pid_table_destroy(LbPidTable *);
 LbPidStatus lb_pid_insert(LbPidTable *,LbPidEntry *,LbProcess *);
 LbPidStatus lb_pid_remove(LbPidTable *,LbPidEntry *);
 LbProcess *lb_pid_lookup(LbPidTable *,Eterm);
+int lb_pid_components(LbPidTable *,Eterm,Uint *number,Uint *serial);
+int lb_pid_from_components(LbPidTable *,Uint number,Uint serial,Eterm *);
 size_t lb_pid_count(const LbPidTable *);
+size_t lb_pid_capacity(const LbPidTable *);
+LbPidStatus lb_pid_make_list(const LbPidTable *,Eterm **heap,size_t count,Eterm *out);
 #endif

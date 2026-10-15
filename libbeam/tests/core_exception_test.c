@@ -155,6 +155,20 @@ static void actual_errors(LbCodeSpace *space,LbCodeModule *module,LbCodeEntry *i
     CHECK(lb_process_exception_value(p)==am_badarg && is_non_value(lb_process_exception_info(p)));
     lb_process_destroy(p); lb_code_entry_release(bif);
 }
+static void generic_terminal_opcodes(LbCodeSpace *space,LbCodeModule *module)
+{
+    const char *names[]={"badrecord","if_end"};
+    const Eterm reasons[]={am_badrecord,am_if_clause};
+    for(size_t i=0;i<2;++i) {
+        LbCodeEntry *code=entry(space,module,names[i]); LbProcess *p=process(code);
+        CHECK(run(p)==LB_PROCESS_EXCEPTION && lb_process_exception(p)==reasons[i]);
+        CHECK(LB_GET_EXC_INDEX(p->freason)==(i?LB_GET_EXC_INDEX(LB_EXC_IF_CLAUSE):LB_GET_EXC_INDEX(LB_EXC_BADRECORD)));
+        Eterm value=lb_process_exception_value(p);
+        if(i==0) CHECK(is_tuple(value) && boxed_val(value)[1]==am_badrecord);
+        else CHECK(value==am_if_clause);
+        lb_process_destroy(p); lb_code_entry_release(code);
+    }
+}
 static void actual_exits(LbCodeSpace *space,LbCodeModule *module,LbCodeEntry *identity)
 {
     LbCodeEntry *code=entry(space,module,"exiting");
@@ -182,7 +196,7 @@ static void execution(const char *path,int vectors)
     CHECK(lb_engine_create(&callbacks,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
     CHECK(lb_code_load(space,data,(size_t)size,&module,&error)==LB_CODE_OK); memset(data,0xa5,(size_t)size); free(data);
     LbCodeEntry *identity=entry(space,module,"identity"); expansion(identity,&m); actual_errors(space,module,identity,&m,vectors);
-    actual_exits(space,module,identity);
+    generic_terminal_opcodes(space,module); actual_exits(space,module,identity);
     lb_code_entry_release(identity); CHECK(lb_code_unload(module)==LB_CODE_OK);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); CHECK(!m.live);
     if(!vectors) puts("CORE_EXCEPTION_EXECUTION_OK encoded_reasons=true scalar_not_gc_root=true native_expansion=true real_instruction_errors=true error_root_gc=true copied_lifetime=true failure_retry=true binary_info_atomic=true stale_info_cleared=true exact_retirement=true stacktrace=false catch=false");

@@ -52,13 +52,13 @@ TEST(Runner, MissingDependencyReportsExactOwnedMfaAndLocation) {
     EXPECT_NE(result.output.find("mfa=\"first_slice\":\"literal\"/0"), std::string::npos) << result.output;
 }
 
-TEST(Runner, UnusedUnsupportedCatchRefusesBeforeAnyCallResult) {
+TEST(Runner, UnusedOnLoadRefusesWholeModuleBeforeAnyCallResult) {
     const auto result = run(runfile("libbeam/run_beam"), {
-        "--entry", "refused_exception", "identity", "--call", "must-not-run",
-        "--isolate", fixture("refused_exception"),
+        "--entry", "module_on_load_refused", "identity", "--call", "must-not-run",
+        "--isolate", fixture("module_on_load_refused"),
     });
     EXPECT_TRUE(result.exited(1)) << result.output;
-    EXPECT_NE(result.output.find("stage=try"), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("stage=on_load"), std::string::npos) << result.output;
     EXPECT_EQ(result.output.find("bytes="), std::string::npos) << result.output;
 }
 

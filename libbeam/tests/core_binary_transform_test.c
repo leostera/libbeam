@@ -182,26 +182,40 @@ static void fixture(Memory *m,LbCodeSpace *space,const char *path)
     CHECK(count>=5 && strings);
     /* Prove the recursive comprehension itself: unrelated earlier exports
      * require linked import descriptors, absent in this raw transform test. */
-    BeamOp *all=p->ops,*function=NULL;
+    BeamOp *all=p->ops,*function=NULL,*private_append=NULL;
     for(BeamOp *op=all;op;op=op->next) {
         if(op->op==genop_int_func_start_5) function=op;
         if(op->op==genop_bs_start_match3_4) break;
     }
     CHECK(function); p->ops=function;
-    LoaderState verify=state(space,p,p->ops); verify.label_count=lb_beam_image_info(p->image)->label_count;
+    const LbBeamImageInfo *image=lb_beam_image_info(p->image);
+    BeamFile_ImportEntry *imports=calloc(image->import_count?image->import_count:1,sizeof(*imports)); CHECK(imports);
+    for(size_t i=0;i<image->import_count;++i) {
+        LbBeamImport imported; CHECK(lb_beam_image_import(p->image,i,&imported)==LB_BEAM_OK);
+        imports[i]=(BeamFile_ImportEntry){p->file_atoms[imported.module],p->file_atoms[imported.function],imported.arity};
+    }
+    for(BeamOp *op=function;op;op=op->next) {
+        if(op!=function && op->op==genop_int_func_start_5) break;
+        if(op->op==genop_bs_create_bin_6 && op->a[6].val==am_private_append) { private_append=op; break; }
+    }
+    CHECK(private_append); LoaderState verify=state(space,p,p->ops); verify.label_count=image->label_count;
+    verify.beam.imports.count=image->import_count; verify.beam.imports.entries=imports;
     LbCodeStatus proof=lb_verify_program(&verify); p->ops=all;
-    CHECK(proof==LB_CODE_FORMAT && !strcmp(p->error.stage,"private append source/consumption proof"));
+    CHECK(proof==LB_CODE_OK && private_append->a[6].val==am_append);
+    free(imports);
     lb_beam_program_destroy(p);
     LbCodeStatus status=lb_code_load(space,data,(size_t)size,&module,&error);
-    /* The comprehension lacks interprocedural private-append entry facts.
-     * Raw proof rejects its unknown writable argument; eager linking may refuse
-     * independently. Local match execution confers no append/call authority. */
-    CHECK((status==LB_CODE_UNSUPPORTED || status==LB_CODE_UNRESOLVED || status==LB_CODE_FORMAT) && !module && !space->modules);
+    /* The isolated helper above still lacks an entry fact. In the complete
+     * module, all local callers pass a writable accumulator; the verifier's
+     * final, nondeferred pass must prove the private append before admission.
+     * append_inference_test separately executes the unchanged fixture. */
+    CHECK(status==LB_CODE_OK && module && space->modules);
+    CHECK(lb_code_unload(module)==LB_CODE_OK && !space->modules);
     free(data);
     /* Preparation legitimately interns fixture atoms; complete space retirement
      * below checks that ownership, rather than pretending it never occurred. */
     CHECK(m->live>=live && m->bytes>=bytes);
-    printf("CORE_BINARY_TRANSFORM_FIXTURE_OK operations=%zu strings=%zu native_generator=true execution_admission=false\n",count,strings);
+    printf("CORE_BINARY_TRANSFORM_FIXTURE_OK operations=%zu strings=%zu native_generator=true strict_interprocedural_admission=true\n",count,strings);
 }
 int main(int argc,char **argv)
 {

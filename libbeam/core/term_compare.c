@@ -9,7 +9,9 @@
 #include "flatmap.h"
 #include "reference.h"
 #include "fun.h"
+#include "big.h"
 #include "work_budget.h"
+#include <string.h>
 #include <stdlib.h>
 
 typedef unsigned char byte;
@@ -90,13 +92,13 @@ LbAllocStatus lb_term_equal(LbAllocDomain *domain,Eterm a,Eterm b,int *equal)
 tailrecur:
     if(a==b) goto pop_next;
 tailrecur_ne:
-    if(!lb_work_domain_charge(domain,1)) goto no_memory;
+    if(!lb_work_domain_charge(domain,1)) goto work_limit;
     switch(primary_tag(a)) {
     case TAG_PRIMARY_LIST:
         if(is_list(b)) {
             Eterm *aval=list_val(a),*bval=list_val(b);
             for(;;) {
-                if(!lb_work_domain_charge(domain,1)) goto no_memory;
+                if(!lb_work_domain_charge(domain,1)) goto work_limit;
                 Eterm atmp=CAR(aval),btmp=CAR(bval);
                 if(atmp!=btmp) {
                     PUSH2(CDR(bval),CDR(aval)); a=atmp; b=btmp; goto tailrecur_ne;
@@ -145,7 +147,7 @@ tailrecur_ne:
             LbBitstringView av,bv;
             if(!lb_bitstring_view(a,&av)) abort();
             if(!lb_bitstring_view(b,&bv)) goto not_equal;
-            if(av.bit_size==bv.bit_size && !lb_work_domain_charge(domain,lb_work_bulk_units((av.bit_size+7)/8))) goto no_memory;
+            if(av.bit_size==bv.bit_size && !lb_work_domain_charge(domain,lb_work_bulk_units((av.bit_size+7)/8))) goto work_limit;
             if(lb_bitstrings_equal(av,bv)) goto pop_next;
             break;
         }
@@ -156,7 +158,7 @@ tailrecur_ne:
             if(*aa!=*bb) goto not_equal;
             i=*aa>>_HEADER_ARITY_OFFS;
             while(i--) {
-                if(!lb_work_domain_charge(domain,1)) goto no_memory;
+                if(!lb_work_domain_charge(domain,1)) goto work_limit;
                 if(*++aa!=*++bb) goto not_equal;
             }
             goto pop_next;
@@ -179,7 +181,7 @@ term_array:
     {
         Eterm *ap=aa,*bp=bb; Sint i=sz;
         for(;;) {
-            if(!lb_work_domain_charge(domain,1)) goto no_memory;
+            if(!lb_work_domain_charge(domain,1)) goto work_limit;
             if(*ap!=*bp) break;
             if(--i==0) goto pop_next;
             ++ap; ++bp;
@@ -202,4 +204,57 @@ not_equal:
     clear_stack(domain,&stack); *equal=0; return LB_ALLOC_OK;
 no_memory:
     clear_stack(domain,&stack); return LB_ALLOC_NO_MEMORY;
+work_limit:
+    clear_stack(domain,&stack); return LB_ALLOC_WORK_LIMIT;
+}
+static int float_value(Eterm term,double *value)
+{
+    Uint bits;
+    if(!is_boxed(term) || (*boxed_val(term)&_TAG_HEADER_MASK)!=FLOAT_SUBTAG) return 0;
+    bits=boxed_val(term)[1]; memcpy(value,&bits,sizeof(*value)); return 1;
+}
+static LbAllocStatus integer_float_equal(LbAllocDomain *domain,Eterm integer,double value,int *equal)
+{
+    uint64_t bits,significand; Uint small_magnitude=0; int negative,e2; size_t count=0,n; const Uint *digits;
+    Uint float_digits[18]={0}; unsigned exponent; memcpy(&bits,&value,sizeof(bits));
+    exponent=(unsigned)((bits>>52)&0x7ff); significand=bits&((UINT64_C(1)<<52)-1);
+    if(exponent==0x7ff) { *equal=0; return LB_ALLOC_OK; }
+    negative=(int)(bits>>63);
+    if(exponent) { significand|=UINT64_C(1)<<52; e2=(int)exponent-1023-52; }
+    else e2=-1074;
+    if(!significand) { *equal=is_small(integer) && signed_val(integer)==0; return LB_ALLOC_OK; }
+    if(e2<0) {
+        unsigned shift=(unsigned)-e2;
+        if(shift>=64 || (significand&((UINT64_C(1)<<shift)-1))) { *equal=0; return LB_ALLOC_OK; }
+        significand>>=shift; e2=0;
+        if(!significand) { *equal=is_small(integer) && signed_val(integer)==0; return LB_ALLOC_OK; }
+    }
+    if(e2/64>=18) { *equal=0; return LB_ALLOC_OK; }
+    size_t word=(unsigned)e2/64; unsigned bit=(unsigned)e2%64;
+    float_digits[word]=significand<<bit; count=word+1;
+    if(bit && (significand>>(64-bit))) { float_digits[word+1]=significand>>(64-bit); count=word+2; }
+    if(is_small(integer)) {
+        Sint value_int=signed_val(integer); negative=value_int<0;
+        small_magnitude=negative?(Uint)0-(Uint)value_int:(Uint)value_int;
+        digits=&small_magnitude; n=1;
+    } else {
+        const Uint *boxed=boxed_val(integer);
+        negative=(*boxed&_TAG_HEADER_MASK)==NEG_BIG_SUBTAG;
+        digits=boxed+1; n=lb_big_size(integer);
+    }
+    if(negative!=(int)(bits>>63) && (count || (n==1 && digits[0]))) { *equal=0; return LB_ALLOC_OK; }
+    if(n!=count) { *equal=0; return LB_ALLOC_OK; }
+    if(!lb_work_domain_charge(domain,count?count:1))
+        return lb_alloc_domain_failure(domain)==LB_ALLOC_WORK_LIMIT?LB_ALLOC_WORK_LIMIT:LB_ALLOC_NO_MEMORY;
+    for(size_t i=0;i<count;++i) if(digits[i]!=float_digits[i]) { *equal=0; return LB_ALLOC_OK; }
+    *equal=1; return LB_ALLOC_OK;
+}
+LbAllocStatus lb_term_loose_equal(LbAllocDomain *domain,Eterm a,Eterm b,int *equal)
+{
+    double left,right; int left_float=float_value(a,&left),right_float=float_value(b,&right);
+    if(!domain || !equal) return LB_ALLOC_INVALID;
+    if(left_float && right_float) { *equal=left==right; return LB_ALLOC_OK; }
+    if(left_float && lb_is_integer(b)) return integer_float_equal(domain,b,left,equal);
+    if(right_float && lb_is_integer(a)) return integer_float_equal(domain,a,right,equal);
+    return lb_term_equal(domain,a,b,equal);
 }

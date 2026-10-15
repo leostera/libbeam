@@ -282,9 +282,25 @@ static void actual_file(const char *path) {
     CHECK(lb_alloc_domain_destroy(d)==LB_ALLOC_OK && !h.live && !h.bytes);
     failure_prefixes(original,(size_t)n,0); free(original);
 }
+static void opcode_catalog(void) {
+    static const struct { const char *name; int arity; } expected[]={
+        {"badrecord",1},{"if_end",0},{"raw_raise",0},{"on_load",0},
+        {"set_tuple_element",3},{"fadd",4},{"fsub",4},{"fnegate",3},
+        {"bs_get_utf8",5},{"bs_skip_bits2",5},{"bs_skip_utf8",4},
+        {"bs_get_utf16",5},{"bs_get_utf32",5},{"bs_match_string",4},
+        {"bs_get_binary2",7},{"bs_get_integer2",7},{"bs_get_float2",7},
+        {"bs_match",3},
+    };
+    for(size_t i=0;i<sizeof(expected)/sizeof(*expected);++i) {
+        size_t opcode;
+        for(opcode=0;opcode<NUM_GENERIC_OPS;++opcode)
+            if(!strcmp(gen_opc[opcode].name,expected[i].name)) break;
+        CHECK(opcode<NUM_GENERIC_OPS && gen_opc[opcode].arity==expected[i].arity);
+    }
+}
 int main(int argc,char **argv) {
     CHECK(MAX_GENERIC_OPCODE==193 && gen_opc[genop_move_2].arity==2);
-    reader_cases(); selection(); synthetic(); literal_shapes(); mutations();
+    opcode_catalog(); reader_cases(); selection(); synthetic(); literal_shapes(); mutations();
     if(argc==2) actual_file(argv[1]); else CHECK(argc==1);
     puts("CORE_BEAM_PROGRAM_OK rollback=true owned_literals=true real_operands=true execution=false"); return 0;
 }

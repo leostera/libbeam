@@ -42,5 +42,12 @@ static inline Eterm lb_reference_write(Eterm *hp,uint64_t value)
     ref->num[2]=(uint32_t)(value>>32);
     return make_boxed(hp);
 }
+static inline Eterm lb_reference_from_numbers(Eterm *hp,uint32_t first,uint32_t second,uint32_t third)
+{
+    LbOrdinaryRef *ref=(LbOrdinaryRef *)hp;
+    ref->header=LB_REF_HEADER; ref->marker=UINT32_MAX;
+    ref->num[0]=third; ref->num[1]=second; ref->num[2]=first;
+    return make_boxed(hp);
+}
 static inline int lb_is_reference(Eterm value) { return lb_reference(value)!=NULL; }
 #endif

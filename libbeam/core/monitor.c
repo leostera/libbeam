@@ -53,7 +53,7 @@ LbProcessStatus lb_monitor_prepare(LbProcess *origin,Eterm ref,LbMonitor **out)
     m->origin.offset=offsetof(LbMonitor,origin); m->u.target.offset=offsetof(LbMonitor,u.target);
     m->origin.key_offset=offsetof(LbMonitor,ref)-offsetof(LbMonitor,origin);
     m->u.target.key_offset=offsetof(LbMonitor,ref)-offsetof(LbMonitor,u.target);
-    m->u.target.flags=TARGET; m->refc=0; m->origin_process=origin; m->target_name=NIL;
+    m->u.target.flags=TARGET; m->refc=0; m->origin_process=origin; m->target_name=NIL; m->down_tag=am_DOWN;
     memcpy(m->heap,boxed_val(ref),sizeof(m->heap)); m->ref=make_boxed(m->heap);
     *out=m; return LB_PROCESS_READY;
 }
@@ -81,8 +81,9 @@ static void detach(LbMonitor *m)
     erase(&m->target_process->monitors_target,&m->u.target); m->refc=0;
     lb_monitor_discard(m);
 }
-static void flush(LbProcess *p,Eterm ref)
+static int flush(LbProcess *p,Eterm ref)
 {
+    int removed=0;
     LbMessageQueue *q=&p->messages; LbMessage **saved=q->save,**link=&q->first;
     while(*link) {
         LbMessage *message=*link;
@@ -99,22 +100,25 @@ static void flush(LbProcess *p,Eterm ref)
                 if(saved==&message->next) saved=link;
                 q->save=link;
                 if(lb_message_queue_take(q)!=message) abort();
-                lb_message_destroy(message); continue;
+                lb_message_destroy(message); removed=1; continue;
             }
         }
         link=&message->next;
     }
     q->save=saved;
+    return removed;
 }
-void lb_monitor_demonitor(LbProcess *p,Eterm ref,int do_flush)
+int lb_monitor_demonitor(LbProcess *p,Eterm ref,int do_flush)
 {
+    int found=0,flushed=0;
     LbMonitorNode *first=p->monitors_origin,*node=first;
     if(node) do {
-        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return; }
+        if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return 0; }
         LbMonitor *m=owner(node); node=node->node.list.next;
-        if(equal_ref(m->ref,ref)) { detach(m); break; }
+        if(equal_ref(m->ref,ref)) { detach(m); found=1; break; }
     } while(node!=first);
-    if(do_flush) flush(p,ref);
+    if(do_flush) flushed=flush(p,ref);
+    return found && !flushed;
 }
 void lb_monitor_exit(LbProcess *p,int notify)
 {
@@ -136,7 +140,7 @@ void lb_monitor_exit(LbProcess *p,int notify)
             if(status==LB_PROCESS_READY) {
                 Eterm named[3]={make_arityval(2),m->target_name,p->entry_module->space->node_name};
                 Eterm object=is_atom(m->target_name)?make_boxed(named):p->identity.id;
-                Eterm tuple[6]={make_arityval(5),am_DOWN,m->ref,am_process,object,reason};
+                Eterm tuple[6]={make_arityval(5),m->down_tag,m->ref,am_process,object,reason};
                 LbMessage *message; Uint cost;
                 status=lb_message_create(p->entry_module->space,make_boxed(tuple),&message,&cost);
                 if(status==LB_PROCESS_READY) {

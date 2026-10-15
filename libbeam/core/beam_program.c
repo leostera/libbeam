@@ -18,11 +18,10 @@ void *lb_palloc(LbBeamProgram *p,size_t count,size_t size)
        !lb_size_add(bytes,sizeof(*block),&bytes) || bytes>LB_BEAM_MAX_BYTES-p->bytes) {
         lb_pfail(p,LB_BEAM_LIMIT); return NULL;
     }
-    /* Reserve checked ownership-list teardown work before adding each arena
-     * block. Interleaved offheap payloads can make rollback non-LIFO: cumulative
-     * quadratic credit bounds that walk even after a later work denial.
-     * The arena's byte cap bounds block_count and this arithmetic. */
-    if(!lb_work_domain_charge(p->domain,8*(uint64_t)p->block_count+4*(uint64_t)p->name_count+16)) {
+    /* Reserve the eventual single teardown walk incrementally: each new block
+     * and optional name contributes constant cleanup work. Recharging the whole
+     * existing prefix on every allocation made preparation quadratic. */
+    if(!lb_work_domain_charge(p->domain,28)) {
         lb_pfail(p,LB_BEAM_LIMIT); return NULL;
     }
     if(lb_alloc_domain_allocate(p->domain,bytes,&memory)!=LB_ALLOC_OK) {

@@ -8,6 +8,7 @@
 #include "fun.h"
 #include "process.h"
 #include "work_budget.h"
+struct LbAlias;
 typedef struct LbHeapFragment {
     struct LbHeapFragment *next;
     LbOffHeap off_heap;
@@ -22,6 +23,7 @@ typedef struct LbMessage {
     LbCodeSpace *space;
     LbWorkBudget *budget; /* owned sender-causal lease, independent of moving terms */
     LbFunLease *leases;
+    struct LbAlias *reply_alias; /* reply alias deactivated when this message is consumed */
     struct LbMessageQueue *queue; /* exclusive published ownership, NULL while prepared */
 } LbMessage;
 _Static_assert(offsetof(LbMessage,space)==5*sizeof(Eterm),"native message reference prefix");

@@ -240,6 +240,7 @@ atom dirty_nif_finalizer
 atom disable_trace
 atom disabled
 atom discard
+atom disconnect_node
 atom dist
 atom dist_cmd
 atom dist_ctrl_put_data
@@ -340,6 +341,7 @@ atom gc_minor_start
 atom Ge='>='
 atom generational
 atom get_all_trap
+atom get_cookie
 atom get_internal_state_blocked
 atom get_seq_token
 atom get_size
@@ -392,6 +394,7 @@ atom internal
 atom internal_error
 atom instruction_counts
 atom invalid
+atom is_alive
 atom is_constant
 atom is_seq_trace
 atom iterator
@@ -427,6 +430,8 @@ atom loaded
 atom load_cancelled
 atom load_failure
 atom local
+atom localtime_to_universaltime
+atom universaltime_to_localtime
 atom logger
 atom long_gc
 atom long_message_queue
@@ -500,6 +505,7 @@ atom new_uniq
 atom newline
 atom nifs
 atom no
+atom nocookie
 atom nomatch
 atom none
 atom no_auto_capture
@@ -591,6 +597,8 @@ atom private
 atom private_append
 atom process
 atom processes
+atom processes_iterator
+atom processes_next
 atom processes_used
 atom process_count
 atom process_display

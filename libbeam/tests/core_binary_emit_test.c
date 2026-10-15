@@ -188,8 +188,8 @@ static void components(LbCodeSpace *space)
     size_t before=st.ci; a[4]=ARG(u,6); CHECK(lb_emit(&st,&op)==LB_CODE_FORMAT && st.ci==before);
     a[4]=ARG(u,5); a[5]=ARG(u,99); CHECK(lb_emit(&st,&op)==LB_CODE_FORMAT && st.ci==before);
     a[5]=ARG(u,LB_BSC_STRING); CHECK(lb_emit(&st,&op)==LB_CODE_FORMAT && st.ci==before);
-    /* The existing unadmitted match-string emitter uses bit counts rather
-     * than byte counts; packing must not change which field is rounded. */
+    /* The admitted match-string emitter uses bit counts rather than byte
+     * counts; packing must not change which field is rounded. */
     const size_t lengths[]={0,1,7,8,9,SIZE_MAX};
     st.labels=lb_palloc(p,2,sizeof(Label)); CHECK(st.labels); st.label_count=2;
     for(size_t i=0;i<sizeof(lengths)/sizeof(*lengths);++i) {
@@ -198,7 +198,7 @@ static void components(LbCodeSpace *space)
         st.specific_op=op_i_bs_match_string_xfWW;
         CHECK(lb_emit(&st,&match)==LB_CODE_OK && st.string_patches->pos==st.ci-1);
         CHECK(st.string_patches->bytes==lengths[i]/8+(lengths[i]%8!=0));
-        CHECK(!lb_instruction_supported(op_i_bs_match_string_xfWW));
+        CHECK(lb_instruction_supported(op_i_bs_match_string_xfWW));
     }
     lb_beam_program_destroy(p);
 }
