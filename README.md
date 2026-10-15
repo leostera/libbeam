@@ -33,9 +33,12 @@ network, port, distribution, host-control, or native-library authority.
 have executable lifecycle, isolation, resource, GC, and selected instruction/BIF
 tests. The unchanged 381-module HelloWorker bundle is not yet admitted: module
 `crypto` has an `on_load` callback that calls the explicitly denied
-`erlang:load_nif/2`. The runtime refuses rather than reporting false initialization.
-Consequently HelloWorker behavior and the complete default acceptance suite remain
-blocked; the current default, Release, and UBSan runs each have 477 passing tests
+`erlang:load_nif/2`; the 512 MiB diagnostic test reaches and refuses that
+initialization. The default 256 MiB bridge attempt currently hits the accounted
+memory limit earlier, also before listening. The runtime refuses rather than
+reporting false initialization. Consequently HelloWorker behavior and the
+complete default acceptance suite remain blocked; the current default, Release,
+and UBSan runs each have 477 passing tests
 and one failure at this refusal. See the [v0.1 contract](docs/libbeam-v0.1-contract.md),
 [worktree inventory](docs/libbeam-v0.1-inventory.md), and the
 [localhost-only bridge example](libbeam/examples/hello_worker_http/README.md) for

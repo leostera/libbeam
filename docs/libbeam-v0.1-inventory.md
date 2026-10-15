@@ -30,12 +30,15 @@ or behavior-tested MFAs.
 
 The unchanged HelloWorker bundle has 381 modules and SHA-256
 `25039ee656bd1148221085309a4cab379847953b61c82074cf2b80ede8b27d91`. The
-current loader does **not** admit the full closure. Its first refusal is
-`crypto` (module index 197), `on_load`, bytecode offset 16066. OTP's
-`crypto:on_load/0` calls `erlang:load_nif/2`; NIF loading is explicitly denied.
-The runtime does not skip initialization or publish the module as successfully
-initialized. See [the runtime contract](libbeam-v0.1-contract.md). No claims
-about modules after this refusal are an audit of the complete closure.
+current loader does **not** admit the full closure. The HelloWorker test's
+explicit 512 MiB limit reaches `crypto` (module index 197), `on_load`, bytecode
+offset 16066. OTP's `crypto:on_load/0` calls `erlang:load_nif/2`; NIF loading is
+explicitly denied. The runtime does not skip initialization or publish the module
+as successfully initialized. With the public default 256 MiB limit, the bridge
+smoke attempt refuses earlier at module index 117, stage `link/admission`, on the
+accounted memory limit; its isolate closes with current memory zero and no
+listener starts. See [the runtime contract](libbeam-v0.1-contract.md). No claims
+about modules after either refusal are an audit of the complete closure.
 
 The literal default `bazel test //...`, Release, and UBSan runs each reached
 478 test targets: 477 passed and `//libbeam:hello_worker_test` failed at this

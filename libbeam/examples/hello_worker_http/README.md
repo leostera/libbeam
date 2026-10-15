@@ -53,14 +53,18 @@ admission at module index 197 (`crypto`), stage `on_load`, offset 16066. Pinned
 `crypto:on_load/0` calls `erlang:load_nif/2`, which remains an explicit capability
 deny. The loader does not skip the callback or publish the module as initialized.
 The remaining HelloWorker request/response and two-Isolate tests are skipped after
-that shared setup failure; no HTTP listener starts and no worker request runs.
+that shared setup failure. With the public default 256 MiB limit, the bridge smoke
+attempt instead hits the accounted memory limit at module index 117
+(`link/admission`); both paths refuse before opening a listener. No worker request
+runs.
 
 This is a **v0.1 blocker**, not successful application support. The artifact and
 closure are unchanged; the runtime policy refuses because truthful crypto
-initialization is outside the current denied-NIF boundary. A Release/UBSan/freshness
-acceptance run has not yet cleared this blocker. Focused tests for the local codec,
-append inference, float operations, list reads, bit skips, and match-string do not
-prove full closure admission or HelloWorker behavior.
+initialization is outside the current denied-NIF boundary. Debug, Release, and
+UBSan each report 477 passing test targets and the same HelloWorker failure; the
+freshness check reports zero out-of-date tests but preserves that failure. Focused
+tests for the local codec, append inference, float operations, list reads, bit
+skips, and match-string do not prove full closure admission or HelloWorker behavior.
 
 A successful curl demonstration would prove only the exact routes exercised on
 that build. It would not prove full OTP compatibility, untested route behavior,
