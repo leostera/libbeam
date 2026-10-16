@@ -30,6 +30,16 @@ Bytes read_fixture(const char* path) {
     if (!input) fail();
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
+void finish_stop(Isolate& isolate, Result<Reclamation> stopped) {
+    if (auto* reclamation = std::get_if<Reclamation>(&stopped)) {
+        if (reclamation->wait_until(deadline())) fail();
+        return;
+    }
+    const auto& error = std::get<Error>(stopped);
+    auto usage = isolate.resource_usage();
+    if (error.code != ErrorCode::closed || !std::holds_alternative<ResourceUsage>(usage) ||
+        !std::get<ResourceUsage>(usage).closed) fail();
+}
 std::uint32_t read_u32(const std::uint8_t* p) {
     return (std::uint32_t(p[0]) << 24) | (std::uint32_t(p[1]) << 16) |
            (std::uint32_t(p[2]) << 8) | std::uint32_t(p[3]);
@@ -95,11 +105,8 @@ void exercise(const std::uint8_t* data, std::size_t size) {
                 (void)call_b.cancel();
             }
         }
-        auto stop_a = a.stop();
-        auto stop_b = b.stop();
-        if (!std::holds_alternative<Reclamation>(stop_a) || !std::holds_alternative<Reclamation>(stop_b)) fail();
-        if (std::get<Reclamation>(std::move(stop_a)).wait_until(deadline())) fail();
-        if (std::get<Reclamation>(std::move(stop_b)).wait_until(deadline())) fail();
+        finish_stop(a, a.stop());
+        finish_stop(b, b.stop());
     }
     if (engine.shutdown(deadline())) fail();
 }

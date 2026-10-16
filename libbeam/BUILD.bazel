@@ -6246,12 +6246,17 @@ filegroup(
   srcs = glob(["tests/fuzz_corpus/isolate_boundary/*"]),
 )
 
+filegroup(
+  name = "beam_image_fuzz_seeds",
+  srcs = glob(["tests/fuzz_corpus/beam_image/*"]),
+)
+
 cc_fuzz_test(
   name = "beam_image_fuzz",
   srcs = ["tests/beam_image_fuzz.cpp"],
   copts = ["-std=c++17"],
   data = ["probe_a_fixture"],
-  corpus = ["probe_a_fixture", "probe_b_fixture"],
+  corpus = [":beam_image_fuzz_seeds", "probe_a_fixture", "probe_b_fixture"],
   deps = ["libbeam"],
   tags = ["manual"],
 )
