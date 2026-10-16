@@ -2462,6 +2462,33 @@ cc_test(
 )
 
 genrule(
+  name = "perf_counter_shim_fixture",
+  srcs = ["tests/fixtures/os.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/perf_counter_shim_fixture/os.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location :tests/fixtures/os.erl)",
+)
+
+genrule(
+  name = "binary_runtime_paths_fixture",
+  srcs = ["tests/fixtures/binary_runtime_paths.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/binary_runtime_paths_fixture/binary_runtime_paths.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location :tests/fixtures/binary_runtime_paths.erl)",
+)
+
+cc_test(
+  name = "binary_runtime_paths_execution",
+  size = "small",
+  args = ["$(rootpath :binary_runtime_paths_fixture)", "$(rootpath :perf_counter_shim_fixture)"],
+  data = ["binary_runtime_paths_fixture", "perf_counter_shim_fixture"],
+  srcs = ["tests/binary_runtime_paths_test.cpp", "tests/test_process.hpp"],
+  copts = ["-std=c++17"],
+  deps = ["@googletest//:gtest", "//libbeam:libbeam"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
   name = "bif_monotonic_time_0_fixture",
   srcs = ["tests/fixtures/bif_monotonic_time_0.erl"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],

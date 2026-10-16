@@ -7513,14 +7513,14 @@ OpCase(i_bs_test_unit8_fx): packed=I[1]; context=xb(packed>>BEAM_WIDE_SHIFT); go
   OpCase(i_bs_get_float2_yftstd): context=yb(I[1]);
   i_bs_get_float2__execute: {
     Eterm packed=I[3],size_term; Uint live=tb(packed&BEAM_TIGHT_MASK);
-    Uint flags=tb((packed>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK);
+    Uint unit_flags=tb((packed>>BEAM_TIGHT_SHIFT)&BEAM_TIGHT_MASK);
+    Uint flags=unit_flags&7;
     destination=db(packed>>(2*BEAM_TIGHT_SHIFT)); fail=(Sint)I[2]; GetSource(I[4],size_term);
     if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) goto malformed_code;
     LbSubBits *sub=(LbSubBits *)boxed_val(context);
     if(!lb_is_match_context(sub) || sub->start>sub->end || live>MAX_REG || !is_small(size_term) ||
        signed_val(size_term)<0 || signed_val(size_term)>64) goto i_bs_get_float2__fail;
-    Uint unit_flags=tb(I[5]),unit=unit_flags>>3,width=(Uint)signed_val(size_term);
-    flags=unit_flags&7;
+    Uint unit=unit_flags>>3,width=(Uint)signed_val(size_term);
     if(!unit || (flags&~BSF_LITTLE) || width>64/unit) goto i_bs_get_float2__fail;
     width*=unit;
     if(width!=0 && width!=16 && width!=32 && width!=64) goto i_bs_get_float2__fail;
@@ -7547,7 +7547,7 @@ OpCase(i_bs_test_unit8_fx): packed=I[1]; context=xb(packed>>BEAM_WIDE_SHIFT); go
     if(!isfinite(number)) goto i_bs_get_float2__fail;
     Eterm *target=REG_TARGET_PTR(destination); HEAP_SPACE_VERIFIED(2);
     HTOP[0]=_make_header(1,FLOAT_SUBTAG); memcpy(HTOP+1,&number,sizeof(number));
-    *target=make_boxed(HTOP); HTOP+=2; sub->start+=width; I+=6; ASSERT(VALID_INSTR(*I)); Goto(*I);
+    *target=make_boxed(HTOP); HTOP+=2; sub->start+=width; I+=5; ASSERT(VALID_INSTR(*I)); Goto(*I);
   }
   i_bs_get_float2__fail: I+=fail; ASSERT(VALID_INSTR(*I)); Goto(*I);
 }
