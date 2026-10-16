@@ -127,9 +127,12 @@ Eterm lb_bif_get_keys_0(LbProcess *p,Eterm *args,const BeamInstr *pc)
     size_t count=0;
     for(unsigned i=0;i<LB_PD_SLOTS;++i) {
         Eterm bucket=dict->data[i];
-        if(is_tuple(bucket)) { if(!charge(p,1)) return THE_NON_VALUE; ++count; }
-        else for(Eterm tail=bucket;is_list(tail);tail=CDR(list_val(tail))) {
-            if(!charge(p,1)) return THE_NON_VALUE; ++count;
+        if(is_tuple(bucket)) {
+            if(!charge(p,1)) return THE_NON_VALUE;
+            ++count;
+        } else for(Eterm tail=bucket;is_list(tail);tail=CDR(list_val(tail))) {
+            if(!charge(p,1)) return THE_NON_VALUE;
+            ++count;
         }
     }
     size_t words,need,construction;
