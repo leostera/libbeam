@@ -284,32 +284,65 @@ Eterm lb_process_exception(const LbProcess *p) { return p && p->status==LB_PROCE
 Eterm lb_process_exception_value(const LbProcess *p) { return p && p->status==LB_PROCESS_EXCEPTION?p->exception_value:THE_NON_VALUE; }
 Eterm lb_process_exception_info(const LbProcess *p) { return p && p->status==LB_PROCESS_EXCEPTION && (p->freason&LB_EXF_HAS_EXT_INFO)?p->fvalue:THE_NON_VALUE; }
 size_t lb_process_collections(const LbProcess *p) { return p?p->collections:0; }
-static int pc_valid(LbProcess *p,const BeamInstr *pc)
+static int pc_valid_work(LbProcess *p,const BeamInstr *pc,size_t *validation_work)
 {
-    LbCodeModule *m; Uint address=(Uint)pc; size_t i;
+    LbCodeModule *m; Uint address=(Uint)pc; size_t i,work=0;
+    if(validation_work) *validation_work=0;
     if(pc==lb_host_return) return 1;
     if(pc==p->entry_module->space->apply_export.dispatch.addresses[0] ||
        pc==p->entry_module->space->apply_fun_export.dispatch.addresses[0]) return 1;
-    for(i=0;i<LB_NATIVE_COUNT;++i) if(pc==p->entry_module->space->natives[i].dispatch.addresses[0]) return 1;
     if(address%sizeof(BeamInstr)) return 0;
-    for(m=p->entry_module->space->modules;m;m=m->next)
-        if(m->words && address>=(Uint)m->words && address<(Uint)(m->words+m->word_count)) return 1;
+    m=p->pc_module;
+    if(m && m->words && address>=(Uint)m->words && address<(Uint)(m->words+m->word_count)) return 1;
+    if(pc==p->pc_native) return 1;
+    for(m=p->entry_module->space->modules;m;m=m->next) {
+        work+=2; /* Pay only when an execution edge changes code ranges. */
+        if(m->words && address>=(Uint)m->words && address<(Uint)(m->words+m->word_count)) {
+            p->pc_module=m;
+            if(validation_work) *validation_work=work;
+            return 1;
+        }
+    }
+    for(i=0;i<LB_NATIVE_COUNT;++i) {
+        ++work;
+        if(pc==p->entry_module->space->natives[i].dispatch.addresses[0]) {
+            p->pc_native=pc;
+            if(validation_work) *validation_work=work;
+            return 1;
+        }
+    }
+    if(validation_work) *validation_work=work;
     return 0;
+}
+static int pc_valid(LbProcess *p,const BeamInstr *pc)
+{ return pc_valid_work(p,pc,NULL); }
+static const LbMFA *module_entry_mfa(LbProcess *p,LbCodeModule *module,const BeamInstr *pc)
+{
+    for(size_t i=0;i<module->export_count;++i) {
+        if(!lb_work_domain_charge(module->space->domain,1)) return NULL;
+        if(module->exports[i].dispatch.addresses[0]==pc) return &module->exports[i].info.mfa;
+    }
+    return private_mfa(module,pc,&p->local_mfa)?&p->local_mfa:NULL;
 }
 static const LbMFA *entry_mfa(LbProcess *p,const BeamInstr *pc)
 {
     LbCodeSpace *space=p->entry_module->space;
-    LbCodeModule *module; Export *e;
-    for(e=space->exports;e;e=e->next) {
+    LbCodeModule *module=p->pc_module; Uint address=(Uint)pc;
+    if(pc==space->apply_export.dispatch.addresses[0]) return &space->apply_export.info.mfa;
+    if(pc==space->apply_fun_export.dispatch.addresses[0]) return &space->apply_fun_export.info.mfa;
+    /* Module ranges and their function directories are immutable after
+     * publication; only a code-range transition scans the namespace. */
+    if(module && module->words && address>=(Uint)module->words &&
+       address<(Uint)(module->words+module->word_count)) return module_entry_mfa(p,module,pc);
+    for(size_t i=0;i<LB_NATIVE_COUNT;++i) {
         if(!lb_work_domain_charge(space->domain,1)) return NULL;
-        if(e->dispatch.addresses[0]==pc) return &e->info.mfa;
+        if(pc==space->natives[i].dispatch.addresses[0]) return &space->natives[i].info.mfa;
     }
-    /* Local calls can yield at non-exported entries. Use the emitted native
-     * function directory, not an export stub or a fabricated scheduling MFA.
-     * memcpy avoids aliasing instruction-word storage as an LbMFA object. */
     for(module=space->modules;module;module=module->next) {
         if(!lb_work_domain_charge(space->domain,1)) return NULL;
-        if(private_mfa(module,pc,&p->local_mfa)) return &p->local_mfa;
+        if(!module->words || address<(Uint)module->words || address>=(Uint)(module->words+module->word_count)) continue;
+        p->pc_module=module;
+        return module_entry_mfa(p,module,pc);
     }
     return NULL;
 }
@@ -422,13 +455,13 @@ dispatch:
     /* Candidate examination is sender-causal, before import/removal/matching. */
     if(next_op==op_i_loop_rec_f && !lb_work_receive_begin(c_p,*c_p->messages.save)) goto resource_limit;
     if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
-    /* pc_valid is also an assertion predicate: it must remain pure. Pay its
-     * frozen native table bound and private-directory scan here, not inside
-     * CHECK_ARGS where Debug-only validation would distort admission credit. */
-    if(!lb_work_domain_charge(c_p->entry_module->space->domain,LB_NATIVE_COUNT+1u)) goto work_failure;
-    for(LbCodeModule *module=c_p->entry_module->space->modules;module;module=module->next)
-        if(!lb_work_domain_charge(module->space->domain,2)) goto work_failure;
-    if(!pc_valid(c_p,I) || !VALID_INSTR(next_op) || (c_p->decimal && next_op!=op_call_bif_W)) goto malformed_code;
+    /* Cache the last immutable module range so the steady-state PC guard is
+     * constant-time. Charge full native/private-directory scans only on a
+     * code-range transition, not inside CHECK_ARGS' Debug-only validation. */
+    size_t validation_work=0;
+    if(!pc_valid_work(c_p,I,&validation_work)) goto malformed_code;
+    if(validation_work && !lb_work_domain_charge(c_p->entry_module->space->domain,validation_work)) goto work_failure;
+    if(!VALID_INSTR(next_op) || (c_p->decimal && next_op!=op_call_bif_W)) goto malformed_code;
     {
         Uint cost; LbAllocStatus held=lb_fun_prepare_instruction(c_p,I,&cost);
         FCALLS-=(Sint)cost;

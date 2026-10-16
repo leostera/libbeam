@@ -129,6 +129,18 @@ static void consumption(LbCodeSpace *space)
         verify(space,&p,reset?LB_CODE_OK:LB_CODE_FORMAT);
     }
 }
+static void exported_private_append_falls_back(LbCodeSpace *space)
+{
+    Program p; begin(&p); ADD(&p,allocate_2,U(1),U(2)); ADD(&p,move_2,X(1),Y(0)); init(&p);
+    BeamOp *op=binary(&p,am_private_append,Y(0),X(0),P,1);
+    ADD(&p,deallocate_1,U(1)); ret(&p);
+    LbBeamProgram program={.ops=p.ops}; Export exported={0}; LbCodeModule module={0};
+    LoaderState st={.space=space,.program=&program,.label_count=12,.module_code=&module};
+    exported.info.mfa=(LbMFA){am_erlang,am_binary,2};
+    module.name=am_erlang; module.exports=&exported; module.export_count=1;
+    CHECK(lb_verify_program(&st)==LB_CODE_OK);
+    CHECK(op->a[6].type==TAG_a && op->a[6].val==am_append);
+}
 static void joins_and_revocation(LbCodeSpace *space)
 {
     Program p;
@@ -197,7 +209,7 @@ int main(int argc,char **argv)
 {
     Memory m={0}; LbSystemAllocator callbacks={&m,allocate,release}; LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(&callbacks,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    live_and_destinations(space); consumption(space); joins_and_revocation(space);
+    live_and_destinations(space); consumption(space); exported_private_append_falls_back(space); joins_and_revocation(space);
     Program p; begin(&p); add(&p,genop_bs_init_writable_0,NULL,0); ret(&p);
     verify(space,&p,LB_CODE_FORMAT); /* Native allocating body-call frame required. */
     begin(&p); init(&p); binary(&p,am_private_append,X(0),X(0),P,1); ret(&p);

@@ -9,12 +9,7 @@
 static LbBeamOp *new_op(LbBeamProgram *p)
 {
     LbBeamOp *op;
-    if(!p->free_ops) {
-        LbOpBlock *block=lb_palloc(p,1,sizeof(*block)); size_t i;
-        if(!block) return NULL;
-        for(i=0;i<31;++i) block->ops[i].next=&block->ops[i+1];
-        p->free_ops=block->ops;
-    }
+    if(!p->free_ops && !lb_program_allocate_op_block(p,&p->free_ops)) return NULL;
     op=p->free_ops; p->free_ops=op->next; op->next=NULL; op->a=op->def_args;
     return op;
 }

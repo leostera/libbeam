@@ -24,4 +24,6 @@ struct LbAllocDomain {
 /* Fresh zeroed storage only. A child is destroyed before its containing control.
  * Init performs no callback/allocation; destroy refuses live allocations/users. */
 LbAllocStatus lb_alloc_scope_init(LbAllocDomain *parent,LbAllocDomain *storage,size_t limit);
+/* Trusted internal release for exact live pointers returned by this domain. */
+LbAllocStatus lb_alloc_domain_release_owned(LbAllocDomain *,void *);
 #endif

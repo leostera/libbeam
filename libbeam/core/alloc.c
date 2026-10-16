@@ -12,7 +12,7 @@
  * Preserve unknown-pointer checking: release scans owned nodes before reading
  * their header. Every simultaneously retained block counts through physical free. */
 union LbBlock {
-    struct { LbBlock *next; size_t charge; } info;
+    struct { LbBlock *next,*prev; size_t charge; } info;
     max_align_t alignment;
 };
 static void *system_allocate(void *context,size_t size)
@@ -41,6 +41,7 @@ LbAllocStatus lb_alloc_scope_init(LbAllocDomain *parent,LbAllocDomain *scope,siz
     if(!parent || !scope || parent==scope || !limit || !parent->system.allocate || scope->system.allocate)
         return LB_ALLOC_INVALID;
     if(parent->children==SIZE_MAX) return LB_ALLOC_LIMIT;
+    memset(scope,0,sizeof(*scope));
     scope->system=parent->system; scope->parent=parent; scope->limit=limit;
     ++parent->children; return LB_ALLOC_OK;
 }
@@ -49,34 +50,41 @@ LbAllocStatus lb_alloc_domain_allocate(LbAllocDomain *domain,size_t size,void **
     LbBlock *block; size_t charge;
     if(!out) return LB_ALLOC_INVALID;
     *out=NULL; if(!domain || !size || !domain->system.allocate) return LB_ALLOC_INVALID;
-    /* Preserve the raw unbounded bootstrap API's impossible-size OOM result. */
     if(size>SIZE_MAX-sizeof(*block)) return failed(domain,domain->parent?LB_ALLOC_LIMIT:LB_ALLOC_NO_MEMORY);
     charge=sizeof(*block)+size;
     if(charge>domain->limit-domain->current) return failed(domain,LB_ALLOC_LIMIT);
-    /* Conservative initialization/preparation estimate; spare backing remains
-     * memory-charged independently. The allocation callback is not guest code. */
     if(!lb_work_domain_charge(domain,1+size/128+(size%128!=0))) return LB_ALLOC_WORK_LIMIT;
     block=domain->system.allocate(domain->system.context,charge);
     if(!block) return failed(domain,LB_ALLOC_NO_MEMORY);
-    block->info.next=domain->blocks; block->info.charge=charge; domain->blocks=block;
+    block->info.next=domain->blocks; block->info.prev=NULL; block->info.charge=charge;
+    if(domain->blocks) domain->blocks->info.prev=block;
+    domain->blocks=block;
     assert(domain->block_count<SIZE_MAX); ++domain->block_count;
     domain->current+=charge; if(domain->current>domain->peak) domain->peak=domain->current;
     *out=block+1; return LB_ALLOC_OK;
 }
+static LbAllocStatus release_block(LbAllocDomain *domain,LbBlock *block)
+{
+    size_t charge=block->info.charge;
+    if(!charge || charge>domain->current) return LB_ALLOC_INVALID;
+    if(block->info.prev) block->info.prev->info.next=block->info.next;
+    else domain->blocks=block->info.next;
+    if(block->info.next) block->info.next->info.prev=block->info.prev;
+    domain->system.release(domain->system.context,block);
+    assert(domain->block_count); --domain->block_count; domain->current-=charge;
+    return LB_ALLOC_OK;
+}
+LbAllocStatus lb_alloc_domain_release_owned(LbAllocDomain *domain,void *allocation)
+{
+    if(!domain || !allocation) return LB_ALLOC_INVALID;
+    return release_block(domain,(LbBlock *)allocation-1);
+}
 LbAllocStatus lb_alloc_domain_release(LbAllocDomain *domain,void *allocation)
 {
-    LbBlock **link,*block;
+    LbBlock *block;
     if(!domain || !allocation) return LB_ALLOC_INVALID;
-    for(link=&domain->blocks;(block=*link)!=NULL;link=&block->info.next) {
-        if((void *)(block+1)==allocation) {
-            size_t charge=block->info.charge;
-            *link=block->info.next;
-            if(charge>domain->current) abort();
-            domain->system.release(domain->system.context,block);
-            assert(domain->block_count); --domain->block_count;
-            domain->current-=charge; return LB_ALLOC_OK;
-        }
-    }
+    for(block=domain->blocks;block;block=block->info.next)
+        if((void *)(block+1)==allocation) return release_block(domain,block);
     return LB_ALLOC_INVALID;
 }
 LbAllocStatus lb_alloc_domain_destroy(LbAllocDomain *domain)

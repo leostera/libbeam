@@ -31,6 +31,8 @@ typedef struct LbCatchFrame {
 } LbCatchFrame;
 struct LbProcess {
     LbCodeModule *entry_module;
+    LbCodeModule *pc_module; /* cached immutable code range in this namespace */
+    const BeamInstr *pc_native; /* cached immutable native dispatch entry */
     LbWorld *world; /* borrowed C task owner; task retirement precedes world destruction */
     LbWorkBudget *work_birth,*work_active,*work_previous; /* owned stable metadata leases */
     LbMessage *work_candidate; /* borrowed queue node, never a moving term */

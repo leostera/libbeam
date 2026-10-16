@@ -120,20 +120,13 @@ static int binary_descriptors_valid(LoaderState *st,const BeamOp *op)
 BeamOp *lb_load_new_op(LoaderState *st)
 {
     BeamOp *op;
-    if(!st->free_ops) {
-        BeamOp *block=lb_palloc(st->program,32,sizeof(*block)); size_t i;
-        if(!block) return NULL;
-        for(i=0;i<31;++i) block[i].next=&block[i+1];
-        st->free_ops=block;
-    }
+    if(!st->free_ops && !lb_program_allocate_op_block(st->program,&st->free_ops)) return NULL;
     op=st->free_ops; st->free_ops=op->next;
     memset(op,0,sizeof(*op)); op->a=op->def_args;
     return op;
 }
 void lb_load_free_op(LoaderState *st,BeamOp *op)
 {
-    /* Expanded arrays remain owned by the preparation arena until destruction.
-     * Reused operations never retain pointers into another operation's array. */
     op->next=st->free_ops; st->free_ops=op;
 }
 static int needs_nif_padding(LoaderState *st)

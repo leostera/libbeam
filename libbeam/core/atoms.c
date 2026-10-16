@@ -18,6 +18,7 @@
  * adaptations. Not the global atom table, and not a parallel mock identity map.
  */
 #include "atoms.h"
+#include "alloc_internal.h"
 #include "utf8.h"
 #include <stdlib.h>
 #include "lb_atoms_generated.inc"
@@ -37,17 +38,17 @@ struct LbAtomTable {
 struct LbAtomTransaction {
     LbAtomTable *table;
     AtomEntry *pending, **stage, **index, **buckets;
-    size_t added, capacity, slots;
+    size_t added, capacity, slots, stage_slots;
 };
 struct LbAtomBinding {
     LbAtomTable *table;
     size_t count;
     Eterm terms[];
 };
-typedef LbBeamBytes (*NameSource)(const void *, size_t);
+typedef LbAtomNameReader NameSource;
 static void release_owned(LbAllocDomain *owner, void *p)
 {
-    if (p && lb_alloc_domain_release(owner, p) != LB_ALLOC_OK) abort();
+    if (p && lb_alloc_domain_release_owned(owner,p)!=LB_ALLOC_OK) abort();
 }
 static void *allocate(LbAtomTable *table, size_t count, size_t width)
 {
@@ -97,28 +98,25 @@ size_t lb_atoms_predefined_count(void)
 {
     return sizeof(lb_predefined_names) / sizeof(lb_predefined_names[0]) - 1;
 }
-static LbBeamBytes predefined(const void *unused, size_t i)
+static int predefined(void *unused,size_t i,LbBeamBytes *name,Eterm **destination)
 {
-    (void)unused;
-    return (LbBeamBytes){(const unsigned char *)lb_predefined_names[i], strlen(lb_predefined_names[i])};
+    (void)unused; *name=(LbBeamBytes){(const unsigned char *)lb_predefined_names[i],strlen(lb_predefined_names[i])};
+    *destination=NULL; return 1;
 }
-static LbBeamBytes from_image(const void *image, size_t i)
+static int from_image(void *image,size_t i,LbBeamBytes *name,Eterm **destination)
 {
-    LbBeamBytes result;
-    if (lb_beam_image_atom(image, (uint32_t)i + 1, &result) != LB_BEAM_OK) abort();
-    return result;
+    *destination=NULL; return lb_beam_image_atom(image,(uint32_t)i+1,name)==LB_BEAM_OK;
 }
-static LbBeamBytes one_name(const void *name, size_t i)
+static int one_name(void *name,size_t i,LbBeamBytes *result,Eterm **destination)
 {
-    (void)i;
-    return *(const LbBeamBytes *)name;
+    (void)i; *result=*(const LbBeamBytes *)name; *destination=NULL; return 1;
 }
 /* All fallible work is staged. Existing hash chains/count/index/backing remain
  * untouched until every new name and any replacement metadata are allocated.
  * Thus a failed binding cannot leak atom identities or capacity into its owner.
  */
-static LbAtomStatus prepare_batch(LbAtomTable *t, size_t count, NameSource source,
-                                  const void *context, Eterm *terms, LbAtomTransaction **out)
+static LbAtomStatus prepare_batch(LbAtomTable *t,size_t count,NameSource source,
+                                  void *context,Eterm *terms,LbAtomTransaction **out)
 {
     LbAtomTransaction *tx;
     AtomEntry *pending = NULL, **stage = NULL, **new_index = NULL, **new_buckets = NULL;
@@ -135,8 +133,9 @@ static LbAtomStatus prepare_batch(LbAtomTable *t, size_t count, NameSource sourc
         stage_slots *= 2;
     }
     for (i = 0; i < count; ++i) {
-        LbBeamBytes name = source(context, i);
+        LbBeamBytes name; Eterm *destination=NULL;
         AtomEntry *entry;
+        if(!source(context,i,&name,&destination)) { status=LB_ATOM_INVALID; goto fail; }
         Uint hash;
         size_t bytes;
         if (!lb_utf8_atom_validate(name.data, name.size)) { status = LB_ATOM_BAD_UTF8; goto fail; }
@@ -157,6 +156,7 @@ static LbAtomStatus prepare_batch(LbAtomTable *t, size_t count, NameSource sourc
             stage[slot(stage_slots, hash)] = entry;
         }
         if (terms) terms[i] = make_atom(entry->index);
+        if(destination) *destination=make_atom(entry->index);
     }
     if (!added) goto prepared;
     if (!capacity) capacity = 8;
@@ -181,7 +181,7 @@ static LbAtomStatus prepare_batch(LbAtomTable *t, size_t count, NameSource sourc
     }
 prepared:
     tx->pending=pending; tx->stage=stage; tx->index=new_index; tx->buckets=new_buckets;
-    tx->capacity=capacity; tx->slots=slots; tx->added=added;
+    tx->capacity=capacity; tx->slots=slots; tx->stage_slots=stage_slots; tx->added=added;
     t->transaction=tx; *out=tx;
     return LB_ATOM_OK;
 fail:
@@ -233,12 +233,23 @@ void lb_atoms_commit(LbAtomTransaction *tx)
     }
     release_owned(t->owner,tx->stage); t->transaction=NULL; release_owned(t->owner,tx);
 }
-static LbAtomStatus intern_batch(LbAtomTable *t,size_t count,NameSource source,const void *context,Eterm *terms)
+static LbAtomStatus intern_batch(LbAtomTable *t,size_t count,NameSource source,void *context,Eterm *terms)
 {
     LbAtomTransaction *tx;
     LbAtomStatus status=prepare_batch(t,count,source,context,terms,&tx);
     if (status==LB_ATOM_OK) lb_atoms_commit(tx);
     return status;
+}
+LbAtomStatus lb_atoms_transaction_find(const LbAtomTransaction *tx,const void *data,size_t size,Eterm *out)
+{
+    LbBeamBytes name={data,size}; AtomEntry *entry;
+    if(!out) return LB_ATOM_INVALID;
+    *out=THE_NON_VALUE;
+    if(!tx || (!data && size) || !lb_utf8_atom_validate(data,size)) return LB_ATOM_INVALID;
+    entry=find(tx->table->bucket,tx->table->slots,name,atom_hash(data,size));
+    if(!entry && tx->stage) entry=find(tx->stage,tx->stage_slots,name,atom_hash(data,size));
+    if(!entry) return LB_ATOM_NOT_FOUND;
+    *out=make_atom(entry->index); return LB_ATOM_OK;
 }
 LbAtomStatus lb_atoms_transaction_name(const LbAtomTransaction *tx,Eterm term,LbBeamBytes *out)
 {
@@ -293,21 +304,29 @@ LbAtomStatus lb_atoms_intern(LbAtomTable *t, const void *data, size_t size, Eter
     if (status == LB_ATOM_OK) *out = term;
     return status;
 }
-static LbBeamBytes name_array(const void *names, size_t i)
+static int name_array(void *context,size_t i,LbBeamBytes *name,Eterm **destination)
 {
-    return ((const LbBeamBytes *)names)[i];
+    *name=((const LbBeamBytes *)context)[i]; *destination=NULL; return 1;
 }
 LbAtomStatus lb_atoms_prepare_names(LbAtomTable *t,const LbBeamBytes *names,size_t count,Eterm *terms,LbAtomTransaction **out)
 {
     if (!out) return LB_ATOM_INVALID;
     *out=NULL;
     if (!t || (count && (!names || !terms))) return LB_ATOM_INVALID;
-    return prepare_batch(t,count,name_array,names,terms,out);
+    return prepare_batch(t,count,name_array,(void *)names,terms,out);
+}
+LbAtomStatus lb_atoms_prepare_names_stream(LbAtomTable *t,size_t count,LbAtomNameReader source,
+                                           void *context,LbAtomTransaction **out)
+{
+    if(!out) return LB_ATOM_INVALID;
+    *out=NULL;
+    if(!t || (count && !source)) return LB_ATOM_INVALID;
+    return prepare_batch(t,count,source,context,NULL,out);
 }
 LbAtomStatus lb_atoms_intern_names(LbAtomTable *t, const LbBeamBytes *names, size_t count, Eterm *out)
 {
     if (!t || (count && (!names || !out))) return LB_ATOM_INVALID;
-    return intern_batch(t, count, name_array, names, out);
+    return intern_batch(t,count,name_array,(void *)names,out);
 }
 LbAtomStatus lb_atoms_find(const LbAtomTable *t, const void *data, size_t size, Eterm *out)
 {
@@ -364,7 +383,7 @@ LbAtomStatus lb_atom_binding_create(LbAtomTable *t, const LbBeamImage *image, Lb
     binding = allocate(t, 1, bytes);
     if (!binding) return LB_ATOM_NO_MEMORY;
     binding->table = t; binding->count = (size_t)info->atom_count + 1; binding->terms[0] = NIL;
-    status = intern_batch(t, info->atom_count, from_image, image, binding->terms + 1);
+    status = intern_batch(t,info->atom_count,from_image,(void *)image,binding->terms+1);
     if (status != LB_ATOM_OK) { release_owned(t->owner, binding); return status; }
     ++t->borrowers; /* limit checked before transaction; serialized caller */
     *out = binding;

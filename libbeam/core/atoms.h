@@ -12,6 +12,7 @@ typedef enum {
     LB_ATOM_OK, LB_ATOM_INVALID, LB_ATOM_BAD_UTF8, LB_ATOM_LIMIT,
     LB_ATOM_NO_MEMORY, LB_ATOM_BUSY, LB_ATOM_NOT_FOUND
 } LbAtomStatus;
+typedef int (*LbAtomNameReader)(void *,size_t,LbBeamBytes *,Eterm **);
 /* Serialized internal C interface. Tables own their strings and stable indices;
  * bare Eterms carry no owner bits. Never interpret a foreign term in this table.
  * Domain and caller-supplied allocation callbacks outlive the table/bindings.
@@ -29,7 +30,9 @@ LbAtomStatus lb_atoms_intern_names(LbAtomTable *, const LbBeamBytes *, size_t, E
  * One serialized writer transaction may be open. Reads see committed names;
  * other writes and destruction refuse busy. Commit is allocation-free. */
 LbAtomStatus lb_atoms_prepare_names(LbAtomTable *, const LbBeamBytes *, size_t, Eterm *, LbAtomTransaction **);
+LbAtomStatus lb_atoms_prepare_names_stream(LbAtomTable *,size_t,LbAtomNameReader,void *,LbAtomTransaction **);
 LbAtomStatus lb_atoms_transaction_name(const LbAtomTransaction *, Eterm, LbBeamBytes *);
+LbAtomStatus lb_atoms_transaction_find(const LbAtomTransaction *,const void *,size_t,Eterm *);
 void lb_atoms_commit(LbAtomTransaction *);
 void lb_atoms_abort(LbAtomTransaction *);
 LbAtomStatus lb_atoms_find(const LbAtomTable *, const void *, size_t, Eterm *);

@@ -274,6 +274,18 @@ protected:
 TEST_F(HelloWorker, DefaultGreeting) {
     EXPECT_EQ(invoke(request("GET", "/hello")), response(200, "Hello, world!\n"));
 }
+TEST_F(HelloWorker, ClosureFitsDefaultMemoryBudget) {
+    auto peer=take(engine->create_isolate());
+    const auto loaded=load(peer);
+    ASSERT_FALSE(loaded) << (loaded?loaded->message:"");
+    auto receipt=take(peer.stop());
+    EXPECT_FALSE(receipt.wait_until(deadline()));
+    const auto usage=take(peer.resource_usage());
+    EXPECT_TRUE(usage.closed);
+    EXPECT_EQ(usage.memory_current,0u);
+    EXPECT_EQ(usage.limits.memory_limit_bytes,256u*1024u*1024u);
+    EXPECT_EQ(usage.limits.invocation_work_limit,10000000u);
+}
 TEST_F(HelloWorker, NamedAndEncodedGreetings) {
     EXPECT_EQ(invoke(request("GET", "/hello", "name=Leo")), response(200, "Hello, Leo!\n"));
     EXPECT_EQ(invoke(request("GET", "/hello", "name=Hello%20World%21")), response(200, "Hello, Hello World!!\n"));

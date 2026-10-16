@@ -2,6 +2,7 @@
  * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  */
 #include "beam_program_internal.h"
+#include "alloc_internal.h"
 #include "utf8.h"
 #include "work_budget.h"
 #include <stdlib.h>
@@ -27,16 +28,77 @@ void *lb_palloc(LbBeamProgram *p,size_t count,size_t size)
     if(lb_alloc_domain_allocate(p->domain,bytes,&memory)!=LB_ALLOC_OK) {
         lb_pfail(p,LB_BEAM_NO_MEMORY); return NULL;
     }
-    block=memory; block->link.next=p->blocks; p->blocks=block; p->bytes+=bytes; ++p->block_count;
+    block=memory; block->link.previous=NULL; block->link.next=p->blocks; block->link.bytes=bytes;
+    if(p->blocks) p->blocks->link.previous=block;
+    p->blocks=block; p->bytes+=bytes; ++p->block_count;
     memset(block+1,0,bytes-sizeof(*block)); return block+1;
+}
+void lb_pfree(LbBeamProgram *p,void *pointer)
+{
+    LbPrepBlock *block;
+    if(!p || !pointer) return;
+    block=(LbPrepBlock *)pointer-1;
+    if(block->link.previous) block->link.previous->link.next=block->link.next;
+    else { if(p->blocks!=block) abort(); p->blocks=block->link.next; }
+    if(block->link.next) block->link.next->link.previous=block->link.previous;
+    if(p->bytes<block->link.bytes || !p->block_count) abort();
+    p->bytes-=block->link.bytes; --p->block_count;
+    if(lb_alloc_domain_release_owned(p->domain,block)!=LB_ALLOC_OK) abort();
+}
+int lb_program_allocate_op_block(LbBeamProgram *p,LbBeamOp **free_ops)
+{
+    size_t capacity=p->op_block_capacity? p->op_block_capacity*2 : 32,bytes,ops_bytes;
+    LbOpBlock *block;
+    if(!p || !free_ops) return 0;
+    if(capacity>4096) capacity=4096;
+    if(capacity<p->op_block_capacity || !lb_size_mul(capacity,sizeof(*block->ops),&ops_bytes) ||
+       !lb_size_add(offsetof(LbOpBlock,ops),ops_bytes,&bytes)) return lb_pfail(p,LB_BEAM_LIMIT);
+    block=lb_palloc(p,1,bytes); if(!block) return 0;
+    block->next=p->op_blocks; block->capacity=capacity; p->op_blocks=block; p->op_block_capacity=capacity;
+    for(size_t i=0;i<capacity;++i) block->ops[i].next=i+1<capacity?&block->ops[i+1]:NULL;
+    *free_ops=block->ops;
+    return 1;
+}
+void lb_program_discard_ops(LbBeamProgram *p,int discard_chain)
+{
+    if(!p) return;
+    if(discard_chain) for(LbBeamOp *op=p->ops;op;op=op->next)
+        if(op->a && op->a!=op->def_args) { lb_pfree(p,op->a); op->a=op->def_args; }
+    while(p->op_blocks) {
+        LbOpBlock *block=p->op_blocks; p->op_blocks=block->next; lb_pfree(p,block);
+    }
+    p->ops=p->free_ops=NULL;
 }
 int lb_pname(LbBeamProgram *p,LbBeamBytes name,Eterm *destination)
 {
     LbNamePatch *patch;
     if(!lb_utf8_atom_validate(name.data,name.size)) return lb_pfail(p,LB_BEAM_BAD_FORMAT);
-    patch=lb_palloc(p,1,sizeof(*patch)); if(!patch) return 0;
+    if(p->atom_lookup) {
+        if(lb_atoms_transaction_find(p->atom_lookup,name.data,name.size,destination)!=LB_ATOM_OK)
+            return lb_pfail(p,LB_BEAM_BAD_FORMAT);
+        return 1;
+    }
+    if(!p->name_blocks || p->name_blocks->used==p->name_blocks->capacity) {
+        size_t capacity=p->name_block_capacity? p->name_block_capacity*2 : 32,patch_bytes,bytes;
+        if(capacity>1024) capacity=1024;
+        if(capacity<p->name_block_capacity ||
+           !lb_size_mul(capacity,sizeof(LbNamePatch),&patch_bytes) ||
+           !lb_size_add(offsetof(LbNameBlock,patches),patch_bytes,&bytes)) return lb_pfail(p,LB_BEAM_LIMIT);
+        LbNameBlock *block=lb_palloc(p,1,bytes); if(!block) return 0;
+        block->next=p->name_blocks; block->capacity=capacity;
+        p->name_blocks=block; p->name_block_capacity=capacity;
+    }
+    patch=&p->name_blocks->patches[p->name_blocks->used++];
     patch->name=name; patch->destination=destination; *destination=THE_NON_VALUE;
     patch->next=p->names; p->names=patch; ++p->name_count; return 1;
+}
+void lb_program_discard_names(LbBeamProgram *p)
+{
+    if(!p) return;
+    while(p->name_blocks) {
+        LbNameBlock *block=p->name_blocks; p->name_blocks=block->next; lb_pfree(p,block);
+    }
+    p->names=NULL; p->name_count=0;
 }
 void lb_beam_program_destroy(LbBeamProgram *p)
 {
@@ -46,7 +108,7 @@ void lb_beam_program_destroy(LbBeamProgram *p)
     lb_offheap_clear(&p->off_heap);
     while(p->blocks) {
         LbPrepBlock *block=p->blocks; p->blocks=block->link.next;
-        if(lb_alloc_domain_release(domain,block)!=LB_ALLOC_OK) abort();
+        if(lb_alloc_domain_release_owned(domain,block)!=LB_ALLOC_OK) abort();
         assert(p->block_count); --p->block_count;
     }
     lb_beam_image_destroy(p->image);
@@ -89,8 +151,10 @@ static LbBeamStatus begin(LbAllocDomain *domain,LbAtomTable *atoms,const void *b
         if(lb_beam_image_atom(p->image,(uint32_t)i,&name)!=LB_BEAM_OK) abort();
         if(!lb_pname(p,name,&p->file_atoms[i])) goto fail;
     }
-    if(!lb_pliterals(p) || !lb_pmetadata(p) || !lb_pdecode(p)) goto fail;
-    if(executable && !lb_pmodule_info(p)) goto fail;
+    if(bind_atoms) {
+        if(!lb_pliterals(p) || !lb_pmetadata(p) || !lb_pdecode(p)) goto fail;
+        if(executable && !lb_pmodule_info(p)) goto fail;
+    } else if(!lb_pliterals(p) || !lb_pmodule_info(p)) goto fail;
     p->error.stage="atom admission";
     ast=lb_atoms_retain(atoms);
     if(ast!=LB_ATOM_OK) { lb_pfail(p,LB_BEAM_LIMIT); goto fail; }
@@ -110,6 +174,7 @@ static LbBeamStatus begin(LbAllocDomain *domain,LbAtomTable *atoms,const void *b
          * transaction. Code transformation/linking may still fail and abort it. */
         i=0;
         for(patch=p->names;patch;patch=patch->next) *patch->destination=terms[i++];
+        lb_program_discard_names(p);
         for(op=p->ops;op;op=op->next) for(i=0;i<op->arity;++i)
             if(op->a[i].type==TAG_a) op->a[i].val=(Sint)p->file_atoms[op->a[i].val];
         for(i=0;i<p->lambda_count;++i) p->lambdas[i].function=p->file_atoms[p->lambdas[i].function];
@@ -133,16 +198,49 @@ LbBeamStatus lb_program_begin_staged(LbAllocDomain *domain,LbAtomTable *atoms,co
 {
     return begin(domain,atoms,bytes,size,out,error,1,0);
 }
+LbBeamStatus lb_program_prepare_staged(LbBeamProgram *p)
+{
+    if(!p || !p->atom_lookup) return LB_BEAM_INVALID_ARGUMENT;
+    p->error.stage="metadata";
+    if(!lb_pmetadata(p)) return p->error.status;
+    return LB_BEAM_OK;
+}
+LbBeamStatus lb_program_decode_staged(LbBeamProgram *p)
+{
+    LbBeamOp *op; size_t i;
+    if(!p || !p->atom_lookup) return LB_BEAM_INVALID_ARGUMENT;
+    p->error.stage="code decode";
+    if(!lb_pdecode(p)) return p->error.status;
+    for(op=p->ops;op;op=op->next) for(i=0;i<op->arity;++i)
+        if(op->a[i].type==TAG_a) op->a[i].val=(Sint)p->file_atoms[op->a[i].val];
+    for(i=0;i<p->lambda_count;++i) p->lambdas[i].function=p->file_atoms[p->lambdas[i].function];
+    if(!lb_pvalidate_maps(p,NULL)) return p->error.status;
+    p->atom_lookup=NULL;
+    return LB_BEAM_OK;
+}
+typedef struct {
+    LbBeamProgram *const *programs;
+    size_t count,module;
+    LbNamePatch *patch;
+} AtomPatchStream;
+static int atom_patch_next(void *context,size_t index,LbBeamBytes *name,Eterm **destination)
+{
+    AtomPatchStream *stream=context;
+    (void)index;
+    while(stream->module<stream->count && !stream->patch) {
+        ++stream->module;
+        if(stream->module<stream->count) stream->patch=stream->programs[stream->module]->names;
+    }
+    if(stream->module>=stream->count) return 0;
+    *name=stream->patch->name; *destination=stream->patch->destination;
+    stream->patch=stream->patch->next;
+    return 1;
+}
 LbBeamStatus lb_program_bind_batch(LbBeamProgram *const *programs,size_t count)
 {
     LbBeamProgram *first;
-    LbBeamBytes *names;
-    Eterm *terms;
-    LbNamePatch *patch;
-    LbBeamOp *op;
-    LbAtomTransaction *transaction=NULL;
-    LbAtomStatus status;
-    size_t total=0,at=0,i,j;
+    LbAtomTransaction *transaction=NULL; LbAtomStatus status;
+    AtomPatchStream stream; size_t total=0,i;
     if(!programs || !count || !programs[0]) return LB_BEAM_INVALID_ARGUMENT;
     first=programs[0];
     for(i=0;i<count;++i) {
@@ -153,12 +251,8 @@ LbBeamStatus lb_program_bind_batch(LbBeamProgram *const *programs,size_t count)
             return LB_BEAM_LIMIT;
         }
     }
-    names=lb_palloc(first,total,sizeof(*names));
-    terms=lb_palloc(first,total,sizeof(*terms));
-    if(!names || !terms) return first->error.status;
-    for(i=0;i<count;++i) for(patch=programs[i]->names;patch;patch=patch->next) names[at++]=patch->name;
-    if(at!=total) abort();
-    status=lb_atoms_prepare_names(first->atoms,names,total,terms,&transaction);
+    stream=(AtomPatchStream){programs,count,0,programs[0]->names};
+    status=lb_atoms_prepare_names_stream(first->atoms,total,atom_patch_next,&stream,&transaction);
     if(status!=LB_ATOM_OK) {
         first->error.stage="atom batch admission";
         lb_pfail(first,status==LB_ATOM_NO_MEMORY?LB_BEAM_NO_MEMORY:
@@ -166,16 +260,10 @@ LbBeamStatus lb_program_bind_batch(LbBeamProgram *const *programs,size_t count)
         return first->error.status;
     }
     first->transaction=transaction;
-    at=0;
     for(i=0;i<count;++i) {
-        LbBeamProgram *p=programs[i];
-        for(patch=p->names;patch;patch=patch->next) *patch->destination=terms[at++];
-        for(op=p->ops;op;op=op->next) for(j=0;j<op->arity;++j)
-            if(op->a[j].type==TAG_a) op->a[j].val=(Sint)p->file_atoms[op->a[j].val];
-        for(j=0;j<p->lambda_count;++j) p->lambdas[j].function=p->file_atoms[p->lambdas[j].function];
-        if(!lb_pvalidate_maps(p,NULL)) return p->error.status;
+        programs[i]->atom_lookup=transaction;
+        lb_program_discard_names(programs[i]);
     }
-    if(at!=total) abort();
     return LB_BEAM_OK;
 }
 void lb_program_commit(LbBeamProgram *p)

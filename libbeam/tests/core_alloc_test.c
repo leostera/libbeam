@@ -50,10 +50,10 @@ static void failure_prefixes(void)
         status = lb_alloc_domain_create(&system, &domain);
         CHECK(status == (fail == 1 ? LB_ALLOC_NO_MEMORY : LB_ALLOC_OK));
         if (status == LB_ALLOC_OK) {
-            for (; count < 4; ++count) {
-                CHECK(lb_alloc_domain_allocate(domain, 17, &blocks[count]) ==
-                      (count + 2 == fail ? LB_ALLOC_NO_MEMORY : LB_ALLOC_OK));
-                if (!blocks[count]) break;
+            for (;count<4;++count) {
+                CHECK(lb_alloc_domain_allocate(domain,17,&blocks[count]) ==
+                      (count+2==fail?LB_ALLOC_NO_MEMORY:LB_ALLOC_OK));
+                if(!blocks[count]) break;
             }
             while (count) CHECK(lb_alloc_domain_release(domain, blocks[--count]) == LB_ALLOC_OK);
             CHECK(lb_alloc_domain_destroy(domain) == LB_ALLOC_OK);

@@ -82,7 +82,7 @@ struct LbCodeModule {
     LbCodeModule *next;
     Eterm name;
     BeamInstr *words;
-    size_t word_count, users, importers, pending_importers;
+    size_t word_count, function_count, users, importers, pending_importers;
     Export *exports;
     size_t export_count;
     Export **imports;

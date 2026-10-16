@@ -118,7 +118,7 @@ typedef struct {
 } Analysis;
 static int function_params_inferable(const LoaderState *,const BeamOp *);
 static int parameter_restarts_match(const Analysis *,size_t,size_t);
-static int parameter_starts_match_nofail(const Analysis *,size_t,size_t);
+static int parameter_starts_match_checked(const Analysis *,size_t,size_t);
 static int function_parameter(const Analysis *,size_t,BeamOpArg);
 static void refine(Flow *,BeamOpArg,uint32_t);
 static int defined(const uint64_t *set,size_t index) { return (int)((set[index/64]>>(index%64))&1); }
@@ -376,6 +376,7 @@ static void refine_tuple_copies(Flow *f,const Node *nodes,size_t index,BeamOpArg
 static LbCodeStatus binary_flow(LoaderState *st,Analysis *w,size_t function,Flow *f,Flow *failed,BeamOp *op)
 {
     BeamOpArg *a=op->a; uint32_t result_shape=BITSTRING_SHAPE; int consuming;
+    st->program->error.offset=op->offset;
     REQUIRE(op->arity>=12 && a[5].type==TAG_u && a[5].val>=6 &&
             (Uint)a[5].val==op->arity-6 && a[5].val%6==0 && (Uint)a[5].val<=65536);
     REQUIRE(a[1].type==TAG_u && (Uint)a[1].val<=UINT32_MAX && a[2].type==TAG_u && roots(f,(Uint)a[2].val));
@@ -385,7 +386,8 @@ static LbCodeStatus binary_flow(LoaderState *st,Analysis *w,size_t function,Flow
     /* A callback may revoke writable ownership. Re-encode only this
      * formerly-proven source as ordinary append on the final strict pass;
      * its native implementation copies volatile views and checks binary type. */
-    if(!w->defer_append_shapes && a[6].type==TAG_a && a[6].val==am_private_append) {
+    if((!w->defer_append_shapes || !w->function_inferable[function]) &&
+       a[6].type==TAG_a && a[6].val==am_private_append) {
         uint32_t source_shape=shape(st,f,a[10]);
         if(source_shape!=APPEND_SHAPE && source_shape!=APPEND_CONTEXT_SHAPE)
             a[6].val=am_append; /* Keep the optimization only with proven writable provenance. */
@@ -680,7 +682,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         int terminal=0;
         w->head=(w->head+1)%n; --w->pending; nodes[index].queued=0;
         if(++steps>16777216) { p->error.stage="flow analysis step limit"; return LB_CODE_LIMIT; }
-        op=nodes[index].op; a=op->a; p->error.stage=gen_opc[op->op].name; p->error.offset=op->offset;
+        op=nodes[index].op; a=op->a;
+        p->error.stage=gen_opc[op->op].name; p->error.offset=op->offset;
         switch(op->op) {
         case genop_int_func_start_5:case genop_label_1:case genop_line_1:case genop_nif_start_0:case genop_on_load_0:break;
         case genop_i_nif_padding_0:terminal=1;break;
@@ -746,7 +749,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_put_tuple2_2:
             REQUIRE(a[1].type==TAG_u && a[1].val>0 && (Uint)a[1].val<=MAX_ARITYVAL && (Uint)a[1].val==op->arity-2);
             REQUIRE(f.heap>=(Uint)a[1].val+1);
-            for(r=2;r<op->arity;++r) REQUIRE(source(st,&f,a[r]));
+            for(r=2;r<op->arity;++r) REQUIRE(root_source(st,&f,a[r]));
             REQUIRE(destination(&f,a[0],TUPLE_SHAPE|(uint32_t)a[1].val)); f.heap-=(Uint)a[1].val+1; break;
         case genop_update_record_5: {
             Uint size,count,destination_register; uint32_t old_destination_shape;
@@ -781,7 +784,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             break;
         }
         case genop_put_list_3:
-            REQUIRE(f.heap>=2 && source(st,&f,a[0]) && source(st,&f,a[1]));
+            REQUIRE(f.heap>=2 && root_source(st,&f,a[0]) && root_source(st,&f,a[1]));
             REQUIRE(destination(&f,a[2],LIST_SHAPE)); f.heap-=2; break;
         case genop_set_tuple_element_3: {
             uint32_t tuple_shape;
@@ -1338,7 +1341,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                      * a failed type check remains a guest exception. */
                     int proven=actual==MATCH_CONTEXT_SHAPE || actual==APPEND_CONTEXT_SHAPE ||
                         (actual==BITSTRING_SHAPE && parameter_restarts_match(w,callee,arg)) ||
-                        (actual==0 && parameter_starts_match_nofail(w,callee,arg));
+                        (actual==0 && parameter_starts_match_checked(w,callee,arg));
                     if(!proven) {
                         static const char *const failures[]={
                             "match-context callsite proof argument 0", "match-context callsite proof argument 1",
@@ -1579,12 +1582,14 @@ static int parameter_restarts_match(const Analysis *w,size_t function,size_t par
 { return parameter_restarts_match_depth(w,function,parameter,0); }
 /* Verification sees upstream bs_start_match4 before its transform. Accept the
  * unknown-input case only if that checked operation is the first body opcode. */
-static int parameter_starts_match_nofail(const Analysis *w,size_t function,size_t parameter)
+static int parameter_starts_match_checked(const Analysis *w,size_t function,size_t parameter)
 {
     size_t start=w->function_starts[function];
     for(size_t i=start+1;i<w->count && w->nodes[i].function==function;++i) {
         const BeamOp *op=w->nodes[i].op;
         if(op->op==genop_label_1 || op->op==genop_line_1) continue;
+        if(op->op==genop_bs_start_match3_4)
+            return op->a[1].type==TAG_x && (Uint)op->a[1].val==parameter;
         return op->op==genop_bs_start_match4_4 && op->a[0].type==TAG_a &&
             op->a[0].val==am_no_fail && op->a[1].type==TAG_u &&
             op->a[2].type==TAG_x && (Uint)op->a[2].val==parameter;

@@ -9,7 +9,6 @@
 #include "md5.h"
 #include "pid_table.h"
 #include "fun.h"
-#include <stdio.h>
 static int module_imports_denied_nif(const LbCodeModule *module);
 static LbCodeStatus from_beam(LbBeamStatus s)
 {
@@ -159,7 +158,7 @@ static LbCodeStatus setup(LoaderState *st)
             LbBeamLambda *lambda=&p->lambdas[i]; LbFunEntry *entry=&module->funs[i];
             if(indices[lambda->index]) return LB_CODE_FORMAT;
             indices[lambda->index]=1;
-            entry->module=module->name; entry->function=lambda->function;
+            entry->module=module->name; entry->function=p->file_atoms[lambda->function];
             entry->arity=(int)(lambda->arity-lambda->num_free);
             entry->index=(int)lambda->index; entry->old_index=(int)i;
             _Static_assert(sizeof(entry->old_uniq)==sizeof(lambda->old_uniq),"native fun uniq width");
@@ -274,6 +273,7 @@ LbCodeStatus lb_code_prepare_module(LbCodeModule *module,LoaderState *st)
     if(!module || !st || !module->program || !module->space) return LB_CODE_INVALID;
     memset(st,0,sizeof(*st));
     st->program=module->program; st->module_code=module; st->space=module->space;
+    module->function_count=lb_beam_image_info(st->program->image)->function_count;
     st->program->error.stage="link/admission";
     return setup(st);
 }
@@ -283,12 +283,7 @@ LbCodeStatus lb_code_compile_prepared(LoaderState *prepared)
     LbCodeModule *module=st->module_code;
     LbCodeStatus status;
     size_t rewrites=0,i;
-    status=lb_verify_program(st);
-    if(status!=LB_CODE_OK) {
-        if(module->name==am_string && st->program->error.offset==17358)
-            fprintf(stderr,"STRING_VERIFY_FAIL status=%d stage=%s offset=%zu\n",status,st->program->error.stage,st->program->error.offset);
-        return status;
-    }
+    status=lb_verify_program(st); if(status!=LB_CODE_OK) return status;
     if(module->activation==LB_MODULE_ON_LOAD_DENIED_NIF) {
         size_t words;
         if(!module_imports_denied_nif(module) || !module->export_count ||
@@ -302,6 +297,7 @@ LbCodeStatus lb_code_compile_prepared(LoaderState *prepared)
             memcpy(&module->words[2*i+1],&denied,sizeof(denied));
             module->exports[i].dispatch.addresses[0]=module->words+2*i;
         }
+        lb_program_discard_ops(st->program,1);
         return LB_CODE_OK;
     }
     st->genop=st->program->ops;
@@ -322,29 +318,16 @@ LbCodeStatus lb_code_compile_prepared(LoaderState *prepared)
             if(result!=TE_FAIL) return LB_CODE_FORMAT;
         }
         st->program->error.stage="specific selection";
-        if(lb_beam_select_specific(op,&selection)!=LB_BEAM_OK) {
-            if(module->name==am_string && op->offset==17358)
-                fprintf(stderr,"STRING_SELECT_FAIL generic=%u arity=%u\n",op->op,op->arity);
-            return LB_CODE_UNSUPPORTED;
-        }
+        if(lb_beam_select_specific(op,&selection)!=LB_BEAM_OK) return LB_CODE_UNSUPPORTED;
         st->specific_op=(int)selection.opcode;
         st->program->error.stage=opc[selection.opcode].name;
         if(selection.opcode!=op_label_L && selection.opcode!=op_line_I && selection.opcode!=op_nif_start &&
            selection.opcode!=op_i_nif_padding &&
            selection.opcode!=op_i_func_info_IaaI && selection.opcode!=op_int_code_end &&
-           !lb_instruction_supported(selection.opcode)) {
-            if(module->name==am_string && op->offset==17358)
-                fprintf(stderr,"STRING_SUPPORT_FAIL specific=%d generic=%u arity=%u\n",selection.opcode,op->op,op->arity);
-            return LB_CODE_UNSUPPORTED;
-        }
+           !lb_instruction_supported(selection.opcode)) return LB_CODE_UNSUPPORTED;
         for(i=0;i<op->arity && i<sizeof(selection.r_mask)*CHAR_BIT;++i)
             if(selection.r_mask&(1u<<i)) op->a[i].type=TAG_r;
-        status=lb_emit(st,op);
-        if(status!=LB_CODE_OK) {
-            if(module->name==am_string && op->offset==17358)
-                fprintf(stderr,"STRING_EMIT_FAIL status=%d specific=%d generic=%u arity=%u\n",status,selection.opcode,op->op,op->arity);
-            return status;
-        }
+        status=lb_emit(st,op); if(status!=LB_CODE_OK) return status;
         st->genop=op->next; lb_load_free_op(st,op);
     }
     st->program->error.stage="relocation";
@@ -363,6 +346,7 @@ LbCodeStatus lb_code_compile_prepared(LoaderState *prepared)
         entry->dispatch.addresses[0]=st->codev+address;
         memcpy(entry->uniq,module->md5,sizeof(entry->uniq));
     }
+    lb_program_discard_ops(st->program,0);
     return LB_CODE_OK;
 }
 LbCodeStatus lb_compile_code(LbCodeModule *module)
@@ -628,17 +612,6 @@ LbCodeStatus lb_code_load_batch_with_policy(LbCodeSpace *space,const LbCodeInput
         }
         modules[i]=memory; memset(modules[i],0,sizeof(*modules[i]));
         modules[i]->space=space; modules[i]->program=programs[i];
-        BeamOp *marker=on_load_marker(programs[i]);
-        if(marker) {
-            if(policy==LB_CODE_ON_LOAD_REJECT) {
-                result=LB_CODE_UNSUPPORTED; failed_program=programs[i];
-                programs[i]->error.stage="on_load";
-                programs[i]->error.offset=marker->offset;
-                batch_error(error,report,result,failed_program,i,programs[0]->transaction);
-                goto rollback;
-            }
-            modules[i]->activation=LB_MODULE_ON_LOAD_DENIED_NIF;
-        }
     }
     result=from_beam(lb_program_bind_batch(programs,count));
     if(result!=LB_CODE_OK) { failed_program=programs[0]; batch_error(error,report,result,failed_program,SIZE_MAX,programs[0]->transaction); goto rollback; }
@@ -664,19 +637,14 @@ LbCodeStatus lb_code_load_batch_with_policy(LbCodeSpace *space,const LbCodeInput
         }
     }
     for(i=0;i<count;++i) {
+        LbBeamStatus parse=lb_program_prepare_staged(programs[i]);
+        if(parse!=LB_BEAM_OK) { result=from_beam(parse); failed_program=programs[i]; batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback; }
         result=lb_code_prepare_module(modules[i],&states[i]);
         if(result!=LB_CODE_OK) { failed_program=programs[i]; batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback; }
     }
     for(i=0;i<count;++i) {
         result=lb_code_resolve_imports(&states[i],modules,count);
         if(result!=LB_CODE_OK) { failed_program=programs[i]; batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback; }
-    }
-    for(i=0;i<count;++i) if(modules[i]->activation==LB_MODULE_ON_LOAD_DENIED_NIF &&
-                              !module_imports_denied_nif(modules[i])) {
-        result=LB_CODE_UNSUPPORTED; failed_program=programs[i];
-        programs[i]->error.stage="on_load policy requires erlang:load_nif/2";
-        batch_error(error,report,result,failed_program,i,programs[0]->transaction);
-        goto rollback;
     }
     result=validate_batch_importers(space,modules,count);
     if(result!=LB_CODE_OK) {
@@ -686,6 +654,22 @@ LbCodeStatus lb_code_load_batch_with_policy(LbCodeSpace *space,const LbCodeInput
         goto rollback;
     }
     for(i=0;i<count;++i) {
+        LbBeamStatus parse=lb_program_decode_staged(programs[i]);
+        if(parse!=LB_BEAM_OK) { result=from_beam(parse); failed_program=programs[i]; batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback; }
+        BeamOp *marker=on_load_marker(programs[i]);
+        if(marker) {
+            if(policy==LB_CODE_ON_LOAD_REJECT) {
+                result=LB_CODE_UNSUPPORTED; failed_program=programs[i];
+                programs[i]->error.stage="on_load"; programs[i]->error.offset=marker->offset;
+                batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback;
+            }
+            modules[i]->activation=LB_MODULE_ON_LOAD_DENIED_NIF;
+            if(!module_imports_denied_nif(modules[i])) {
+                result=LB_CODE_UNSUPPORTED; failed_program=programs[i];
+                programs[i]->error.stage="on_load policy requires erlang:load_nif/2";
+                batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback;
+            }
+        }
         result=lb_code_compile_prepared(&states[i]);
         if(result!=LB_CODE_OK) { failed_program=programs[i]; batch_error(error,report,result,failed_program,i,programs[0]->transaction); goto rollback; }
     }
@@ -787,6 +771,4 @@ const Uint *lb_code_module_words(const LbCodeModule *module,size_t *count)
 }
 Eterm lb_code_module_name(const LbCodeModule *module) { return module?module->name:THE_NON_VALUE; }
 size_t lb_code_module_function_count(const LbCodeModule *module)
-{
-    return module?lb_beam_image_info(module->program->image)->function_count:0;
-}
+{ return module?module->function_count:0; }

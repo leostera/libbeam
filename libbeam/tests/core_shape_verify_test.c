@@ -275,7 +275,7 @@ static void proven_match_start(LbCodeSpace *space)
 static void interprocedural_match_context_restart(LbCodeSpace *space)
 {
     Eterm empty[2]={_make_header(1,HEAP_BITS_SUBTAG),0},literals[]={make_boxed(empty)};
-    for(unsigned mode=0;mode<2;++mode) {
+    for(unsigned mode=0;mode<3;++mode) {
         Program p={0}; LbBeamProgram program={0}; LoaderState st={0}; LbCodeStatus status;
         LbCodeModule module={0};
         /* The first caller seeds the callee's parameter fact with a context.
@@ -287,26 +287,39 @@ static void interprocedural_match_context_restart(LbCodeSpace *space)
         ADD(&p,move_2,X(1),X(0)); ADD(&p,call_2,U(1),F(6));
         ADD(&p,deallocate_1,U(0)); ret(&p);
         ADD(&p,int_func_start_5,U(5),U(0),A(0),A(11),U(1)); ADD(&p,label_1,U(6));
-        if(mode) {
+        if(mode==1) {
             ADD(&p,bs_get_position_3,X(0),X(1),U(1));
             ADD(&p,bs_get_tail_3,X(0),X(0),U(1));
+        } else if(mode==2) {
+            ADD(&p,bs_start_match3_4,F(10),X(0),U(1),X(1));
+            ADD(&p,bs_get_tail_3,X(1),X(0),U(1));
         } else {
             ADD(&p,bs_start_match4_4,((BeamOpArg){TAG_a,am_no_fail}),U(1),X(0),X(1));
             ADD(&p,bs_get_tail_3,X(1),X(0),U(1));
         }
         ADD(&p,allocate_2,U(0),U(1));
         ADD(&p,call_2,U(1),F(9)); ADD(&p,deallocate_1,U(0)); ADD(&p,call_only_2,U(1),F(6));
+        if(mode==2) { ADD(&p,label_1,U(10)); ADD(&p,move_2,N,X(0)); ret(&p); }
         ADD(&p,int_func_start_5,U(8),U(0),A(0),A(12),U(1)); ADD(&p,label_1,U(9));
         ADD(&p,move_2,X(0),X(0)); ret(&p);
         program.ops=p.ops; program.atoms=space->atoms; program.literals=literals; program.literal_count=1;
-        st.program=&program; st.space=space; st.label_count=10; st.module_code=&module;
+        st.program=&program; st.space=space; st.label_count=11; st.module_code=&module;
         status=lb_verify_program(&st);
-        LbCodeStatus expected=mode?LB_CODE_FORMAT:LB_CODE_OK;
+        LbCodeStatus expected=mode==1?LB_CODE_FORMAT:LB_CODE_OK;
         if(status!=expected) fprintf(stderr,"match-context restart status=%d expected=%d stage=%s offset=%zu\n",
                                      status,expected,program.error.stage,program.error.offset);
         CHECK(status==expected);
-        if(mode) CHECK(!strcmp(program.error.stage,"match-context callsite argument shape is unknown"));
+        if(mode==1) CHECK(!strcmp(program.error.stage,"match-context callsite argument shape is unknown"));
     }
+}
+static void list_can_root_match_context(LbCodeSpace *space)
+{
+    Program p; begin(&p);
+    ADD(&p,bs_start_match3_4,F(3),X(0),U(1),X(1));
+    ADD(&p,test_heap_2,U(2),U(2));
+    ADD(&p,put_list_3,X(0),X(1),X(0)); ret(&p);
+    ADD(&p,label_1,U(3)); ADD(&p,move_2,A(0),X(0)); ret(&p);
+    verify(space,&p,LB_CODE_OK);
 }
 static void if_end_frame_join(LbCodeSpace *space)
 {
@@ -334,7 +347,7 @@ int main(void)
 {
     LbEngine *engine; LbCodeSpace *space;
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    tested_tuple_copy(space); proven_match_start(space); interprocedural_match_context_restart(space); if_end_frame_join(space); set_tuple_element_proof(space); joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); exception_handler_calls(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
+    tested_tuple_copy(space); proven_match_start(space); interprocedural_match_context_restart(space); list_can_root_match_context(space); if_end_frame_join(space); set_tuple_element_proof(space); joins(space); transfers(space); arithmetic_edges(space); forwarding_returns(space); apply_boundaries(space); exception_handler_calls(space); predicate_scratch(space); list_is_not_cons(space); terminal_frame_joins(space);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK && lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
     puts("CORE_SHAPE_PROOF_OK failure_edges=true late_joins=true backedges=true bounds=true alias_moves=true call_clobbers=true y_facts=true hints_not_authority=true arithmetic_edges=true predicate_scratch=true list_not_cons=true trim_facts=true execution=false");
     return 0;

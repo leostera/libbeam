@@ -7,8 +7,12 @@
 #include "beam_reader.h"
 #include "binary.h"
 #include <string.h>
-typedef union LbPrepBlock { struct { union LbPrepBlock *next; } link; max_align_t alignment; } LbPrepBlock;
+typedef union LbPrepBlock {
+    struct { union LbPrepBlock *previous,*next; size_t bytes; } link;
+    max_align_t alignment;
+} LbPrepBlock;
 typedef struct LbNamePatch { struct LbNamePatch *next; LbBeamBytes name; Eterm *destination; } LbNamePatch;
+typedef struct LbNameBlock { struct LbNameBlock *next; size_t used,capacity; LbNamePatch patches[]; } LbNameBlock;
 typedef struct LbDynamicLiteral { struct LbDynamicLiteral *next; Eterm value; Sint index; } LbDynamicLiteral;
 typedef struct LbProcess LbProcess;
 typedef enum { LB_ETF_TEMPORARY, LB_ETF_LITERAL } LbEtfStorage;
@@ -24,21 +28,24 @@ typedef struct LbExternalFunPatch {
     Eterm *fun_words;
     Eterm module, function, arity;
 } LbExternalFunPatch;
-typedef struct LbOpBlock { struct LbOpBlock *next; LbBeamOp ops[32]; } LbOpBlock;
+typedef struct LbOpBlock { struct LbOpBlock *next; size_t capacity; LbBeamOp ops[]; } LbOpBlock;
 struct LbBeamProgram {
     LbAllocDomain *domain;
     LbAtomTable *atoms;
     LbBeamImage *image;
     LbPrepBlock *blocks;
+    LbOpBlock *op_blocks;
+    size_t op_block_capacity;
     LbOffHeap off_heap;
     size_t bytes, block_count;
     LbBeamError error;
     int retained;
-    LbAtomTransaction *transaction;
+    LbAtomTransaction *transaction,*atom_lookup;
     Eterm attributes, compile;
     Eterm *file_atoms;
     LbNamePatch *names;
-    size_t name_count;
+    LbNameBlock *name_blocks;
+    size_t name_block_capacity,name_count;
     Eterm *literals;
     size_t literal_count, dynamic_count;
     LbDynamicLiteral *dynamic;
@@ -55,9 +62,15 @@ struct LbBeamProgram {
 };
 LbBeamStatus lb_program_begin(LbAllocDomain *, LbAtomTable *, const void *, size_t, LbBeamProgram **, LbBeamError *);
 LbBeamStatus lb_program_begin_staged(LbAllocDomain *, LbAtomTable *, const void *, size_t, LbBeamProgram **, LbBeamError *);
+LbBeamStatus lb_program_prepare_staged(LbBeamProgram *);
+LbBeamStatus lb_program_decode_staged(LbBeamProgram *);
 LbBeamStatus lb_program_bind_batch(LbBeamProgram *const *, size_t);
 void lb_program_commit(LbBeamProgram *);
 void *lb_palloc(LbBeamProgram *, size_t, size_t);
+void lb_pfree(LbBeamProgram *, void *);
+void lb_program_discard_ops(LbBeamProgram *, int);
+void lb_program_discard_names(LbBeamProgram *);
+int lb_program_allocate_op_block(LbBeamProgram *, LbBeamOp **);
 int lb_pfail(LbBeamProgram *, LbBeamStatus);
 int lb_pname(LbBeamProgram *, LbBeamBytes, Eterm *);
 int lb_pliterals(LbBeamProgram *);
