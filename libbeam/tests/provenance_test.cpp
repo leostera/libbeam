@@ -125,16 +125,19 @@ TEST(Provenance, AdmittedNativeSourcesHaveReviewedIdentity) {
 TEST(Provenance, OpcodeInputsAndGeneratorMatchPinnedProfile) {
     EXPECT_EQ(sha256(read_file(runfile("libbeam/tools/otp/beam_makeops"))),
               "40f5befb1cb6920e69f8bc4340931b13bfc52345eb0e43b4aebf72eb1c464d65");
-    struct Input { const char* original; const char* admitted; const char* digest; };
+    struct Input { const char* original; const char* admitted; const char* digest; const char* profile_digest=nullptr; };
+    // These two pinned-source exceptions are libbeam-profile adaptations:
+    // route light BIFs through the owned Export trampoline and turn native
+    // record tests into an always-failing edge because native records are not admitted.
     const Input inputs[] = {
         {"beam/lib/compiler/src/genop.tab", "libbeam/core/otp/opcodes/genop.tab", "0f999b3797672f28bfbd4007245a95637bd38b68ac67dcfcb95eacce29e0780e"},
         {"beam/erts/emulator/beam/predicates.tab", "libbeam/core/otp/opcodes/predicates.tab", "6aa371b05724f1c762093d8555ed64b2711f98143571c9455b81fa7c578183f2"},
         {"beam/erts/emulator/beam/generators.tab", "libbeam/core/otp/opcodes/generators.tab", "cddd948034d8cf1d07b59c34885d4766cd7d929aae79ebb776909ec1b735758a"},
-        {"beam/erts/emulator/beam/emu/ops.tab", "libbeam/core/otp/opcodes/emu/ops.tab", "d204cbdd007a51df81203211675354274b5fcabd67e8fe65e0f4badf4071e234"},
+        {"beam/erts/emulator/beam/emu/ops.tab", "libbeam/core/otp/opcodes/emu/ops.tab", "d204cbdd007a51df81203211675354274b5fcabd67e8fe65e0f4badf4071e234", "26d168da171a5fb780e759e3556f07e025c8116aba371eb06ce67dad6504e3f9"},
         {"beam/erts/emulator/beam/emu/predicates.tab", "libbeam/core/otp/opcodes/emu/predicates.tab", "cce20c6cbb968d8d579cfe1e4f481cb51a891eb20edb71ef4681e523b0e2db0d"},
         {"beam/erts/emulator/beam/emu/generators.tab", "libbeam/core/otp/opcodes/emu/generators.tab", "e2980f167ddb6f30a920c1bd9fe5bda682d0e73b8b744a7abfba4723e7965138"},
         {"beam/erts/emulator/beam/emu/macros.tab", "libbeam/core/otp/opcodes/emu/macros.tab", "7cdce7719cde9115a88c8a4dd0299d4dbda31be2fb40c6eea5f045d293d212c4"},
-        {"beam/erts/emulator/beam/emu/instrs.tab", "libbeam/core/otp/opcodes/emu/instrs.tab", "6191258ed0710adad9cdfd67779a8680461e695487fa5471594e1001a93d9647"},
+        {"beam/erts/emulator/beam/emu/instrs.tab", "libbeam/core/otp/opcodes/emu/instrs.tab", "6191258ed0710adad9cdfd67779a8680461e695487fa5471594e1001a93d9647", "aefa41989ca5b12c0d1040767738046f5a91f5d5fbb25ab7cea20c9a797b2020"},
         {"beam/erts/emulator/beam/emu/arith_instrs.tab", "libbeam/core/otp/opcodes/emu/arith_instrs.tab", "cd590350432e121b374141c9a8df73b6862e5ec5c8a291701643018606b2f5b2"},
         {"beam/erts/emulator/beam/emu/bif_instrs.tab", "libbeam/core/otp/opcodes/emu/bif_instrs.tab", "efa0551d5ffa27a197de60fb6759530a00a891031627b58d948442fe0f313aee"},
         {"beam/erts/emulator/beam/emu/bs_instrs.tab", "libbeam/core/otp/opcodes/emu/bs_instrs.tab", "49f203f8c900e9da964e3c483f186c7562fdb4ddb9bb2fa8a0f9af574c2d3279"},
@@ -147,7 +150,8 @@ TEST(Provenance, OpcodeInputsAndGeneratorMatchPinnedProfile) {
     ASSERT_EQ(std::size(inputs), 16u);
     for (const auto& input : inputs) {
         EXPECT_EQ(sha256(read_file(reference_path(input.original))), input.digest) << input.original;
-        EXPECT_EQ(sha256(read_file(reference_path(input.admitted))), input.digest) << input.admitted;
+        EXPECT_EQ(sha256(read_file(reference_path(input.admitted))),
+                  input.profile_digest ? input.profile_digest : input.digest) << input.admitted;
     }
     const auto build = read_file(runfile("bazel/BUILD.bazel"));
     for (const char* target : {"opcode_upstream", "opcode_upstream_repeat"}) {

@@ -1419,6 +1419,48 @@ Eterm lb_bif_is_integer_1(LbProcess *p,Eterm *args,const BeamInstr *pc)
     p->last_native_cost=1;
     return lb_is_integer(args[0])?am_true:am_false;
 }
+Eterm lb_bif_is_integer_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    int lower_order,upper_order; (void)pc; p->last_native_cost=0;
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost=1;
+    /* OTP validates both bounds before testing the value's type. */
+    if(!lb_is_integer(args[1]) || !lb_is_integer(args[2])) return fail(p,LB_EXC_BADARG);
+    if(!lb_is_integer(args[0])) return am_false;
+    if(!compare_integer_terms(p,args[1],args[0],&lower_order) ||
+       !compare_integer_terms(p,args[0],args[2],&upper_order)) return THE_NON_VALUE;
+    return lower_order<=0 && upper_order<=0?am_true:am_false;
+}
+Eterm lb_bif_is_record_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=0;
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost=1;
+    if(!is_atom(args[1])) return fail(p,LB_EXC_BADARG);
+    if(!is_tuple(args[0])) return am_false;
+    Eterm *tuple=tuple_val(args[0]);
+    return arityval(*tuple)>=1 && tuple[1]==args[1]?am_true:am_false;
+}
+Eterm lb_bif_is_record_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
+{
+    (void)pc; p->last_native_cost=0;
+    LbAllocDomain *domain=p->entry_module->space->domain;
+    if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+    p->last_native_cost=1;
+    /* OTP 29 validates the size discriminator before inspecting the tag. */
+    if(is_atom(args[2])) {
+        /* No native-record term representation is admitted by libbeam yet. */
+        return am_false;
+    }
+    if(!is_small(args[2])) return fail(p,LB_EXC_BADARG);
+    if(!is_atom(args[1])) return am_false;
+    Sint arity=signed_val(args[2]);
+    if(arity<1 || !is_tuple(args[0])) return am_false;
+    Eterm *tuple=tuple_val(args[0]);
+    return arityval(*tuple)==(Uint)arity && tuple[1]==args[1]?am_true:am_false;
+}
 Eterm lb_bif_min_2(LbProcess *p,Eterm *args,const BeamInstr *pc)
 {
     int order; (void)pc; p->last_native_cost=0;

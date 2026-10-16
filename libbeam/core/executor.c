@@ -172,7 +172,10 @@ static void step(LbTask *task)
         if(owner && !owner->capability_failure) owner->capability_failure=task->process->capability_failure;
         denied=1;
         limited=finish_task(task,LB_TASK_CAPABILITY_DENIED); break;
-    case LB_PROCESS_REFUSED: limited=finish_task(task,LB_TASK_REFUSED); break;
+    /* Invalid runtime state is a task refusal, never a reason to abort the
+     * shared Engine worker and every other isolate using it. */
+    case LB_PROCESS_INVALID: case LB_PROCESS_REFUSED:
+        limited=finish_task(task,LB_TASK_REFUSED); break;
     case LB_PROCESS_ENVIRONMENT: limited=finish_task(task,LB_TASK_ENVIRONMENT); break;
     default: abort();
     }

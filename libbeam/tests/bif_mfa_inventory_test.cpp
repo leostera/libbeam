@@ -27,7 +27,7 @@ TEST(MfaTargets, ExactlyOneRealTargetForEveryRequestedMfa) {
         else if (function == "/") function = "divide";
         EXPECT_TRUE(expected_targets.insert("bif_" + function + "_" + line.substr(slash + 1) + "_test").second);
     }
-    ASSERT_EQ(requested.size(), 185u);
+    ASSERT_EQ(requested.size(), 188u);
     std::ifstream input(build_path);
     ASSERT_TRUE(input.good());
     const std::string build{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};

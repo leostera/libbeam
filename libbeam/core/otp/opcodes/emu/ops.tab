@@ -920,9 +920,11 @@ call_ext_only Ar=u Bif=u$is_bif | is_heavy_bif(Bif) =>
 # The general case for BIFs that have no special requirements.
 #
 
-call_ext u Bif=u$is_bif => call_light_bif Bif
-call_ext_last u Bif=u$is_bif D => call_light_bif_last Bif D
-call_ext_only _Ar=u Bif=u$is_bif => call_light_bif_only Bif
+# libbeam's dispatch invokes imported BIFs through the owned Export trampoline;
+# the ERTS light-BIF direct-pointer instructions are outside this runtime profile.
+call_ext u Bif=u$is_bif => i_call_ext Bif
+call_ext_last u Bif=u$is_bif D => i_call_ext_last Bif D
+call_ext_only _Ar=u Bif=u$is_bif => i_call_ext_only Bif
 
 #
 # Any remaining calls are calls to Erlang functions, not BIFs.
@@ -1631,7 +1633,9 @@ i_update_record_in_place_done
 %unused gen.get_local_record_elements
 %unused gen.update_local_record
 
-is_any_native_record f xy
+# Native-record construction and external decoding are not admitted. Within this
+# runtime profile the predicate is therefore always false.
+is_any_native_record Fail=f _Src => jump Fail
 
 is_native_record Fail Src Mod Name =>
     i_is_native_record Fail Src Mod Name

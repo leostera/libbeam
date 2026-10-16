@@ -4,6 +4,10 @@
 #ifndef LIBBEAM_CORE_MAP_RUNTIME_H
 #define LIBBEAM_CORE_MAP_RUNTIME_H
 #include "process.h"
+/* Cap map-update operands at a bounded profile size. Maps beyond the native
+ * flatmap limit may be admitted only for compile-time structure and refuse at
+ * execution until HAMT construction is supported. */
+#define LB_MAP_MAX_FIELDS 256u
 typedef enum {
     LB_MAP_OK,
     LB_MAP_MISSING,

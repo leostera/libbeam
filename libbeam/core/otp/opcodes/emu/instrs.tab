@@ -1320,12 +1320,6 @@ padding() {
 // Native records.
 //
 
-is_any_native_record(Fail, Src) {
-    if (!is_record($Src)) {
-        $FAIL($Fail);
-    }
-}
-
 i_is_native_record(Fail, Src, Mod, Name) {
     if (!erl_is_native_record($Src, $Mod, $Name)) {
         $FAIL($Fail);

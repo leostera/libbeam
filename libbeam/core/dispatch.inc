@@ -5729,7 +5729,8 @@ OpCase(new_map_dtI):
 {
   Eterm packed=I[1], dst=db(packed&BEAM_LOOSE_MASK), result;
   Uint words=I[2], live=tb(packed>>BEAM_LOOSE_SHIFT);
-  if((words&1) || words>2*LB_FLATMAP_MAX_SIZE || live>MAX_REG) goto malformed_code;
+  if((words&1) || live>MAX_REG) goto malformed_code;
+  if(words>2*LB_FLATMAP_MAX_SIZE) goto execution_refused;
   size_t count=words/2;
   size_t reserve=LB_FLATMAP_WORDS+count+(count?count+1:2);
   c_p->last_native_cost=0; SWAPOUT;

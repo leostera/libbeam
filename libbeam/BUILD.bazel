@@ -1833,6 +1833,57 @@ cc_test(
 )
 
 genrule(
+  name = "bif_is_integer_3_fixture",
+  srcs = ["tests/fixtures/bif_is_integer_3.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/bif_is_integer_3_fixture/bif_is_integer_3.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic  -o $(@D) $(location :tests/fixtures/bif_is_integer_3.erl)",
+)
+
+cc_test(
+  name = "bif_is_integer_3_test",
+  size = "small",
+  args = ["$(rootpath :bif_is_integer_3_fixture)", "bif_is_integer_3", "is_integer"],
+  data = ["bif_is_integer_3_fixture"],
+  deps = ["bif_execution_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
+  name = "bif_is_record_3_fixture",
+  srcs = ["tests/fixtures/bif_is_record_3.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/bif_is_record_3_fixture/bif_is_record_3.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic  -o $(@D) $(location :tests/fixtures/bif_is_record_3.erl)",
+)
+
+cc_test(
+  name = "bif_is_record_3_test",
+  size = "small",
+  args = ["$(rootpath :bif_is_record_3_fixture)", "bif_is_record_3", "is_record"],
+  data = ["bif_is_record_3_fixture"],
+  deps = ["bif_execution_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
+  name = "bif_is_record_2_fixture",
+  srcs = ["tests/fixtures/bif_is_record_2.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/bif_is_record_2_fixture/bif_is_record_2.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic  -o $(@D) $(location :tests/fixtures/bif_is_record_2.erl)",
+)
+
+cc_test(
+  name = "bif_is_record_2_test",
+  size = "small",
+  args = ["$(rootpath :bif_is_record_2_fixture)", "bif_is_record_2", "is_record"],
+  data = ["bif_is_record_2_fixture"],
+  deps = ["bif_execution_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
   name = "bif_is_float_1_fixture",
   srcs = ["tests/fixtures/bif_is_float_1.erl"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
@@ -2391,7 +2442,7 @@ cc_test(
 
 test_suite(
   name = "bif_mfa_tests",
-  tests = ["bif_alias_0_test", "bif_alias_1_test", "bif_and_2_test", "bif_apply_2_test", "bif_binary_to_integer_2_test", "bif_binary_to_list_1_test", "bif_binary_to_list_3_test", "bif_bit_size_1_test", "bif_bitstring_to_list_1_test", "bif_bump_reductions_1_test", "bif_call_on_load_function_1_test", "bif_cancel_timer_1_test", "bif_cancel_timer_2_test", "bif_ceil_1_test", "bif_convert_time_unit_3_test", "bif_decode_packet_3_test", "bif_delete_module_1_test", "bif_demonitor_1_test", "bif_disconnect_node_1_test", "bif_display_1_test", "bif_display_string_1_test", "bif_display_string_2_test", "bif_dist_ctrl_put_data_2_test", "bif_divide_2_test", "bif_dt_restore_tag_1_test", "bif_dt_spread_tag_1_test", "bif_erase_0_test", "bif_exit_1_test", "bif_external_size_1_test", "bif_finish_after_on_load_2_test", "bif_finish_loading_1_test", "bif_float_1_test", "bif_float_to_list_1_test", "bif_float_to_list_2_test", "bif_fun_info_1_test", "bif_fun_info_2_test", "bif_fun_info_mfa_1_test", "bif_fun_to_list_1_test", "bif_garbage_collect_0_test", "bif_garbage_collect_1_test", "bif_get_0_test", "bif_get_cookie_0_test", "bif_get_keys_0_test", "bif_get_keys_1_test", "bif_group_leader_0_test", "bif_group_leader_2_test", "bif_halt_0_test", "bif_halt_1_test", "bif_halt_2_test", "bif_has_prepared_code_on_load_1_test", "bif_hibernate_0_test", "bif_hibernate_3_test", "bif_insert_element_3_test", "bif_integer_to_list_1_test", "bif_integer_to_list_2_test", "bif_iolist_size_1_test", "bif_iolist_to_iovec_1_test", "bif_is_alive_0_test", "bif_is_bitstring_1_test", "bif_is_boolean_1_test", "bif_is_builtin_3_test", "bif_is_float_1_test", "bif_is_map_1_test", "bif_is_number_1_test", "bif_is_pid_1_test", "bif_is_port_1_test", "bif_is_process_alive_1_test", "bif_is_reference_1_test", "bif_is_tuple_1_test", "bif_link_1_test", "bif_list_to_atom_1_test", "bif_list_to_binary_1_test", "bif_list_to_bitstring_1_test", "bif_list_to_existing_atom_1_test", "bif_list_to_float_1_test", "bif_list_to_integer_2_test", "bif_list_to_pid_1_test", "bif_list_to_port_1_test", "bif_list_to_ref_1_test", "bif_load_module_2_test", "bif_load_nif_2_test", "bif_loaded_0_test", "bif_localtime_0_test", "bif_localtime_to_universaltime_1_test", "bif_localtime_to_universaltime_2_test", "bif_make_fun_3_test", "bif_match_spec_test_3_test", "bif_md5_1_test", "bif_md5_final_1_test", "bif_md5_init_0_test", "bif_md5_update_2_test", "bif_memory_0_test", "bif_memory_1_test", "bif_monitor_2_test", "bif_monitor_3_test", "bif_monitor_node_2_test", "bif_monitor_node_3_test", "bif_monotonic_time_0_test", "bif_monotonic_time_1_test", "bif_nif_error_1_test", "bif_node_1_test", "bif_nodes_0_test", "bif_nodes_1_test", "bif_nodes_2_test", "bif_open_port_2_test", "bif_or_2_test", "bif_phash2_1_test", "bif_phash2_2_test", "bif_phash_2_test", "bif_pid_to_list_1_test", "bif_port_close_1_test", "bif_port_command_2_test", "bif_port_command_3_test", "bif_port_connect_2_test", "bif_port_control_3_test", "bif_port_get_data_1_test", "bif_port_info_1_test", "bif_port_info_2_test", "bif_port_set_data_2_test", "bif_port_to_list_1_test", "bif_ports_0_test", "bif_posixtime_to_universaltime_1_test", "bif_pre_loaded_0_test", "bif_prepare_loading_2_test", "bif_process_display_2_test", "bif_process_flag_2_test", "bif_process_flag_3_test", "bif_process_info_1_test", "bif_processes_0_test", "bif_processes_iterator_0_test", "bif_processes_next_1_test", "bif_purge_module_1_test", "bif_read_timer_1_test", "bif_ref_to_list_1_test", "bif_registered_0_test", "bif_round_1_test", "bif_send_2_test", "bif_send_3_test", "bif_send_after_3_test", "bif_send_after_4_test", "bif_set_cookie_2_test", "bif_setnode_2_test", "bif_spawn_2_test", "bif_spawn_4_test", "bif_spawn_link_1_test", "bif_spawn_link_2_test", "bif_spawn_link_3_test", "bif_spawn_link_4_test", "bif_spawn_monitor_2_test", "bif_spawn_monitor_3_test", "bif_spawn_monitor_4_test", "bif_spawn_opt_2_test", "bif_spawn_opt_3_test", "bif_spawn_opt_5_test", "bif_spawn_request_5_test", "bif_spawn_request_abandon_1_test", "bif_start_timer_3_test", "bif_start_timer_4_test", "bif_statistics_1_test", "bif_system_info_1_test", "bif_system_time_0_test", "bif_system_time_1_test", "bif_term_to_binary_1_test", "bif_term_to_binary_2_test", "bif_time_offset_0_test", "bif_time_offset_1_test", "bif_timestamp_0_test", "bif_trunc_1_test", "bif_tuple_size_1_test", "bif_unalias_1_test", "bif_unary_plus_1_test", "bif_unique_integer_0_test", "bif_unique_integer_1_test", "bif_universaltime_0_test", "bif_universaltime_to_localtime_1_test", "bif_universaltime_to_posixtime_1_test", "bif_unlink_1_test", "bif_unregister_1_test", "bif_whereis_1_test", "bif_xor_2_test", "bif_yield_0_test"],
+  tests = ["bif_alias_0_test", "bif_alias_1_test", "bif_and_2_test", "bif_apply_2_test", "bif_binary_to_integer_2_test", "bif_binary_to_list_1_test", "bif_binary_to_list_3_test", "bif_bit_size_1_test", "bif_bitstring_to_list_1_test", "bif_bump_reductions_1_test", "bif_call_on_load_function_1_test", "bif_cancel_timer_1_test", "bif_cancel_timer_2_test", "bif_ceil_1_test", "bif_convert_time_unit_3_test", "bif_decode_packet_3_test", "bif_delete_module_1_test", "bif_demonitor_1_test", "bif_disconnect_node_1_test", "bif_display_1_test", "bif_display_string_1_test", "bif_display_string_2_test", "bif_dist_ctrl_put_data_2_test", "bif_divide_2_test", "bif_dt_restore_tag_1_test", "bif_dt_spread_tag_1_test", "bif_erase_0_test", "bif_exit_1_test", "bif_external_size_1_test", "bif_finish_after_on_load_2_test", "bif_finish_loading_1_test", "bif_float_1_test", "bif_float_to_list_1_test", "bif_float_to_list_2_test", "bif_fun_info_1_test", "bif_fun_info_2_test", "bif_fun_info_mfa_1_test", "bif_fun_to_list_1_test", "bif_garbage_collect_0_test", "bif_garbage_collect_1_test", "bif_get_0_test", "bif_get_cookie_0_test", "bif_get_keys_0_test", "bif_get_keys_1_test", "bif_group_leader_0_test", "bif_group_leader_2_test", "bif_halt_0_test", "bif_halt_1_test", "bif_halt_2_test", "bif_has_prepared_code_on_load_1_test", "bif_hibernate_0_test", "bif_hibernate_3_test", "bif_insert_element_3_test", "bif_integer_to_list_1_test", "bif_integer_to_list_2_test", "bif_iolist_size_1_test", "bif_iolist_to_iovec_1_test", "bif_is_alive_0_test", "bif_is_bitstring_1_test", "bif_is_boolean_1_test", "bif_is_builtin_3_test", "bif_is_integer_3_test", "bif_is_record_3_test", "bif_is_record_2_test", "bif_is_float_1_test", "bif_is_map_1_test", "bif_is_number_1_test", "bif_is_pid_1_test", "bif_is_port_1_test", "bif_is_process_alive_1_test", "bif_is_reference_1_test", "bif_is_tuple_1_test", "bif_link_1_test", "bif_list_to_atom_1_test", "bif_list_to_binary_1_test", "bif_list_to_bitstring_1_test", "bif_list_to_existing_atom_1_test", "bif_list_to_float_1_test", "bif_list_to_integer_2_test", "bif_list_to_pid_1_test", "bif_list_to_port_1_test", "bif_list_to_ref_1_test", "bif_load_module_2_test", "bif_load_nif_2_test", "bif_loaded_0_test", "bif_localtime_0_test", "bif_localtime_to_universaltime_1_test", "bif_localtime_to_universaltime_2_test", "bif_make_fun_3_test", "bif_match_spec_test_3_test", "bif_md5_1_test", "bif_md5_final_1_test", "bif_md5_init_0_test", "bif_md5_update_2_test", "bif_memory_0_test", "bif_memory_1_test", "bif_monitor_2_test", "bif_monitor_3_test", "bif_monitor_node_2_test", "bif_monitor_node_3_test", "bif_monotonic_time_0_test", "bif_monotonic_time_1_test", "bif_nif_error_1_test", "bif_node_1_test", "bif_nodes_0_test", "bif_nodes_1_test", "bif_nodes_2_test", "bif_open_port_2_test", "bif_or_2_test", "bif_phash2_1_test", "bif_phash2_2_test", "bif_phash_2_test", "bif_pid_to_list_1_test", "bif_port_close_1_test", "bif_port_command_2_test", "bif_port_command_3_test", "bif_port_connect_2_test", "bif_port_control_3_test", "bif_port_get_data_1_test", "bif_port_info_1_test", "bif_port_info_2_test", "bif_port_set_data_2_test", "bif_port_to_list_1_test", "bif_ports_0_test", "bif_posixtime_to_universaltime_1_test", "bif_pre_loaded_0_test", "bif_prepare_loading_2_test", "bif_process_display_2_test", "bif_process_flag_2_test", "bif_process_flag_3_test", "bif_process_info_1_test", "bif_processes_0_test", "bif_processes_iterator_0_test", "bif_processes_next_1_test", "bif_purge_module_1_test", "bif_read_timer_1_test", "bif_ref_to_list_1_test", "bif_registered_0_test", "bif_round_1_test", "bif_send_2_test", "bif_send_3_test", "bif_send_after_3_test", "bif_send_after_4_test", "bif_set_cookie_2_test", "bif_setnode_2_test", "bif_spawn_2_test", "bif_spawn_4_test", "bif_spawn_link_1_test", "bif_spawn_link_2_test", "bif_spawn_link_3_test", "bif_spawn_link_4_test", "bif_spawn_monitor_2_test", "bif_spawn_monitor_3_test", "bif_spawn_monitor_4_test", "bif_spawn_opt_2_test", "bif_spawn_opt_3_test", "bif_spawn_opt_5_test", "bif_spawn_request_5_test", "bif_spawn_request_abandon_1_test", "bif_start_timer_3_test", "bif_start_timer_4_test", "bif_statistics_1_test", "bif_system_info_1_test", "bif_system_time_0_test", "bif_system_time_1_test", "bif_term_to_binary_1_test", "bif_term_to_binary_2_test", "bif_time_offset_0_test", "bif_time_offset_1_test", "bif_timestamp_0_test", "bif_trunc_1_test", "bif_tuple_size_1_test", "bif_unalias_1_test", "bif_unary_plus_1_test", "bif_unique_integer_0_test", "bif_unique_integer_1_test", "bif_universaltime_0_test", "bif_universaltime_to_localtime_1_test", "bif_universaltime_to_posixtime_1_test", "bif_unlink_1_test", "bif_unregister_1_test", "bif_whereis_1_test", "bif_xor_2_test", "bif_yield_0_test"],
 )
 
 genrule(
@@ -6249,6 +6300,17 @@ filegroup(
 filegroup(
   name = "beam_image_fuzz_seeds",
   srcs = glob(["tests/fuzz_corpus/beam_image/*"]),
+)
+
+cc_test(
+  name = "beam_image_runtime_refusal_test",
+  size = "medium",
+  timeout = "moderate",
+  srcs = ["tests/beam_image_runtime_refusal_test.cpp", "tests/test_process.hpp"],
+  data = ["tests/fuzz_corpus/beam_image/runtime_invalid_pc.beam", "probe_b_fixture"],
+  copts = ["-std=c++17"],
+  deps = ["libbeam", "@googletest//:gtest_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
 cc_fuzz_test(

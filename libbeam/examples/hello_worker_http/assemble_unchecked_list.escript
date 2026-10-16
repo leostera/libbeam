@@ -50,6 +50,7 @@ assemble(Source, Target, Mode) ->
             {Functions, {CurrentName, CurrentArity, CurrentLabel, [Instruction | CurrentOps]}}
     end, {[], none}, Forms),
     Functions = lists:reverse([{function, Name, Arity, Label, lists:reverse(Ops)} | Done]),
-    %% OTP 28's beam_asm accepts this five-tuple; no semantic validator is run.
-    {ok, Binary} = beam_asm:module({Mod, Exports, Attributes, Functions, Labels}, [], [], []),
+    %% OTP 29's beam_asm takes annotations separately; this low-level assembler
+    %% bypasses only the compiler's semantic verifier, not libbeam admission.
+    {ok, Binary} = beam_asm:module({Mod, Exports, Attributes, #{}, Functions, Labels}, [], [], []),
     ok = file:write_file(Target, Binary).

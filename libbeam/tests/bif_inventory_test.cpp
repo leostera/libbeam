@@ -15,9 +15,9 @@ TEST(InventoryCli, EmitsCompleteSourceFactsWithoutClaimingCoverage) {
     ASSERT_TRUE(result.exited(0)) << result.output;
     EXPECT_TRUE(result.standard_error.empty());
     const auto report = Json::parse(result.standard_output);
-    EXPECT_EQ(report.at("requested_count"), 185);
-    EXPECT_EQ(report.at("direct_native_declarations"), 135);
-    EXPECT_EQ(report.at("entries").size(), 185u);
+    EXPECT_EQ(report.at("requested_count"), 188);
+    EXPECT_EQ(report.at("direct_native_declarations"), 138);
+    EXPECT_EQ(report.at("entries").size(), 188u);
     EXPECT_EQ(report.at("scope"), "source facts and proposed contracts; not capability admission or test coverage");
 }
 TEST(InventoryCli, InvalidArgumentsAndMissingInputsFailWithoutPartialReport) {
@@ -178,8 +178,8 @@ TEST(InventorySources, DenialDeclarationsMatchPolicy) {
 TEST(InventorySources, PinnedInventory) {
     auto root = Path(runfile(""));
     auto result = audit(root, root / "libbeam/core/otp/bif-batch-request.txt");
-    EXPECT_EQ(result["requested_count"], 185);
-    EXPECT_EQ(result["direct_native_declarations"], 135);
+    EXPECT_EQ(result["requested_count"], 188);
+    EXPECT_EQ(result["direct_native_declarations"], 138);
     for (const auto& row : result["entries"]) {
         SCOPED_TRACE(row["function"].dump());
         // Execution contracts live in the actual MFA tests. Source discovery

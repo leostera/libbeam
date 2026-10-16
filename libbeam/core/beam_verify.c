@@ -7,6 +7,7 @@
 #include "code_internal.h"
 #include "fun.h"
 #include "flatmap.h"
+#include "map_runtime.h"
 #include "binary.h"
 #define BITS (MAX_REG/64)
 #define NO_FRAME SIZE_MAX
@@ -580,11 +581,13 @@ static int plain_bif_allowed(const LbEngine *engine,const BifEntry *native,size_
 #include "type_predicates.def"
 #undef LB_TYPE_PREDICATE
         BIF_tuple_size_1,BIF_node_1,BIF_splus_1,BIF_bit_size_1};
-    static const unsigned binary[]={BIF_is_function_2,BIF_map_get_2,BIF_element_2,BIF_max_2,BIF_min_2,BIF_is_map_key_2,BIF_seq_2,BIF_seqeq_2,BIF_sneq_2,BIF_sneqeq_2,BIF_slt_2,BIF_sle_2,BIF_sgt_2,BIF_sge_2,BIF_and_2,BIF_or_2,BIF_xor_2};
+    static const unsigned binary[]={BIF_is_function_2,BIF_map_get_2,BIF_element_2,BIF_max_2,BIF_min_2,BIF_is_map_key_2,BIF_seq_2,BIF_seqeq_2,BIF_sneq_2,BIF_sneqeq_2,BIF_slt_2,BIF_sle_2,BIF_sgt_2,BIF_sge_2,BIF_and_2,BIF_or_2,BIF_xor_2,BIF_is_record_2};
+    static const unsigned ternary[]={BIF_is_integer_3,BIF_is_record_3};
     if(!native || native->kind!=BIF_KIND_GUARD) return 0;
     const unsigned *ids; size_t count;
     if(arity==1) { ids=unary; count=sizeof(unary)/sizeof(*unary); }
     else if(arity==2) { ids=binary; count=sizeof(binary)/sizeof(*binary); }
+    else if(arity==3) { ids=ternary; count=sizeof(ternary)/sizeof(*ternary); }
     else return 0;
     for(size_t i=0;i<count;++i) if(native==&engine->bifs[ids[i]]) return 1;
     return 0;
@@ -614,10 +617,10 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_jump_1:case genop_is_lt_3:case genop_is_ge_3:case genop_is_eq_3:case genop_is_ne_3:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_binary_2:case genop_is_list_2:case genop_is_integer_2:case genop_is_map_2:case genop_is_function_2:case genop_is_function2_3:
         case genop_is_float_2:case genop_is_number_2:case genop_is_port_2:case genop_is_boolean_2:case genop_is_bitstr_2:
-        case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:case genop_select_val_3:
+        case genop_is_tuple_2:case genop_is_any_native_record_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:case genop_select_val_3:
         case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_set_tuple_element_3:case genop_get_list_3:
         case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif1_5:case genop_gc_bif2_6:
-        case genop_bs_match_3:case genop_bs_match_string_4:case genop_bs_get_utf8_5:case genop_bs_skip_utf8_4:case genop_bs_get_float2_7:case genop_bs_get_utf16_5:case genop_bs_skip_utf16_4:case genop_bs_get_utf32_5:case genop_bs_skip_utf32_4:case genop_bs_skip_bits2_5:case genop_bs_get_binary2_7:case genop_bs_get_integer2_7:case genop_bs_start_match3_4:case genop_bs_start_match4_4:case genop_bs_get_position_3:case genop_bs_set_position_2:case genop_bs_get_tail_3:case genop_gc_bif3_7:case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_make_fun3_3:
+        case genop_bs_match_3:case genop_bs_match_string_4:case genop_bs_get_utf8_5:case genop_bs_skip_utf8_4:case genop_bs_get_float2_7:case genop_bs_get_utf16_5:case genop_bs_skip_utf16_4:case genop_bs_get_utf32_5:case genop_bs_skip_utf32_4:case genop_bs_skip_bits2_5:case genop_bs_get_binary2_7:case genop_bs_get_integer2_7:case genop_bs_start_match3_4:case genop_bs_start_match4_4:case genop_bs_get_position_3:case genop_bs_set_position_2:case genop_bs_get_tail_3:case genop_gc_bif3_7:case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_bif3_6:case genop_make_fun3_3:
         case genop_new_map_3:case genop_put_map_assoc_5:case genop_put_map_exact_5:
         case genop_get_map_elements_3:case genop_has_map_fields_3:
         case genop_fconv_2:case genop_fmove_2:case genop_fload_2:case genop_fstore_2:case genop_fadd_4:case genop_fsub_4:case genop_i_fsub_3:case genop_fnegate_3:case genop_fmul_4:case genop_i_fmul_3:case genop_fdiv_4:case genop_i_fdiv_3:
@@ -884,8 +887,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             for(r=0;r<live;++r) REQUIRE(source(st,&f,a[3+r]));
             if(live) { REQUIRE(f.heap>=LB_FUN_WORDS+live); f.heap-=LB_FUN_WORDS+live; }
             REQUIRE(destination(&f,a[1],0)); break;
-        case genop_bif1_4:case genop_bif2_5: {
-            size_t arity=op->op==genop_bif1_4?1:2;
+        case genop_bif1_4:case genop_bif2_5:case genop_bif3_6: {
+            size_t arity=op->op==genop_bif1_4?1:op->op==genop_bif2_5?2:3;
             REQUIRE(a[1].type==TAG_u && (Uint)a[1].val<st->beam.imports.count);
             const BifEntry *native=st->bif_imports[a[1].val];
             if(native==&st->space->engine->bifs[BIF_get_1] && arity==1) {
@@ -916,14 +919,21 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         }
         case genop_put_map_assoc_5: {
             size_t size,live;
+            p->error.stage="put_map_assoc failure label";
             REQUIRE((a[0].type==TAG_f && (!a[0].val || label(st,a[0]))) || (a[0].type==TAG_p && !a[0].val));
-            REQUIRE(source(st,&f,a[1]));
+            p->error.stage="put_map_assoc source"; REQUIRE(source(st,&f,a[1]));
+            p->error.stage="put_map_assoc destination and live count";
             REQUIRE((a[2].type==TAG_x || a[2].type==TAG_y) && a[3].type==TAG_u && (Uint)a[3].val<MAX_REG);
-            REQUIRE(a[4].type==TAG_u && !(a[4].val&1) && (Uint)a[4].val<=2*LB_FLATMAP_MAX_SIZE);
+            p->error.stage="put_map_assoc update count type"; REQUIRE(a[4].type==TAG_u);
+            p->error.stage="put_map_assoc update count range"; REQUIRE(a[4].val>=0 && (Uint)a[4].val<=2*LB_MAP_MAX_FIELDS);
+            p->error.stage="put_map_assoc update count parity"; REQUIRE(!(a[4].val&1));
             size=(Uint)a[4].val; live=(Uint)a[3].val;
+            p->error.stage="put_map_assoc update roots";
             REQUIRE(op->arity==5+size && roots(&f,live));
+            p->error.stage="put_map_assoc update source";
             for(r=5;r<op->arity;++r) REQUIRE(source(st,&f,a[r]));
-            trim_live(&f,live); REQUIRE(destination(&f,a[2],MAP_SHAPE)); f.heap=0; break;
+            trim_live(&f,live); p->error.stage="put_map_assoc result";
+            REQUIRE(destination(&f,a[2],MAP_SHAPE)); f.heap=0; break;
         }
         case genop_put_map_exact_5: {
             size_t size,live;
@@ -1422,7 +1432,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_is_lt_3:case genop_is_ge_3:case genop_is_eq_3:case genop_is_ne_3:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_binary_2:case genop_is_list_2:case genop_is_integer_2:case genop_is_map_2:case genop_is_function_2:case genop_is_function2_3:
         case genop_is_float_2:case genop_is_number_2:case genop_is_port_2:case genop_is_boolean_2:case genop_is_bitstr_2:
-        case genop_is_tuple_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_is_nonempty_list_2:
+        case genop_is_tuple_2:case genop_is_any_native_record_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_is_nonempty_list_2:
             if(op->op==genop_is_eq_exact_3) {
                 p->error.stage="is_eq_exact failure target"; REQUIRE(label(st,a[0]));
                 p->error.stage="is_eq_exact first operand"; REQUIRE(source(st,&f,a[1]));

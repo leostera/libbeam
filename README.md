@@ -47,7 +47,7 @@ Historical full-ERTS/Realm tooling is retired, not an alternate runtime backend.
 
 ## Build and test
 
-Use Bazel **9.3.0**, a native C/C++ toolchain, Erlang/OTP 28, Elixir >= 1.19,
+Use Bazel **9.3.0**, a native C/C++ toolchain, Erlang/OTP 29 or newer, Elixir >= 1.19,
 Perl, zlib and native binutils. Reuse incremental outputs:
 
 ```sh

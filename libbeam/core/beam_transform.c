@@ -340,9 +340,27 @@ static int transform_update_record(LoaderState *st,BeamOp *source)
     }
     previous->next=source->next; st->genop=first; lb_load_free_op(st,source); return TE_OK;
 }
+static int empty_map_literal(LoaderState *st,BeamOpArg source)
+{
+    Eterm term;
+    return source.type==TAG_q &&
+        lb_beam_program_literal(st->program,st->space->atoms,source.val,&term)==LB_BEAM_OK &&
+        lb_is_flatmap(term) && ((LbFlatMap *)boxed_val(term))->size==0;
+}
 int lb_transform(LoaderState *st)
 {
     BeamOp *unary=st->genop;
+    if(unary->op==genop_i_put_map_assoc_4 && unary->arity>=4 &&
+       unary->a[3].type==TAG_u && unary->a[3].val>2*LB_FLATMAP_MAX_SIZE) {
+        Uint words=(Uint)unary->a[3].val;
+        if(words>2*LB_MAP_MAX_FIELDS) return TE_UNSUPPORTED;
+        if(unary->arity!=4+words) { st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT; }
+        if(!empty_map_literal(st,unary->a[0])) return TE_UNSUPPORTED;
+        unary->a[0]=unary->a[1]; unary->a[1]=unary->a[2]; unary->a[2]=unary->a[3];
+        memmove(unary->a+3,unary->a+4,words*sizeof(*unary->a));
+        unary->op=genop_new_map_3; unary->arity=3+words;
+        return TE_OK;
+    }
     if(unary->op==genop_bs_get_float2_7) {
         BeamOpArg fail,context,live,size,unit_flags,destination; Uint flags,unit;
         if(unary->arity!=7 ||
