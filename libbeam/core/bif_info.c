@@ -42,7 +42,14 @@ Eterm lb_bif_is_builtin_3(LbProcess *p,Eterm *args,const BeamInstr *pc)
     }
     Sint arity=signed_val(args[2]);
     if(arity<0 || arity>MAX_ARG) return am_false;
-    LbEngine *engine=p->entry_module->space->engine;
+    LbCodeSpace *space=p->entry_module->space;
+    if(space->lists_reverse_bif.f && space->lists_reverse_bif.module==args[0] &&
+       space->lists_reverse_bif.name==args[1] && arity==2) {
+        if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
+        ++p->last_native_cost;
+        return am_true;
+    }
+    LbEngine *engine=space->engine;
     for(size_t i=0;i<LB_NATIVE_COUNT;++i) {
         if(!lb_work_domain_charge(domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return THE_NON_VALUE; }
         ++p->last_native_cost;

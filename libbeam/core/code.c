@@ -5,6 +5,7 @@
  * instruction ABI; this replaces the singleton loader/code-index architecture.
  */
 #include "code_internal.h"
+#include "atoms.h"
 #include "alias.h"
 #include "md5.h"
 #include "pid_table.h"
@@ -27,12 +28,27 @@ Export *lb_export_find(LbCodeSpace *space,Eterm module,Eterm function,unsigned a
         if(e->info.mfa.module==module && e->info.mfa.function==function && e->info.mfa.arity==arity) return e;
     return NULL;
 }
+static Export *lists_reverse_native(LoaderState *st,Eterm module,Eterm function,unsigned arity)
+{
+    if(arity!=2 || module!=st->space->lists_reverse_bif.module ||
+       function!=st->space->lists_reverse_bif.name) return NULL;
+    for(size_t i=0;i<LB_NATIVE_COUNT;++i) {
+        if(st->space->engine->native_ids[i]==LB_BIF_LISTS_REVERSE_2) {
+            Export *native=&st->space->natives[i];
+            native->info.mfa=(LbMFA){module,function,2};
+            return native;
+        }
+    }
+    abort();
+}
 LbCodeStatus lb_code_space_create_in_domain(LbEngine *engine,LbAllocDomain *domain,LbCodeSpace **out)
 {
     LbCodeSpace *space;
     void *memory;
     size_t i;
     LbAtomStatus status;
+    static const LbBeamBytes additional_atoms[]={{(const uint8_t*)"lists",5},{(const uint8_t*)"reverse",7}};
+    Eterm additional_terms[2];
     if(!out) return LB_CODE_INVALID;
     *out=NULL; if(!engine || !domain) return LB_CODE_INVALID;
     if(!lb_engine_is_open(engine)) return LB_CODE_CLOSED;
@@ -42,6 +58,12 @@ LbCodeStatus lb_code_space_create_in_domain(LbEngine *engine,LbAllocDomain *doma
     space->node_name=am_Noname;
     status=lb_atoms_create(domain,1048576,&space->atoms);
     if(status!=LB_ATOM_OK) { lb_release(domain,space); return status==LB_ATOM_NO_MEMORY?LB_CODE_NO_MEMORY:LB_CODE_LIMIT; }
+    status=lb_atoms_intern_names(space->atoms,additional_atoms,2,additional_terms);
+    if(status!=LB_ATOM_OK) {
+        if(lb_atoms_destroy(space->atoms)!=LB_ATOM_OK) abort();
+        lb_release(domain,space);
+        return status==LB_ATOM_NO_MEMORY?LB_CODE_NO_MEMORY:LB_CODE_LIMIT;
+    }
     for(i=0;i<LB_NATIVE_COUNT;++i) {
         unsigned id=engine->native_ids[i];
         const BifEntry *bif=&engine->bifs[id];
@@ -56,6 +78,14 @@ LbCodeStatus lb_code_space_create_in_domain(LbEngine *engine,LbAllocDomain *doma
         e->dispatch.addresses[0]=&e->trampoline.op;
         e->next=space->exports; space->exports=e;
     }
+    space->lists_reverse_bif=engine->bifs[LB_BIF_LISTS_REVERSE_2];
+    space->lists_reverse_bif.module=additional_terms[0];
+    space->lists_reverse_bif.name=additional_terms[1];
+    for(i=0;i<LB_NATIVE_COUNT;++i) if(engine->native_ids[i]==LB_BIF_LISTS_REVERSE_2) {
+        space->natives[i].info.mfa=(LbMFA){additional_terms[0],additional_terms[1],2};
+        break;
+    }
+    if(i==LB_NATIVE_COUNT) abort();
     Export *apply=&space->apply_export;
     apply->bif_number=-1; apply->info.op=op_i_func_info_IaaI;
     apply->info.mfa=(LbMFA){am_erlang,am_apply,3};
@@ -184,9 +214,13 @@ LbCodeStatus lb_code_resolve_imports(LoaderState *st,LbCodeModule *const *batch,
     size_t i;
     for(i=0;i<module->import_count;++i) {
         BeamFile_ImportEntry *entry=&st->beam.imports.entries[i];
-        Export *export=entry->module==module->name?local_export(module,entry->function,(unsigned)entry->arity):
+        Export *native=lb_export_find(st->space,entry->module,entry->function,(unsigned)entry->arity);
+        Export *override=lists_reverse_native(st,entry->module,entry->function,(unsigned)entry->arity);
+        if(override) native=override;
+        Export *export=override?override:native && native->bif_number>=0?native:
+            entry->module==module->name?local_export(module,entry->function,(unsigned)entry->arity):
             batch_export_find(batch,count,entry->module,entry->function,(unsigned)entry->arity);
-        if(!export) export=lb_export_find(st->space,entry->module,entry->function,(unsigned)entry->arity);
+        if(!export) export=native;
         if(!export && st->space->preloading && entry->module==am_erlang)
             export=lb_export_find(st->space,entry->module,entry->function,(unsigned)entry->arity);
         if(!export) {
@@ -197,7 +231,8 @@ LbCodeStatus lb_code_resolve_imports(LoaderState *st,LbCodeModule *const *batch,
             return LB_CODE_LIMIT;
         module->imports[i]=export;
         module->dependencies[i]=export->owner==module?NULL:export->owner;
-        if(export->bif_number>=0) st->bif_imports[i]=&st->space->engine->bifs[export->bif_number];
+        if(override) st->bif_imports[i]=&st->space->lists_reverse_bif;
+        else if(export->bif_number>=0) st->bif_imports[i]=&st->space->engine->bifs[export->bif_number];
     }
     {
         LbExternalFunPatch *patch=st->program->external_funs;
@@ -206,9 +241,13 @@ LbCodeStatus lb_code_resolve_imports(LoaderState *st,LbCodeModule *const *batch,
             Export *export;
             if(!is_atom(patch->module) || !is_atom(patch->function) || !is_small(patch->arity) ||
                signed_val(patch->arity)<0 || signed_val(patch->arity)>255) return LB_CODE_FORMAT;
-            export=patch->module==module->name?local_export(module,patch->function,(unsigned)signed_val(patch->arity)):
+            Export *native=lb_export_find(st->space,patch->module,patch->function,(unsigned)signed_val(patch->arity));
+            Export *override=lists_reverse_native(st,patch->module,patch->function,(unsigned)signed_val(patch->arity));
+            if(override) native=override;
+            export=override?override:native && native->bif_number>=0?native:
+                patch->module==module->name?local_export(module,patch->function,(unsigned)signed_val(patch->arity)):
                 batch_export_find(batch,count,patch->module,patch->function,(unsigned)signed_val(patch->arity));
-            if(!export) export=lb_export_find(st->space,patch->module,patch->function,(unsigned)signed_val(patch->arity));
+            if(!export) export=native;
             if(!export) {
                 st->program->error.stage="unresolved external fun";
                 st->program->error.offset=external_index;

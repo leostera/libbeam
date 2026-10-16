@@ -69,6 +69,7 @@ struct LbCodeSpace {
     LbCodeModule *modules;
     Export *exports;
     Export natives[LB_NATIVE_COUNT];
+    BifEntry lists_reverse_bif;
     Export apply_export; /* erlang:apply/3 is an instruction, not a value BIF */
     Export apply_fun_export; /* erlang:apply/2 dispatches a retained fun */
     size_t messages; /* owned prepared/queued fragments pin atoms and namespace */
@@ -142,6 +143,15 @@ Eterm lb_bif_make_tuple_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_error_2(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_exit_1(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_nif_error_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_re_import_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_re_version_0(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_re_run_3(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_binary_match_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_binary_split_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_lists_reverse_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_maps_from_list_1(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_maps_merge_2(LbProcess *,Eterm *,const BeamInstr *);
+Eterm lb_bif_map_next_3(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_get_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_get_keys_0(LbProcess *,Eterm *,const BeamInstr *);
 Eterm lb_bif_get_keys_1(LbProcess *,Eterm *,const BeamInstr *);

@@ -261,6 +261,15 @@ LbEngineStatus lb_engine_create_with_limits(const LbSystemAllocator *allocator,c
         {BIF_trunc_1,{am_erlang,am_trunc,1,lb_bif_trunc_1,BIF_KIND_HEAVY}},
         {BIF_round_1,{am_erlang,am_round,1,lb_bif_round_1,BIF_KIND_HEAVY}},
         {BIF_float_1,{am_erlang,am_float,1,lb_bif_float_1,BIF_KIND_HEAVY}},
+        {BIF_re_import_1,{am_re,am_import,1,lb_bif_re_import_1,BIF_KIND_HEAVY}},
+        {BIF_re_version_0,{am_re,am_version,0,lb_bif_re_version_0,BIF_KIND_HEAVY}},
+        {BIF_re_run_3,{am_re,am_run,3,lb_bif_re_run_3,BIF_KIND_HEAVY}},
+        {BIF_binary_match_2,{am_binary,am_match,2,lb_bif_binary_match_2,BIF_KIND_HEAVY}},
+        {BIF_binary_split_2,{am_binary,am_split,2,lb_bif_binary_split_2,BIF_KIND_HEAVY}},
+        {BIF_maps_from_list_1,{am_maps,am_from_list,1,lb_bif_maps_from_list_1,BIF_KIND_HEAVY}},
+        {BIF_maps_merge_2,{am_maps,am_merge,2,lb_bif_maps_merge_2,BIF_KIND_HEAVY}},
+        {BIF_erts_internal_map_next_3,{am_erts_internal,am_map_next,3,lb_bif_map_next_3,BIF_KIND_HEAVY}},
+        {LB_BIF_LISTS_REVERSE_2,{NIL,NIL,2,lb_bif_lists_reverse_2,BIF_KIND_HEAVY}},
 #define LB_TYPE_PREDICATE(name, predicate) {BIF_##name##_1,{am_erlang,am_##name,1,lb_bif_##name##_1,BIF_KIND_GUARD}},
 #include "type_predicates.def"
 #undef LB_TYPE_PREDICATE

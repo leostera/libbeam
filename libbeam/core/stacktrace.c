@@ -85,9 +85,12 @@ LbProcessStatus lb_error_down_reason(LbProcess *p,Eterm *out)
     if(!lb_work_domain_charge(space->domain,LB_NATIVE_COUNT)) return LB_PROCESS_WORK_LIMIT;
     for(size_t i=0;i<LB_NATIVE_COUNT;++i) if(pc==space->natives[i].dispatch.addresses[0]) { bif=1; break; }
     if(bif && p->current->function!=am_error) {
-        /* All admitted native imports are erlang BIFs. Other format modules
-         * and BIF cause maps require their own positive catalog admission. */
-        if(p->current->module!=am_erlang || (p->freason&LB_EXF_HAS_EXT_INFO)) return LB_PROCESS_REFUSED;
+        /* Only the exact admitted lists:reverse/2 catalog exception may
+         * raise from a non-erlang native module. */
+        int library_reverse=p->current->module==space->lists_reverse_bif.module &&
+            p->current->function==space->lists_reverse_bif.name && p->current->arity==2;
+        if((p->current->module!=am_erlang && !library_reverse) || (p->freason&LB_EXF_HAS_EXT_INFO))
+            return LB_PROCESS_REFUSED;
         frames[depth++].mfa=*p->current; copy_args=1; args_arity=p->current->arity;
         pc=p->native_callsite;
         if(pc && lookup(space,pc,&frames[depth].mfa)) ++depth;

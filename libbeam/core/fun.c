@@ -414,23 +414,26 @@ Uint lb_fun_mark_code(LbProcess *p)
 }
 LbAllocStatus lb_fun_prepare_instruction(LbProcess *p,const BeamInstr *pc,Uint *cost)
 {
-    *cost=0; LbCodeSpace *space=p->entry_module->space;
-    if(!space->has_fun_literals) return LB_ALLOC_OK;
-    Uint address=(Uint)pc;
-    for(LbCodeModule *module=space->modules;module;module=module->next) {
-        if(!lb_work_domain_charge(space->domain,1)) return LB_ALLOC_WORK_LIMIT;
+    *cost=0;
+    LbCodeSpace *space=p->entry_module->space;
+    if(!space->has_fun_literals || pc==p->pc_native ||
+       pc==space->apply_export.dispatch.addresses[0] ||
+       pc==space->apply_fun_export.dispatch.addresses[0]) return LB_ALLOC_OK;
+    /* The dispatch loop validates and caches the current code range before
+     * reaching this hook. Reuse that proof instead of rescanning every module
+     * at every instruction (which can starve heavy BIFs in large closures). */
+    LbCodeModule *module=p->pc_module;
+    /* Native dispatch entries are not module code and cannot own literal
+     * fun references. Module PCs were already established by pc_valid_work. */
+    if(!module || !contains_code(module,(Uint)pc)) return LB_ALLOC_OK;
+    size_t index=(size_t)(pc-module->words);
+    for(const LbLiteralFunUse *use=module->literal_fun_uses;use;use=use->next) {
+        if(!lb_work_domain_charge(module->space->domain,1)) return LB_ALLOC_WORK_LIMIT;
         ++*cost;
-        if(!contains_code(module,address)) continue;
-        size_t index=(size_t)(pc-module->words);
-        for(const LbLiteralFunUse *use=module->literal_fun_uses;use;use=use->next) {
-            if(!lb_work_domain_charge(space->domain,1)) return LB_ALLOC_WORK_LIMIT;
-            ++*cost;
-            if(use->pc!=index) continue;
-            LbAllocStatus status=use->entry ? lb_fun_retain(p,use->entry) :
-                lb_fun_retain_export(space,&p->fun_leases,use->external,cost);
-            if(status!=LB_ALLOC_OK) return status;
-        }
-        break;
+        if(use->pc!=index) continue;
+        LbAllocStatus status=use->entry ? lb_fun_retain(p,use->entry) :
+            lb_fun_retain_export(space,&p->fun_leases,use->external,cost);
+        if(status!=LB_ALLOC_OK) return status;
     }
     return LB_ALLOC_OK;
 }

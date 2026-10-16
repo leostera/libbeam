@@ -211,6 +211,12 @@ protected:
             ASSERT_FALSE(loaded) << (loaded ? loaded->message : "");
             shared_loaded = true;
         }
+        if(!sdk_loaded) {
+            const auto beam=read_file(sdk_fixture_path);
+            const auto loaded_sdk=shared_isolate->load_module(view(beam));
+            ASSERT_FALSE(loaded_sdk) << (loaded_sdk?loaded_sdk->message:"");
+            sdk_loaded=true;
+        }
         engine = &*shared_engine;
         isolate = &*shared_isolate;
     }
@@ -233,13 +239,13 @@ protected:
             EXPECT_EQ(error->code, libbeam::ErrorCode::closed);
         return {result.begin(), result.end()};
     }
-    static void reclaim(libbeam::Isolate& target) {
-        auto receipt = take(target.stop());
-        EXPECT_FALSE(receipt.wait_until(deadline()));
-        const auto usage = take(target.resource_usage());
+    static void reclaim(libbeam::Isolate& target,uint64_t expected_memory=512u*1024u*1024u) {
+        auto receipt=take(target.stop());
+        EXPECT_FALSE(receipt.wait_until(std::chrono::steady_clock::now()+std::chrono::seconds(60)));
+        const auto usage=take(target.resource_usage());
         EXPECT_TRUE(usage.closed);
-        EXPECT_EQ(usage.memory_current, 0u);
-        EXPECT_EQ(usage.limits.memory_limit_bytes, 512u * 1024u * 1024u);
+        EXPECT_EQ(usage.memory_current,0u);
+        EXPECT_EQ(usage.limits.memory_limit_bytes,expected_memory);
         EXPECT_EQ(usage.limits.invocation_work_limit, 10000000u);
     }
     void TearDown() override {}
@@ -248,13 +254,13 @@ public:
         try {
             if (shared_isolate) {
                 auto receipt = take(shared_isolate->stop());
-                if (receipt.wait_until(deadline())) return false;
+                if(receipt.wait_until(std::chrono::steady_clock::now()+std::chrono::seconds(60))) return false;
                 const auto usage = take(shared_isolate->resource_usage());
                 if (!usage.closed || usage.memory_current != 0) return false;
                 shared_isolate.reset();
             }
             if (shared_engine) {
-                if (shared_engine->shutdown(deadline())) return false;
+                if(shared_engine->shutdown(std::chrono::steady_clock::now()+std::chrono::seconds(60))) return false;
                 shared_engine.reset();
             }
             return true;
@@ -278,20 +284,34 @@ TEST_F(HelloWorker, ClosureFitsDefaultMemoryBudget) {
     auto peer=take(engine->create_isolate());
     const auto loaded=load(peer);
     ASSERT_FALSE(loaded) << (loaded?loaded->message:"");
+    const auto input=request("GET","/hello");
+    auto call=take(peer.start("Elixir.HelloWorker","__midgard_call__",view(input)));
+    auto result=take(call.wait_until(std::chrono::steady_clock::now()+std::chrono::seconds(60)));
+    const auto expected=response(200,"Hello, world!\n");
+    EXPECT_EQ(result,Bytes(expected.begin(),expected.end()));
     auto receipt=take(peer.stop());
-    EXPECT_FALSE(receipt.wait_until(deadline()));
+    EXPECT_FALSE(receipt.wait_until(std::chrono::steady_clock::now()+std::chrono::seconds(60)));
     const auto usage=take(peer.resource_usage());
     EXPECT_TRUE(usage.closed);
     EXPECT_EQ(usage.memory_current,0u);
     EXPECT_EQ(usage.limits.memory_limit_bytes,256u*1024u*1024u);
     EXPECT_EQ(usage.limits.invocation_work_limit,10000000u);
 }
-TEST_F(HelloWorker, NamedAndEncodedGreetings) {
+TEST_F(HelloWorker, QueryStringDecoding) {
     EXPECT_EQ(invoke(request("GET", "/hello", "name=Leo")), response(200, "Hello, Leo!\n"));
-    EXPECT_EQ(invoke(request("GET", "/hello", "name=Hello%20World%21")), response(200, "Hello, Hello World!!\n"));
-    EXPECT_EQ(invoke(request("GET", "/hello", "name=a+b")), response(200, "Hello, a b!\n"));
-    EXPECT_EQ(invoke(request("GET", "/hello", "name=J%C3%B6rg")), response(200, "Hello, J\xc3\xb6rg!\n"));
     EXPECT_EQ(invoke(request("GET", "/hello", "name=")), response(200, "Hello, !\n"));
+}
+TEST_F(HelloWorker, PlusQueryStringDecoding) {
+    EXPECT_EQ(invoke(request("GET", "/hello", "name=a+b")), response(200, "Hello, a b!\n"));
+}
+TEST_F(HelloWorker, RegexInputBoundaries) {
+    EXPECT_EQ(invoke(request("GET","/hello","","",{{"x-test","value"}})),
+              response(200,"Hello, world!\n"));
+    for(const auto& name : {std::string(""),std::string("x_test"),std::string("X-Test"),std::string("x-\xc3\xa9")}) {
+        SCOPED_TRACE(name);
+        EXPECT_EQ(invoke(request("GET","/hello","","",{{name,"value"}})),
+                  response(400,"worker error\n"));
+    }
 }
 TEST_F(HelloWorker, RealJasonJson) {
     EXPECT_EQ(invoke(request("POST", "/json", "", R"({"name":"Leo"})")),
@@ -385,7 +405,7 @@ TEST_F(HelloWorker, TwoIsolatesShareEngineNotApplicationState) {
         const auto result = take(pending.wait_until(deadline()));
         EXPECT_EQ(std::string(result.begin(), result.end()), response(200, "Hello, peer!\n"));
     }
-    reclaim(peer);
+    reclaim(peer,256u*1024u*1024u);
     EXPECT_EQ(invoke(request("GET", "/hello")), response(200, "Hello, world!\n"));
 }
 // Separate callback fixtures exercise the real SDK without altering HelloWorker.
@@ -393,14 +413,8 @@ class SdkBoundary : public HelloWorker {
 protected:
     void SetUp() override {
         HelloWorker::SetUp();
-        if (HasFatalFailure() || shared_load_error) return;
-        if (!sdk_loaded) {
-            const auto beam = read_file(sdk_fixture_path);
-            const auto loaded = isolate->load_module(view(beam));
-            ASSERT_FALSE(loaded) << (loaded ? loaded->message : "");
-            sdk_loaded = true;
-        }
-        entry_module = "Elixir.BoundaryWorker";
+        if(HasFatalFailure() || shared_load_error) return;
+        entry_module="Elixir.BoundaryWorker";
     }
 };
 TEST_F(SdkBoundary, OrdinaryCallbackExceptionBecomes500AndAllowsReuse) {

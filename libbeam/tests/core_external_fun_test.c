@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0
- * Copyright 2026 Leandro Ostera <leandro@earendil-works.com>
+ * Copyright 2026 Leandro Ostera <leandro@ostera.io>
  */
 #include "process_internal.h"
 #include "fun.h"
