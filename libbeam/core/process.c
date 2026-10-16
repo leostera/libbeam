@@ -5,6 +5,7 @@
  * Based on emu/beam_emu.c process_main's NO_JUMP_TABLE dispatch, register swaps,
  * continuation return, and native BIF call/epilogue. No scheduler/TLS singleton.
  */
+#define _POSIX_C_SOURCE 200809L
 #include "process_internal.h"
 #include "exit_signal.h"
 #include "apply.h"
