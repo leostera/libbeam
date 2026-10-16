@@ -3,7 +3,7 @@
 
 %% Included in both variants. Only the binary version tag differs.
 %% No files, ports, NIFs, distribution, on_load, or tenant lifecycle API.
--export([boot/1, request/1]).
+-export([boot/1, request/1, foreign/1]).
 
 boot(<<>>) ->
     Parent = self(),
@@ -32,6 +32,16 @@ request(Command) when Command =:= <<"next">>; Command =:= <<"read">> ->
         error(request_timeout)
     end.
 
+foreign(PidBytes) ->
+    Pid = binary_to_term(PidBytes),
+    Ref = make_ref(),
+    Pid ! {cross, self(), Ref},
+    receive
+        {Ref, Reply} -> Reply
+    after 10 ->
+        <<?VERSION/binary, ":no-route">>
+    end.
+
 loop(Count) ->
     receive
         {From, Ref, <<"next">>} ->
@@ -40,5 +50,8 @@ loop(Count) ->
             loop(Next);
         {From, Ref, <<"read">>} ->
             From ! {Ref, <<?VERSION/binary, ":", (integer_to_binary(Count))/binary>>},
-            loop(Count)
+            loop(Count);
+        {cross, From, Ref} ->
+            From ! {Ref, <<?VERSION/binary, ":cross">>},
+            loop(Count + 1)
     end.

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Leandro Ostera <leandro@ostera.io>
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_fuzzing//fuzzing:cc_defs.bzl", "cc_fuzz_test")
 load("//bazel:testing.bzl", "cross_configuration_artifacts", "runtime_link_inputs", "source_inventory")
 
 package(default_visibility = ["//visibility:public"])
@@ -6238,6 +6239,31 @@ cc_test(
   data = ["send_slice_fixture", "monitor_slice_fixture", "group_leader_slice_fixture", "process_flag_slice_fixture"],
   deps = ["libbeam"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+filegroup(
+  name = "isolate_boundary_fuzz_seeds",
+  srcs = glob(["tests/fuzz_corpus/isolate_boundary/*"]),
+)
+
+cc_fuzz_test(
+  name = "beam_image_fuzz",
+  srcs = ["tests/beam_image_fuzz.cpp"],
+  copts = ["-std=c++17"],
+  data = ["probe_a_fixture"],
+  corpus = ["probe_a_fixture", "probe_b_fixture"],
+  deps = ["libbeam"],
+  tags = ["manual"],
+)
+
+cc_fuzz_test(
+  name = "isolate_boundary_fuzz",
+  srcs = ["tests/isolate_boundary_fuzz.cpp", "tests/test_process.hpp"],
+  copts = ["-std=c++17"],
+  data = ["probe_a_fixture", "probe_b_fixture"],
+  corpus = [":isolate_boundary_fuzz_seeds"],
+  deps = ["libbeam"],
+  tags = ["manual"],
 )
 
 genrule(
