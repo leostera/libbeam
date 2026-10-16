@@ -9,6 +9,7 @@
 #include "md5.h"
 #include "pid_table.h"
 #include "fun.h"
+#include <stdio.h>
 static int module_imports_denied_nif(const LbCodeModule *module);
 static LbCodeStatus from_beam(LbBeamStatus s)
 {
@@ -282,7 +283,12 @@ LbCodeStatus lb_code_compile_prepared(LoaderState *prepared)
     LbCodeModule *module=st->module_code;
     LbCodeStatus status;
     size_t rewrites=0,i;
-    status=lb_verify_program(st); if(status!=LB_CODE_OK) return status;
+    status=lb_verify_program(st);
+    if(status!=LB_CODE_OK) {
+        if(module->name==am_string && st->program->error.offset==17358)
+            fprintf(stderr,"STRING_VERIFY_FAIL status=%d stage=%s offset=%zu\n",status,st->program->error.stage,st->program->error.offset);
+        return status;
+    }
     if(module->activation==LB_MODULE_ON_LOAD_DENIED_NIF) {
         size_t words;
         if(!module_imports_denied_nif(module) || !module->export_count ||
@@ -316,16 +322,29 @@ LbCodeStatus lb_code_compile_prepared(LoaderState *prepared)
             if(result!=TE_FAIL) return LB_CODE_FORMAT;
         }
         st->program->error.stage="specific selection";
-        if(lb_beam_select_specific(op,&selection)!=LB_BEAM_OK) return LB_CODE_UNSUPPORTED;
+        if(lb_beam_select_specific(op,&selection)!=LB_BEAM_OK) {
+            if(module->name==am_string && op->offset==17358)
+                fprintf(stderr,"STRING_SELECT_FAIL generic=%u arity=%u\n",op->op,op->arity);
+            return LB_CODE_UNSUPPORTED;
+        }
         st->specific_op=(int)selection.opcode;
         st->program->error.stage=opc[selection.opcode].name;
         if(selection.opcode!=op_label_L && selection.opcode!=op_line_I && selection.opcode!=op_nif_start &&
            selection.opcode!=op_i_nif_padding &&
            selection.opcode!=op_i_func_info_IaaI && selection.opcode!=op_int_code_end &&
-           !lb_instruction_supported(selection.opcode)) return LB_CODE_UNSUPPORTED;
+           !lb_instruction_supported(selection.opcode)) {
+            if(module->name==am_string && op->offset==17358)
+                fprintf(stderr,"STRING_SUPPORT_FAIL specific=%d generic=%u arity=%u\n",selection.opcode,op->op,op->arity);
+            return LB_CODE_UNSUPPORTED;
+        }
         for(i=0;i<op->arity && i<sizeof(selection.r_mask)*CHAR_BIT;++i)
             if(selection.r_mask&(1u<<i)) op->a[i].type=TAG_r;
-        status=lb_emit(st,op); if(status!=LB_CODE_OK) return status;
+        status=lb_emit(st,op);
+        if(status!=LB_CODE_OK) {
+            if(module->name==am_string && op->offset==17358)
+                fprintf(stderr,"STRING_EMIT_FAIL status=%d specific=%d generic=%u arity=%u\n",status,selection.opcode,op->op,op->arity);
+            return status;
+        }
         st->genop=op->next; lb_load_free_op(st,op);
     }
     st->program->error.stage="relocation";
