@@ -1,2 +1,0 @@
-module(name = "cache_contract")
-bazel_dep(name = "rules_cc", version = "0.2.22")

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Leandro Ostera <leandro@ostera.io>
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_test")
-exports_files(["host_tools.bzl"])
+exports_files(["host_tools.bzl", "rules_cc_macos_sdk.patch"])
 
 cc_binary(
   name = "atom_generator",

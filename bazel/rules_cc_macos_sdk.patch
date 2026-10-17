@@ -1,0 +1,23 @@
+diff --git a/cc/private/toolchain/unix_cc_configure.bzl b/cc/private/toolchain/unix_cc_configure.bzl
+--- a/cc/private/toolchain/unix_cc_configure.bzl
++++ b/cc/private/toolchain/unix_cc_configure.bzl
+@@ -567,4 +567,13 @@
+         "-print-resource-dir",
+     )
+     no_canonical_prefixes_opt = _get_no_canonical_prefixes_opt(repository_ctx, cc)
++    macos_sdk_root = []
++    if darwin:
++        xcrun = repository_ctx.which("xcrun")
++        if xcrun:
++            sdk = repository_ctx.execute([xcrun, "--sdk", "macosx", "--show-sdk-path"])
++            if sdk.return_code == 0:
++                sdk_path = sdk.stdout.strip()
++                sdk_parent = "/".join(sdk_path.split("/")[:-1])
++                macos_sdk_root = [sdk_path, sdk_parent + "/MacOSX.sdk"]
+     builtin_include_directories = _uniq(
+@@ -601,4 +608,4 @@
+         # Always included in case the user has Xcode + the CLT installed, both
+         # paths can be used interchangeably
+-        (["/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"] if darwin else []),
++        (["/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"] if darwin else []) + macos_sdk_root,
+     )

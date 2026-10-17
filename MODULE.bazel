@@ -6,6 +6,15 @@ bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "nlohmann_json", version = "3.12.0.bcr.2")
 bazel_dep(name = "boringssl", version = "0.20260929.0")
+# rules_cc's Darwin toolchain only allowlists the fixed CLT SDK root. Include
+# the active versioned Xcode SDK root too, or Bazel treats SDK headers as
+# undeclared absolute includes.
+single_version_override(
+    module_name = "rules_cc",
+    version = "0.2.22",
+    patches = ["//bazel:rules_cc_macos_sdk.patch"],
+    patch_strip = 1,
+)
 
 host_tools = use_repo_rule("//bazel:host_tools.bzl", "host_tools")
 host_tools(name = "libbeam_host")

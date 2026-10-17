@@ -50,7 +50,13 @@ assemble(Source, Target, Mode) ->
             {Functions, {CurrentName, CurrentArity, CurrentLabel, [Instruction | CurrentOps]}}
     end, {[], none}, Forms),
     Functions = lists:reverse([{function, Name, Arity, Label, lists:reverse(Ops)} | Done]),
-    %% OTP 29's beam_asm takes annotations separately; this low-level assembler
-    %% bypasses only the compiler's semantic verifier, not libbeam admission.
-    {ok, Binary} = beam_asm:module({Mod, Exports, Attributes, #{}, Functions, Labels}, [], [], []),
+    %% OTP 29+ added an annotation map to beam_asm's module input. Keep the
+    %% OTP 28 shape for the supported OTP 28 toolchain, and use the newer shape
+    %% when the host compiler expects it. This bypasses only OTP's semantic
+    %% verifier, not libbeam admission.
+    Module = case list_to_integer(erlang:system_info(otp_release)) >= 29 of
+        true -> {Mod, Exports, Attributes, #{}, Functions, Labels};
+        false -> {Mod, Exports, Attributes, Functions, Labels}
+    end,
+    {ok, Binary} = beam_asm:module(Module, [], [], []),
     ok = file:write_file(Target, Binary).
