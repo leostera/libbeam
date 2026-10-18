@@ -9,4 +9,12 @@ identity(Input) -> Input.
 invoke(_F,direct,[A0,A1]) -> erlang:'spawn_link'(A0,A1);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
 check(F,Mode,V) ->
-    Parent = self(), P = invoke(F, Mode, [node(),fun() -> Parent ! done end]), true = is_pid(P), receive done -> true after 1000 -> false end.
+    Parent = self(), P = invoke(F,Mode,[node(),fun() -> Parent ! done end]),
+    true = is_pid(P),
+    {links,Links} = erlang:process_info(self(),links),
+    true = has_link(P,Links),
+    true = unlink(P),
+    receive done -> true after 1000 -> false end.
+has_link(P,[P|_]) -> true;
+has_link(P,[_|Rest]) -> has_link(P,Rest);
+has_link(_,[]) -> false.
