@@ -1,7 +1,7 @@
 {module, bitstring_get_binary_all_opcode}.
 {exports, [{entry,1},{identity,1}]}.
 {attributes, []}.
-{labels, 14}.
+{labels, 16}.
 
 {function, entry, 1, 2}.
   {label,1}.
@@ -11,6 +11,10 @@
     {move,{literal,<<5:3,124:8>>},{x,0}}.
     {bs_start_match4,{atom,no_fail},2,{x,0},{x,0}}.
     {bs_match,{f,3},{x,0},{commands,[{ensure_at_least,3,1},{skip,3},{get_tail,2,8,{x,1}}]}}.
+    {test,is_eq_exact,{f,3},[{x,1},{literal,<<124>>}]}.
+    {move,{literal,<<124>>},{x,0}}.
+    {bs_start_match4,{atom,no_fail},2,{x,0},{x,0}}.
+    {bs_match,{f,3},{x,0},{commands,[{ensure_at_least,8,1},{binary,2,{literal,[]},1,8,{x,1}}]}}.
     {test,is_eq_exact,{f,3},[{x,1},{literal,<<124>>}]}.
     {move,{literal,<<29:5>>},{x,0}}.
     {bs_start_match4,{atom,no_fail},2,{x,0},{x,0}}.
@@ -30,6 +34,10 @@
     {move,{literal,<<5:3,221:8>>},{x,0}}.
     {bs_start_match4,{atom,no_fail},2,{x,0},{y,0}}.
     {bs_match,{f,6},{y,0},{commands,[{ensure_at_least,3,1},{skip,3},{get_tail,2,8,{x,1}}]}}.
+    {test,is_eq_exact,{f,6},[{x,1},{literal,<<221>>}]}.
+    {move,{literal,<<221>>},{x,0}}.
+    {bs_start_match4,{atom,no_fail},2,{x,0},{y,0}}.
+    {bs_match,{f,6},{y,0},{commands,[{ensure_at_least,8,1},{binary,2,{literal,[]},1,8,{x,1}}]}}.
     {test,is_eq_exact,{f,6},[{x,1},{literal,<<221>>}]}.
     {move,{literal,<<23:5>>},{x,0}}.
     {bs_start_match4,{atom,no_fail},2,{x,0},{y,0}}.

@@ -1225,12 +1225,14 @@ gen.bs_match(Fail, Ctx, N, List) {
             unit = List[src+4].val;
 
             $NewBeamOp(S, op);
-            $BeamOpNameArity(op, i_bs_get_fixed_binary, 3);
+            $BeamOpNameArity(op, i_bs_get_binary_imm2, 5);
 
             op->a[0] = Ctx;
-            op->a[1].type = TAG_u;
-            op->a[1].val = size * unit; /* Size */
-            op->a[2] = List[src+5]; /* Dst */
+            op->a[1] = Fail;
+            op->a[2] = List[src+1]; /* Live */
+            op->a[3].type = TAG_u;
+            op->a[3].val = size * unit; /* Size in bits */
+            op->a[4] = List[src+5]; /* Dst */
 
             read_op = 0;
             src += 6;

@@ -1182,12 +1182,12 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                     Uint size=(Uint)a[pos+3].val,unit=(Uint)a[pos+4].val;
                     REQUIRE(size<=(Uint)-1/unit);
                     Uint bits=size*unit;
-                    REQUIRE(bits<=available);
+                    REQUIRE(bits<=65536);
                     if(a[pos+5].type==a[1].type && a[pos+5].val==a[1].val)
                         REQUIRE(pos+6==op->arity);
                     REQUIRE(destination(&f,a[pos+5],BITSTRING_SHAPE));
                     context_overwritten|=same_register(a[pos+5],a[1]);
-                    available-=bits; pos+=6;
+                    available=bits>available?0:available-bits; pos+=6;
                 } else if(command==am_get_tail) {
                     p->error.stage="bs_match get_tail admission";
                     REQUIRE(op->arity-pos>=4 && a[pos+1].type==TAG_u && roots(&f,(Uint)a[pos+1].val));

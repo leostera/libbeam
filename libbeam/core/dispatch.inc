@@ -7519,6 +7519,46 @@ Eterm* orig_htop=HTOP; Eterm* orig_stop=E;
 }
 
 {
+  Eterm context,destination; Eterm *destination_ptr; LbSubBits *sub; Sint fail;
+  OpCase(i_bs_get_binary_imm2_xftWd): context=xb(I[1]); goto i_bs_get_binary_imm2__execute;
+  OpCase(i_bs_get_binary_imm2_yftWd): context=yb(I[1]);
+  i_bs_get_binary_imm2__execute: {
+    fail=fb(I[2]); Uint packed=I[3],live=tb(packed&BEAM_LOOSE_MASK),bits=Ib(I[4]);
+    size_t need=LB_BITSTRING_TAIL_HEAP_NEED; Eterm result=THE_NON_VALUE,*top; LbAllocStatus built;
+    destination=db(packed>>BEAM_LOOSE_SHIFT); destination_ptr=REG_TARGET_PTR(destination);
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) goto malformed_code;
+    sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end) goto malformed_code;
+    if(bits>sub->end-sub->start) goto i_bs_get_binary_imm2__fail;
+    if((E-HTOP)<(Sint)(need+S_RESERVED)) {
+      if(live>=MAX_REG || !is_nil(c_p->construction_root)) goto malformed_code;
+      c_p->construction_root=context; SWAPOUT; c_p->i=I;
+      int reserved=lb_heap_reserve(c_p,need,live);
+      SWAPIN; context=c_p->construction_root; c_p->construction_root=NIL;
+      if(!reserved) {
+        LbAllocStatus failure=lb_alloc_domain_failure(c_p->entry_module->space->domain);
+        if(failure==LB_ALLOC_LIMIT) goto resource_limit;
+        if(failure==LB_ALLOC_WORK_LIMIT) goto work_failure;
+        goto memory_failure;
+      }
+      destination_ptr=REG_TARGET_PTR(destination); sub=(LbSubBits *)boxed_val(context);
+    }
+    top=HTOP;
+    built=lb_bitstring_slice(c_p->entry_module->space->domain,&c_p->off_heap,&top,sub,bits,&result);
+    if(built==LB_ALLOC_WORK_LIMIT) goto work_failure;
+    if(built==LB_ALLOC_LIMIT) goto resource_limit;
+    if(built==LB_ALLOC_NO_MEMORY) goto memory_failure;
+    if(built==LB_ALLOC_INVALID) goto i_bs_get_binary_imm2__fail;
+    if(built!=LB_ALLOC_OK || (size_t)(top-HTOP)>need) goto malformed_code;
+    sub->start+=bits; HTOP=top; *destination_ptr=result;
+    I+=5; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+  i_bs_get_binary_imm2__fail:
+    if(!fail) goto malformed_code;
+    ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I);
+}
+
+{
   Eterm context; LbSubBits *sub; BeamInstr next_pf;
   OpCase(i_bs_skip_xI): context=xb(I[1]); goto i_bs_skip__execute;
   OpCase(i_bs_skip_yI): context=yb(I[1]);
