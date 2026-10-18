@@ -6937,7 +6937,9 @@ Eterm* orig_htop=HTOP; Eterm* orig_stop=E;
 
 {
   OpCase(i_wait_error):
+  OpCase(i_wait_error_locked):
     c_p->freason=LB_EXC_TIMEOUT_VALUE;
+    c_p->messages.save=&c_p->messages.first;
     goto find_func_info;
 
   OpCase(wait_locked_f):

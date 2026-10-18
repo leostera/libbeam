@@ -3,6 +3,9 @@
 -module(wait_error_opcode).
 -export([entry/1,identity/1]).
 entry(_Input) ->
-    try receive after -1 -> ignored end
-    catch error:timeout_value -> <<"ok">> end.
+    true = (try receive after -1 -> ignored end
+            catch error:timeout_value -> true end),
+    true = (try receive foo -> ignored after -1 -> ignored end
+            catch error:timeout_value -> true end),
+    <<"ok">>.
 identity(Input) -> Input.

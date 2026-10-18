@@ -367,6 +367,7 @@ case op_i_bif2_body_ssbd: return 1;
 case op_i_bif1_body_sbd: return 1;
 case op_wait_locked_f: return 1;
 case op_i_wait_error: return 1;
+case op_i_wait_error_locked: return 1;
 case op_wait_timeout_unlocked_int_If: return 1;
 case op_wait_timeout_unlocked_sf: return 1;
 case op_wait_unlocked_f: return 1;
