@@ -9,4 +9,6 @@ identity(Input) -> Input.
 invoke(_F,direct,[A0,A1,A2]) -> erlang:'start_timer'(A0,A1,A2);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
 check(F,Mode,V) ->
-    R = invoke(F, Mode, [0,self(),V]), receive {timeout,R,V} -> true after 1000 -> false end.
+    R = invoke(F,Mode,[0,self(),V]),
+    true = is_reference(R),
+    receive {timeout,R,V} -> true after 1000 -> false end.
