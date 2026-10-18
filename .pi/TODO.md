@@ -45,7 +45,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 - [ ] `opcode: i_debug_line_IIt`
 - [ ] `opcode: i_disabled_line_breakpoint_t`
 - [ ] `opcode: i_enabled_line_breakpoint_t`
-- [ ] `opcode: i_func_info_IaaI`
 - [ ] `opcode: i_generic_breakpoint`
 - [ ] `opcode: i_get_local_record_field_jxaad`
 - [ ] `opcode: i_get_local_record_field_jyaad`
