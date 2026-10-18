@@ -298,6 +298,27 @@ OpCase(i_select_val_bins_yfI):
 }
 
 {
+  Eterm context; Uint packed; 
+  OpCase(i_bs_test_unit_fxt): packed=I[2]; context=xb(packed&BEAM_LOOSE_MASK); goto i_bs_test_unit__execute;
+  OpCase(i_bs_test_unit_fyt): packed=I[2]; context=yb(packed&BEAM_LOOSE_MASK); goto i_bs_test_unit__execute;
+  i_bs_test_unit__execute: {
+    Sint fail=fb(I[1]); Uint unit=packed>>BEAM_LOOSE_SHIFT; int failed=0;
+    if(unit==0) goto malformed_code;
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) failed=1;
+    else {
+      ErlSubBits *sb=(ErlSubBits *)boxed_val(context);
+      if(!lb_is_match_context(sb) || sb->start>sb->end) goto malformed_code;
+      failed=((sb->end-sb->start)%unit)!=0;
+    }
+    if(failed) {
+      if(!fail) goto malformed_code;
+      ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I);
+    }
+    I+=3; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
   Eterm div_left,div_right;
   OpCase(i_m_div_jssd): {
     Eterm packed=I[1],destination=db(packed>>BEAM_WIDE_SHIFT);

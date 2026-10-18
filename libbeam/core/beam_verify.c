@@ -1124,7 +1124,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                     if(a[pos+1].val>0) {
                         Uint stride=(Uint)a[pos+1].val,unit=(Uint)a[pos+2].val;
                         REQUIRE(stride<=(Uint)-1/unit); available=stride*unit;
-                    } else REQUIRE(a[pos+2].val==1 || a[pos+2].val==8); /* Zero stride contributes no known bits; unit eight also checks alignment. */
+                    } /* Zero stride contributes no known bits; the unit is checked by i_bs_test_unit. */
                     pos+=3;
                 } else if(command==am_ensure_exactly) {
                     p->error.stage="bs_match ensure_exactly admission";
