@@ -1,0 +1,210 @@
+# Implementation TODO: OTP BIFs and BEAM instructions
+
+This is an implementation checklist, not a statement of current support. Each BIF has an explicit target behavior:
+
+- **must work**: implement the requested Erlang behavior within the isolate and cover it with an execution test.
+- **must panic**: reject/terminate the isolate operation deterministically, without performing the prohibited host-side effect. Do not let this escape as a host-process panic.
+
+The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFAs). The 32 must panic classifications mirror libbeam/core/capability_denials.def; the remaining requested MFAs are must work. The instruction list is the 67 generated OTP specific forms absent from libbeam/core/dispatch_support.inc (492 forms total; 425 currently listed as supported). These are specific generated forms, including OTP-internal forms—not necessarily 67 distinct source-level instructions.
+
+## BIFs
+
+- [ ] **must work** — `erlang:is_bitstring/1`
+- [ ] **must work** — `erlang:is_boolean/1`
+- [ ] **must work** — `erlang:is_builtin/3`
+- [ ] **must work** — `erlang:is_float/1`
+- [ ] **must work** — `erlang:is_integer/3`
+- [ ] **must work** — `erlang:is_map/1`
+- [ ] **must work** — `erlang:is_number/1`
+- [ ] **must work** — `erlang:is_pid/1`
+- [ ] **must work** — `erlang:is_port/1`
+- [ ] **must work** — `erlang:is_process_alive/1`
+- [ ] **must work** — `erlang:is_reference/1`
+- [ ] **must work** — `erlang:is_record/2`
+- [ ] **must work** — `erlang:is_record/3`
+- [ ] **must work** — `erlang:is_tuple/1`
+- [ ] **must work** — `erlang:link/1`
+- [ ] **must work** — `erlang:list_to_atom/1`
+- [ ] **must work** — `erlang:list_to_binary/1`
+- [ ] **must work** — `erlang:list_to_bitstring/1`
+- [ ] **must work** — `erlang:list_to_existing_atom/1`
+- [ ] **must work** — `erlang:list_to_float/1`
+- [ ] **must work** — `erlang:list_to_integer/2`
+- [ ] **must work** — `erlang:list_to_pid/1`
+- [ ] **must work** — `erlang:list_to_port/1`
+- [ ] **must work** — `erlang:list_to_ref/1`
+- [ ] **must work** — `erlang:load_module/2`
+- [ ] **must panic** — `erlang:load_nif/2`
+- [ ] **must work** — `erlang:loaded/0`
+- [ ] **must work** — `erlang:localtime/0`
+- [ ] **must work** — `erlang:localtime_to_universaltime/1`
+- [ ] **must work** — `erlang:localtime_to_universaltime/2`
+- [ ] **must work** — `erlang:make_fun/3`
+- [ ] **must work** — `erlang:match_spec_test/3`
+- [ ] **must work** — `erlang:md5/1`
+- [ ] **must work** — `erlang:md5_final/1`
+- [ ] **must work** — `erlang:md5_init/0`
+- [ ] **must work** — `erlang:md5_update/2`
+- [ ] **must work** — `erlang:memory/0`
+- [ ] **must work** — `erlang:memory/1`
+- [ ] **must work** — `erlang:monitor/2`
+- [ ] **must work** — `erlang:monitor/3`
+- [ ] **must panic** — `erlang:monitor_node/2`
+- [ ] **must panic** — `erlang:monitor_node/3`
+- [ ] **must work** — `erlang:monotonic_time/0`
+- [ ] **must work** — `erlang:monotonic_time/1`
+- [ ] **must work** — `erlang:nif_error/1`
+- [ ] **must work** — `erlang:node/1`
+- [ ] **must work** — `erlang:nodes/0`
+- [ ] **must work** — `erlang:nodes/1`
+- [ ] **must work** — `erlang:nodes/2`
+- [ ] **must panic** — `erlang:open_port/2`
+- [ ] **must work** — `erlang:or/2`
+- [ ] **must work** — `erlang:phash/2`
+- [ ] **must work** — `erlang:phash2/1`
+- [ ] **must work** — `erlang:phash2/2`
+- [ ] **must work** — `erlang:pid_to_list/1`
+- [ ] **must panic** — `erlang:port_close/1`
+- [ ] **must panic** — `erlang:port_command/2`
+- [ ] **must panic** — `erlang:port_command/3`
+- [ ] **must panic** — `erlang:port_connect/2`
+- [ ] **must panic** — `erlang:port_control/3`
+- [ ] **must work** — `erlang:port_get_data/1`
+- [ ] **must work** — `erlang:port_info/1`
+- [ ] **must work** — `erlang:port_info/2`
+- [ ] **must panic** — `erlang:port_set_data/2`
+- [ ] **must work** — `erlang:port_to_list/1`
+- [ ] **must work** — `erlang:ports/0`
+- [ ] **must work** — `erlang:posixtime_to_universaltime/1`
+- [ ] **must work** — `erlang:pre_loaded/0`
+- [ ] **must panic** — `erlang:prepare_loading/2`
+- [ ] **must panic** — `erlang:process_display/2`
+- [ ] **must work** — `erlang:process_flag/2`
+- [ ] **must work** — `erlang:process_flag/3`
+- [ ] **must work** — `erlang:process_info/1`
+- [ ] **must work** — `erlang:processes/0`
+- [ ] **must work** — `erlang:processes_iterator/0`
+- [ ] **must work** — `erlang:processes_next/1`
+- [ ] **must panic** — `erlang:purge_module/1`
+- [ ] **must work** — `erlang:read_timer/1`
+- [ ] **must work** — `erlang:ref_to_list/1`
+- [ ] **must work** — `erlang:registered/0`
+- [ ] **must work** — `erlang:round/1`
+- [ ] **must work** — `erlang:send/2`
+- [ ] **must work** — `erlang:send/3`
+- [ ] **must work** — `erlang:send_after/3`
+- [ ] **must work** — `erlang:send_after/4`
+- [ ] **must panic** — `erlang:set_cookie/2`
+- [ ] **must panic** — `erlang:setnode/2`
+- [ ] **must work** — `erlang:spawn/2`
+- [ ] **must work** — `erlang:spawn/4`
+- [ ] **must work** — `erlang:spawn_link/1`
+- [ ] **must work** — `erlang:spawn_link/2`
+- [ ] **must work** — `erlang:spawn_link/3`
+- [ ] **must work** — `erlang:spawn_link/4`
+- [ ] **must work** — `erlang:spawn_monitor/2`
+- [ ] **must work** — `erlang:spawn_monitor/3`
+- [ ] **must work** — `erlang:spawn_monitor/4`
+- [ ] **must work** — `erlang:spawn_opt/2`
+- [ ] **must work** — `erlang:spawn_opt/3`
+- [ ] **must work** — `erlang:spawn_opt/5`
+- [ ] **must work** — `erlang:spawn_request/5`
+- [ ] **must work** — `erlang:spawn_request_abandon/1`
+- [ ] **must work** — `erlang:start_timer/3`
+- [ ] **must work** — `erlang:start_timer/4`
+- [ ] **must work** — `erlang:statistics/1`
+- [ ] **must panic** — `erlang:system_flag/2`
+- [ ] **must work** — `erlang:system_info/1`
+- [ ] **must work** — `erlang:system_time/0`
+- [ ] **must work** — `erlang:system_time/1`
+- [ ] **must work** — `erlang:term_to_binary/1`
+- [ ] **must work** — `erlang:term_to_binary/2`
+- [ ] **must work** — `erlang:time_offset/0`
+- [ ] **must work** — `erlang:time_offset/1`
+- [ ] **must work** — `erlang:timestamp/0`
+- [ ] **must panic** — `erlang:trace/3`
+- [ ] **must panic** — `erlang:trace_info/2`
+- [ ] **must panic** — `erlang:trace_pattern/3`
+- [ ] **must work** — `erlang:trunc/1`
+- [ ] **must work** — `erlang:tuple_size/1`
+- [ ] **must work** — `erlang:unalias/1`
+- [ ] **must work** — `erlang:unique_integer/0`
+- [ ] **must work** — `erlang:unique_integer/1`
+- [ ] **must work** — `erlang:universaltime/0`
+- [ ] **must work** — `erlang:universaltime_to_localtime/1`
+- [ ] **must work** — `erlang:universaltime_to_posixtime/1`
+- [ ] **must work** — `erlang:unlink/1`
+- [ ] **must work** — `erlang:unregister/1`
+- [ ] **must work** — `erlang:whereis/1`
+- [ ] **must work** — `erlang:xor/2`
+- [ ] **must work** — `erlang:yield/0`
+
+## Unadmitted generated instruction forms
+
+- [ ] `opcode: call_bif_W`
+- [ ] `opcode: call_error_handler`
+- [ ] `opcode: call_light_bif_be`
+- [ ] `opcode: call_light_bif_only_be`
+- [ ] `opcode: call_nif_WWW`
+- [ ] `opcode: call_nif_early`
+- [ ] `opcode: continue_exit`
+- [ ] `opcode: error_action_code`
+- [ ] `opcode: finish_create_record`
+- [ ] `opcode: i_bs_get_binary_all2_xfttd`
+- [ ] `opcode: i_bs_get_binary_all2_yfttd`
+- [ ] `opcode: i_bs_get_binary_imm2_xftWd`
+- [ ] `opcode: i_bs_get_binary_imm2_yftWd`
+- [ ] `opcode: i_bs_get_integer_16_xfd`
+- [ ] `opcode: i_bs_get_integer_16_yfd`
+- [ ] `opcode: i_bs_get_integer_32_xfd`
+- [ ] `opcode: i_bs_get_integer_32_yfd`
+- [ ] `opcode: i_bs_get_integer_8_xfd`
+- [ ] `opcode: i_bs_get_integer_8_yfd`
+- [ ] `opcode: i_bs_get_integer_imm_xWtftx`
+- [ ] `opcode: i_bs_get_integer_imm_yWtftx`
+- [ ] `opcode: i_bs_get_integer_small_imm_xWftx`
+- [ ] `opcode: i_bs_get_integer_small_imm_yWftx`
+- [ ] `opcode: i_bs_test_unit_fxt`
+- [ ] `opcode: i_bs_test_unit_fyt`
+- [ ] `opcode: i_bxor_jssd`
+- [ ] `opcode: i_call_trace_return`
+- [ ] `opcode: i_create_local_native_record_qdtI`
+- [ ] `opcode: i_create_native_record_jctI`
+- [ ] `opcode: i_debug_breakpoint`
+- [ ] `opcode: i_debug_line_IIt`
+- [ ] `opcode: i_disabled_line_breakpoint_t`
+- [ ] `opcode: i_enabled_line_breakpoint_t`
+- [ ] `opcode: i_func_info_IaaI`
+- [ ] `opcode: i_generic_breakpoint`
+- [ ] `opcode: i_get_local_record_field_jxaad`
+- [ ] `opcode: i_get_local_record_field_jyaad`
+- [ ] `opcode: i_get_record_elements_jxI`
+- [ ] `opcode: i_get_record_elements_jyI`
+- [ ] `opcode: i_get_record_field_jxcad`
+- [ ] `opcode: i_get_record_field_jycad`
+- [ ] `opcode: i_int_bnot_jSd`
+- [ ] `opcode: i_is_native_record_fxaa`
+- [ ] `opcode: i_is_native_record_fyaa`
+- [ ] `opcode: i_is_record_accessible_fx`
+- [ ] `opcode: i_is_record_accessible_fy`
+- [ ] `opcode: i_is_wildcard_record_accessible_fxa`
+- [ ] `opcode: i_is_wildcard_record_accessible_fya`
+- [ ] `opcode: i_lambda_error_t`
+- [ ] `opcode: i_line_breakpoint_cleanup`
+- [ ] `opcode: i_load_nif`
+- [ ] `opcode: i_m_div_jssd`
+- [ ] `opcode: i_nif_padding`
+- [ ] `opcode: i_return_to_trace`
+- [ ] `opcode: i_update_native_record_jsdtI`
+- [ ] `opcode: i_wait_error`
+- [ ] `opcode: i_wait_error_locked`
+- [ ] `opcode: int_code_end`
+- [ ] `opcode: label_L`
+- [ ] `opcode: line_I`
+- [ ] `opcode: nif_start`
+- [ ] `opcode: normal_exit`
+- [ ] `opcode: on_load`
+- [ ] `opcode: padding`
+- [ ] `opcode: return_trace`
+- [ ] `opcode: system_limit_body`
+- [ ] `opcode: trace_jump_W`
