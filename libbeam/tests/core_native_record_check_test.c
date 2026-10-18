@@ -6,6 +6,10 @@
 
 int main(int argc,char **argv)
 {
+    static const BeamInstr field_getters[]={
+        op_i_get_local_record_field_jxaad,op_i_get_local_record_field_jyaad,
+        op_i_get_record_field_jxcad,op_i_get_record_field_jycad
+    };
     static const BeamInstr checks[]={
         op_i_is_native_record_fxaa,op_i_is_native_record_fyaa,
         op_i_is_record_accessible_fx,op_i_is_record_accessible_fy,
@@ -32,9 +36,31 @@ int main(int argc,char **argv)
         lb_code_entry_release(entry);
         BeamInstr *code=(BeamInstr *)process->i;
         code[0]=checks[i];
-        code[1]=(BeamInstr)(uintptr_t)lb_host_return;
-        code[2]=0; code[3]=am_erlang; code[4]=am_erlang;
+        code[1]=2; /* Relative failure edge inside the fixture's code range. */
+        code[2]=op_normal_exit;
         CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
+        lb_process_destroy(process);
+    }
+
+    for(size_t i=0;i<sizeof(field_getters)/sizeof(field_getters[0]);++i) {
+        LbCodeEntry *entry; LbProcess *process;
+        CHECK(lb_instruction_supported(field_getters[i]));
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        BeamInstr *code=(BeamInstr *)process->i;
+        code[0]=field_getters[i]; code[1]=2; code[2]=op_normal_exit;
+        CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
+        lb_process_destroy(process);
+        if(i&1) continue; /* A y-source is a stack slot, not the initial CP. */
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        code=(BeamInstr *)process->i;
+        code[0]=field_getters[i]; code[1]=0; code[2]=0;
+        process->reg[0]=make_small(7);
+        CHECK(lb_process_run(process,10,10)==LB_PROCESS_EXCEPTION);
+        CHECK(lb_process_exception(process)==am_badrecord);
         lb_process_destroy(process);
     }
 

@@ -18,7 +18,18 @@ OpCase(i_is_wildcard_record_accessible_fxa):
 OpCase(i_is_wildcard_record_accessible_fya):
 OpCase(i_get_record_elements_jxI):
 OpCase(i_get_record_elements_jyI):
-    SET_I((const BeamInstr *)(uintptr_t)I[1]); Goto(*I);
+    I+=fb(I[1]); Goto(*I);
+
+/* No native-record term exists in the admitted term model. OTP's field
+ * accessor reports badrecord outside guards and takes Fail inside guards. */
+OpCase(i_get_local_record_field_jxaad):
+OpCase(i_get_record_field_jxcad):
+    if(I[1]) { I+=fb(I[1]); Goto(*I); }
+    c_p->fvalue=xb(I[2]); c_p->freason=LB_EXC_BADRECORD; goto find_func_info;
+OpCase(i_get_local_record_field_jyaad):
+OpCase(i_get_record_field_jycad):
+    if(I[1]) { I+=fb(I[1]); Goto(*I); }
+    c_p->fvalue=yb(I[2]); c_p->freason=LB_EXC_BADRECORD; goto find_func_info;
 
 OpCase(padding):
     ++I; Goto(*I);

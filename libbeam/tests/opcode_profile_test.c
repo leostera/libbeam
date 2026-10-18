@@ -37,6 +37,10 @@ int main(void)
     CHECK(lb_instruction_supported(op_i_is_wildcard_record_accessible_fya));
     CHECK(lb_instruction_supported(op_i_get_record_elements_jxI));
     CHECK(lb_instruction_supported(op_i_get_record_elements_jyI));
+    CHECK(lb_instruction_supported(op_i_get_local_record_field_jxaad));
+    CHECK(lb_instruction_supported(op_i_get_local_record_field_jyaad));
+    CHECK(lb_instruction_supported(op_i_get_record_field_jxcad));
+    CHECK(lb_instruction_supported(op_i_get_record_field_jycad));
     CHECK(lb_instruction_supported(op_padding));
     CHECK(lb_instruction_supported(op_system_limit_body));
     CHECK(lb_instruction_supported(op_trace_jump_W));
