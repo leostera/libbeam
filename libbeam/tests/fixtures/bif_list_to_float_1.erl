@@ -9,4 +9,8 @@ identity(Input) -> Input.
 invoke(_F,direct,[A0]) -> erlang:'list_to_float'(A0);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
 check(F,Mode,V) ->
-    invoke(F, Mode, [[V+48,$.,$5]]) =:= 7.5.
+    7.5 = invoke(F,Mode,[[V+48,$.,$5]]),
+    true = badarg(fun() -> invoke(F,Mode,["7."]) end),
+    true.
+badarg(Fun) ->
+    try Fun() of _ -> false catch error:badarg -> true; _:_ -> false end.
