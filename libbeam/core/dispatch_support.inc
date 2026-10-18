@@ -27,6 +27,7 @@ case op_i_band_ssjd: return 1;
 case op_i_bor_jssd: return 1;
 case op_i_bxor_jssd: return 1;
 case op_i_int_bnot_jSd: return 1;
+case op_i_m_div_jssd: return 1;
 case op_i_bsr_ssjd: return 1;
 case op_i_bsl_ssjd: return 1;
 case op_i_hibernate: return 1;

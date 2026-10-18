@@ -19,6 +19,7 @@ int main(void)
     CHECK(lb_instruction_supported(op_i_bs_match_string_xfWW));
     CHECK(lb_instruction_supported(op_i_bxor_jssd));
     CHECK(lb_instruction_supported(op_i_int_bnot_jSd));
+    CHECK(lb_instruction_supported(op_i_m_div_jssd));
     puts("OPCODE_PROFILE_OK set_tuple_element=supported match_string=supported");
     return 0;
 }

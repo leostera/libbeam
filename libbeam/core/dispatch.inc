@@ -298,6 +298,29 @@ OpCase(i_select_val_bins_yfI):
 }
 
 {
+  Eterm div_left,div_right;
+  OpCase(i_m_div_jssd): {
+    Eterm packed=I[1],destination=db(packed>>BEAM_WIDE_SHIFT);
+    GetSource(I[2],div_left); GetSource(I[3],div_right);
+    Eterm *destination_ptr=REG_TARGET_PTR(destination);
+    Sint fail=jb(packed&BEAM_WIDE_MASK);
+    Uint previous_freason=c_p->freason;
+    reg[0]=div_left; reg[1]=div_right;
+    SWAPOUT; Eterm result=lb_bif_div_2(c_p,reg,I); SWAPIN;
+    FCALLS-=(Sint)c_p->last_native_cost;
+    if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+    if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+    if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+    if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+    if(is_value(result)) {
+      destination_ptr=REG_TARGET_PTR(destination); *destination_ptr=result; I+=4; Goto(*I);
+    }
+    if(fail) { c_p->freason=previous_freason; I+=fail; Goto(*I); }
+    reg[0]=div_left; reg[1]=div_right; SWAPOUT; goto find_func_info;
+  }
+}
+
+{
   Eterm bnot_operand;
   OpCase(i_int_bnot_jSd): {
     Eterm packed=I[2],destination=db(packed>>BEAM_LOOSE_SHIFT);

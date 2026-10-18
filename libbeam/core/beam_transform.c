@@ -523,16 +523,10 @@ int lb_transform(LoaderState *st)
        st->genop->a[2].type==TAG_u && (Uint)st->genop->a[2].val<st->beam.imports.count &&
        st->bif_imports[st->genop->a[2].val]==&st->space->engine->bifs[BIF_div_2]) {
         BeamOp *op=st->genop;
-        /* i_bif2 fetches its encoded source operands in reverse order into the
-         * BIF argument vector; swap the gc_bif source order here. */
-        BeamOpArg fail=op->a[0],left=op->a[4],right=op->a[3],bif=op->a[2],destination=op->a[5];
-        if(fail.type==TAG_p) {
-            op->op=genop_i_bif2_body_4; op->arity=4;
-            op->a[0]=left; op->a[1]=right; op->a[2]=bif; op->a[3]=destination;
-        } else {
-            op->op=genop_i_bif2_5; op->arity=5;
-            op->a[0]=left; op->a[1]=right; op->a[2]=fail; op->a[3]=bif; op->a[4]=destination;
-        }
+        /* OTP lowers floating division to i_m_div with the same source order
+         * as the original gc_bif2 instruction. */
+        op->op=genop_i_m_div_4; op->arity=4;
+        op->a[1]=op->a[3]; op->a[2]=op->a[4]; op->a[3]=op->a[5];
         return TE_OK;
     }
     if(st->genop->op==genop_gc_bif2_6 && st->genop->arity==6 &&
