@@ -13,6 +13,15 @@ int lb_pmetadata(LbBeamProgram *p)
     const LbBeamImageInfo *info=lb_beam_image_info(p->image);
     uint32_t version,count;
     size_t i;
+    p->error.stage="native record header";
+    if(lb_beam_image_chunk(p->image,LB_BEAM_ID('R','e','c','s'),&chunk)==LB_BEAM_OK) {
+        r=(LbBeamReader){chunk.data,chunk.size,0};
+        uint32_t fields;
+        REQUIRE(lb_reader_u32(&r,&version) && version==0 &&
+                lb_reader_u32(&r,&count) && lb_reader_u32(&r,&fields));
+        REQUIRE(count<=(r.size-r.pos)/4 && fields<=(r.size-r.pos)/2);
+        p->record_count=count; p->record_field_count=fields;
+    }
     p->error.stage="types";
     p->type_fallback=1; p->type_count=1;
     if(lb_beam_image_chunk(p->image,LB_BEAM_ID('T','y','p','e'),&chunk)==LB_BEAM_OK) {

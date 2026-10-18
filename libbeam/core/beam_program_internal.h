@@ -54,6 +54,9 @@ struct LbBeamProgram {
     LbMapLiteralPatch *map_literals;
     LbBeamLambda *lambdas;
     size_t lambda_count;
+    /* Versioned Recs metadata remains non-executable until definitions and
+     * instance terms have owned representations. */
+    size_t record_count,record_field_count;
     LbBeamType *types;
     size_t type_count;
     int type_fallback;
