@@ -2,7 +2,10 @@
  * Copyright Ericsson AB 1996-2026. All Rights Reserved.
  * Owned interpreter code adapted from OTP beam_makeops output.
  */
+/* In this profile no line-breakpoint handler can be installed. Both OTP
+ * breakpoint states therefore advance without changing process state. */
 OpCase(i_disabled_line_breakpoint_t):
+OpCase(i_enabled_line_breakpoint_t):
     I+=2; Goto(*I);
 
 OpCase(padding):
