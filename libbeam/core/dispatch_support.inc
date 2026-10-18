@@ -42,6 +42,8 @@ case op_i_bs_get_binary_imm2_xftWd: return 1;
 case op_i_bs_get_binary_imm2_yftWd: return 1;
 case op_i_disabled_line_breakpoint_t: return 1;
 case op_i_enabled_line_breakpoint_t: return 1;
+case op_i_is_native_record_fxaa: return 1;
+case op_i_is_native_record_fyaa: return 1;
 case op_padding: return 1;
 case op_system_limit_body: return 1;
 case op_trace_jump_W: return 1;

@@ -29,6 +29,8 @@ int main(void)
     CHECK(lb_instruction_supported(op_i_bs_get_binary_imm2_yftWd));
     CHECK(lb_instruction_supported(op_i_disabled_line_breakpoint_t));
     CHECK(lb_instruction_supported(op_i_enabled_line_breakpoint_t));
+    CHECK(lb_instruction_supported(op_i_is_native_record_fxaa));
+    CHECK(lb_instruction_supported(op_i_is_native_record_fyaa));
     CHECK(lb_instruction_supported(op_padding));
     CHECK(lb_instruction_supported(op_system_limit_body));
     CHECK(lb_instruction_supported(op_trace_jump_W));
