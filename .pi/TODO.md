@@ -9,7 +9,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 ## BIFs
 
-- [ ] **must panic** — `erlang:finish_after_on_load/2`
 - [ ] **must panic** — `erlang:finish_loading/1`
 - [ ] **must work** — `erlang:float/1`
 - [ ] **must work** — `erlang:float_to_list/1`
