@@ -4318,6 +4318,17 @@ genrule(
 )
 
 cc_test(
+  name = "error_action_code_test",
+  size = "small",
+  srcs = ["tests/error_action_code_test.cpp", "tests/test_process.hpp"],
+  args = ["$(rootpath :call_error_handler_opcode_fixture)", "call_error_handler_opcode"],
+  data = ["call_error_handler_opcode_fixture"],
+  copts = ["-std=c++17"],
+  deps = ["libbeam", "@googletest//:gtest"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+cc_test(
   name = "bitstring_get_binary_all_opcode_test",
   size = "small",
   args = ["$(rootpath :bitstring_get_binary_all_opcode_fixture)", "bitstring_get_binary_all_opcode", "get_binary_all2_and_integer_small_imm"],

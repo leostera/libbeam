@@ -540,6 +540,8 @@ context_switch3:
     c_p->flags &= ~(1u<<13); /* native F_DELAY_GC cannot cross schedule-out */
     c_p->status=LB_PROCESS_YIELDED; goto stop;
 find_func_info: {
+    /* Isolate equivalent of ERTS's beam_exit/error_action_code trampoline:
+     * unwind an owned catch frame or publish the terminal guest exception. */
     if(c_p->status==LB_PROCESS_CAPABILITY_DENIED) goto capability_denied;
     if(lb_alloc_domain_failure(c_p->entry_module->space->domain)==LB_ALLOC_WORK_LIMIT) goto work_failure;
     /* Expand guest exception reasons once, then either unwind to an owned
