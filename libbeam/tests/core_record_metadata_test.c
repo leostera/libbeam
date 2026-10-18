@@ -24,6 +24,11 @@ int main(int argc,char **argv)
     unsigned char version=beam[recs+3]; beam[recs+3]=1;
     CHECK(lb_beam_program_prepare(engine->domain,space->atoms,beam,(size_t)length,&program,&error)==LB_BEAM_BAD_FORMAT);
     CHECK(!program); beam[recs+3]=version;
+    /* A forged count must be rejected before allocating any definitions. */
+    unsigned char saved_count[4]; memcpy(saved_count,beam+recs+4,4);
+    memset(beam+recs+4,0xff,4);
+    CHECK(lb_beam_program_prepare(engine->domain,space->atoms,beam,(size_t)length,&program,&error)==LB_BEAM_BAD_FORMAT);
+    CHECK(!program); memcpy(beam+recs+4,saved_count,4);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine); free(beam);
     puts("CORE_RECORD_METADATA_OK version=0 records=1 fields=2");
