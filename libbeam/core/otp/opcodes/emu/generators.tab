@@ -1367,10 +1367,13 @@ gen.bs_match(Fail, Ctx, N, List) {
         }
         case am_get_tail:
             $NewBeamOp(S, op);
-            $BeamOpNameArity(op, i_bs_get_tail, 2);
+            $BeamOpNameArity(op, i_bs_get_binary_all2, 5);
 
             op->a[0] = Ctx;
-            op->a[1] = List[src+3]; /* Dst */
+            op->a[1] = Fail;
+            op->a[2] = List[src+1]; /* Live */
+            op->a[3] = List[src+2]; /* Unit */
+            op->a[4] = List[src+3]; /* Dst */
 
             read_op = 0;
             src += 4;

@@ -23,6 +23,8 @@ int main(void)
     CHECK(lb_instruction_supported(op_call_error_handler));
     CHECK(lb_instruction_supported(op_call_light_bif_be));
     CHECK(lb_instruction_supported(op_call_light_bif_only_be));
+    CHECK(lb_instruction_supported(op_i_bs_get_binary_all2_xfttd));
+    CHECK(lb_instruction_supported(op_i_bs_get_binary_all2_yfttd));
     puts("OPCODE_PROFILE_OK set_tuple_element=supported match_string=supported");
     return 0;
 }

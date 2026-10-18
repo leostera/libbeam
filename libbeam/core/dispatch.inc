@@ -7363,6 +7363,43 @@ Eterm* orig_htop=HTOP; Eterm* orig_stop=E;
 }
 
 {
+  Eterm context,destination; Eterm *destination_pointer; ErlSubBits *sub;
+  Eterm packed; Uint unit,live; Sint fail;
+  OpCase(i_bs_get_binary_all2_xfttd): context=xb(I[1]); packed=I[3]; goto i_bs_get_binary_all2__execute;
+  OpCase(i_bs_get_binary_all2_yfttd): context=yb(I[1]); packed=I[3];
+  i_bs_get_binary_all2__execute: {
+    fail=fb(I[2]); live=tb(packed&BEAM_LOOSE_MASK);
+    unit=tb((packed>>BEAM_LOOSE_SHIFT)&BEAM_LOOSE_MASK);
+    destination=db(packed>>(2*BEAM_LOOSE_SHIFT));
+    destination_pointer=REG_TARGET_PTR(destination);
+    if(!unit || live>=MAX_REG) goto malformed_code;
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    sub=(ErlSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end) {
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
+    if((sub->end-sub->start)%unit) {
+      if(!fail) goto malformed_code;
+      ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I);
+    }
+    Uint need=LB_BITSTRING_TAIL_HEAP_NEED;
+    Eterm *top=HTOP,result=THE_NON_VALUE;
+    if(c_p->heap_reserved<need || (E-HTOP)<(Sint)(need+S_RESERVED)) goto malformed_code;
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,1)) goto work_failure;
+    LbAllocStatus built=lb_bitstring_tail(c_p->entry_module->space->domain,&c_p->off_heap,&top,sub,&result);
+    if(built==LB_ALLOC_WORK_LIMIT) goto work_failure;
+    if(built==LB_ALLOC_LIMIT) goto resource_limit;
+    if(built==LB_ALLOC_NO_MEMORY) goto memory_failure;
+    if(built!=LB_ALLOC_OK) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    if((size_t)(top-HTOP)>need) goto malformed_code;
+    HTOP=top; c_p->heap_reserved-=need; *destination_pointer=result;
+    I+=4; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
   Eterm context,destination;
   ErlSubBits *sub;
   Eterm *destination_pointer;
