@@ -34,6 +34,9 @@ typedef LbBeamOp BeamOp;
 typedef LbBeamArg BeamOpArg;
 typedef struct { Eterm module, function; Uint arity; } LbMFA;
 typedef struct { BeamInstr op; void *breakpoint; LbMFA mfa; } LbCodeInfo;
+/* Native entry breakpoint payload; tracing is unavailable in this profile,
+ * so only the original opcode is needed when dispatching a patched entry. */
+typedef struct { BeamInstr orig_instr; } LbGenericBreakpoint;
 typedef struct { const BeamInstr *addresses[3]; } LbDispatchable;
 typedef struct LbExport {
     LbDispatchable dispatch;

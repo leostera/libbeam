@@ -1551,6 +1551,16 @@ OpCase(allocate_heap_tIt):
   GotoPF(next_pf);
 }
 
+OpCase(i_generic_breakpoint): {
+    if(c_p->pc_module==NULL || I<c_p->pc_module->words+5 ||
+       I>=c_p->pc_module->words+c_p->pc_module->word_count) goto malformed_code;
+    const LbCodeInfo *info=(const LbCodeInfo *)(I-5);
+    const LbGenericBreakpoint *bp=info->breakpoint;
+    if(info->op!=op_i_func_info_IaaI || !bp || !VALID_INSTR(bp->orig_instr) ||
+       bp->orig_instr==op_i_generic_breakpoint) goto malformed_code;
+    Goto(bp->orig_instr);
+}
+
 OpCase(i_debug_breakpoint):
     /* OTP calls the breakpoint error handler. This isolate has no debugger
      * handler; as with a missing import, the fallback is guest undef. */

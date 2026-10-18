@@ -39,6 +39,26 @@ int main(int argc,char **argv)
     CHECK(lb_process_exception(process)==am_undef);
     lb_process_destroy(process);
 
+    CHECK(lb_instruction_supported(op_i_generic_breakpoint));
+    CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+    CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+    lb_code_entry_release(entry);
+    LbCodeInfo *info=(LbCodeInfo *)(process->i-5);
+    LbGenericBreakpoint breakpoint={op_normal_exit};
+    CHECK(info->op==op_i_func_info_IaaI && !info->breakpoint);
+    info->breakpoint=&breakpoint;
+    ((BeamInstr *)process->i)[0]=op_i_generic_breakpoint;
+    CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
+    info->breakpoint=NULL;
+    lb_process_destroy(process);
+
+    CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+    CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+    lb_code_entry_release(entry);
+    ((BeamInstr *)process->i)[0]=op_i_generic_breakpoint;
+    CHECK(lb_process_run(process,10,10)==LB_PROCESS_INVALID);
+    lb_process_destroy(process);
+
     CHECK(lb_code_unload(module)==LB_CODE_OK);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK);

@@ -21,7 +21,6 @@ terms, which the loader still rejects. Negative-path coverage is not full suppor
 - [ ] `opcode: finish_create_record`
 - [ ] `opcode: i_create_local_native_record_qdtI`
 - [ ] `opcode: i_create_native_record_jctI`
-- [ ] `opcode: i_generic_breakpoint`
 - [ ] `opcode: i_get_local_record_field_jxaad`
 - [ ] `opcode: i_get_local_record_field_jyaad`
 - [ ] `opcode: i_get_record_elements_jxI`
