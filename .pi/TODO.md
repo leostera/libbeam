@@ -9,7 +9,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 ## BIFs
 
-- [ ] **must panic** — `erlang:port_close/1`
 - [ ] **must panic** — `erlang:port_command/2`
 - [ ] **must panic** — `erlang:port_command/3`
 - [ ] **must panic** — `erlang:port_connect/2`
