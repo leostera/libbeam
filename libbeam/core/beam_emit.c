@@ -247,13 +247,15 @@ LbCodeStatus lb_emit(LoaderState *st,BeamOp *op)
         st->last_func_start=st->ci;
         ALLOC(label_patch(st,st->last_label,st->function_number,0)); ++st->function_number; break;
     }
-    case op_line_I:
-        /* The isolate has no active debugger. Preserve the OTP disabled
-         * line-breakpoint no-op in place of line metadata. */
+    case op_line_I: {
+        /* With no active debugger, debug metadata lowers to a disabled
+         * breakpoint. An empty line-table entry is OTP's code-padding marker. */
+        Uint line=st->codev[st->ci-1];
         st->ci-=2;
-        st->codev[st->ci++]=op_i_disabled_line_breakpoint_t;
-        st->codev[st->ci++]=0;
+        st->codev[st->ci++]=line?op_i_disabled_line_breakpoint_t:op_padding;
+        if(line) st->codev[st->ci++]=0;
         break;
+    }
     case op_nif_start:
         /* emu_load.c removes this entry marker. No NIF installation exists in
          * this profile, so no mutable are_nifs patch table is needed. The

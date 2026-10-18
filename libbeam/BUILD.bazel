@@ -4310,18 +4310,18 @@ cc_test(
 )
 
 genrule(
-  name = "disabled_line_breakpoint_opcode_fixture",
-  srcs = ["tests/fixtures/disabled_line_breakpoint_opcode.erl"],
+  name = "line_breakpoint_opcodes_fixture",
+  srcs = ["tests/fixtures/line_breakpoint_opcodes.S"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
-  outs = ["fixtures/disabled_line_breakpoint_opcode_fixture/disabled_line_breakpoint_opcode.beam"],
-  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/disabled_line_breakpoint_opcode.erl)",
+  outs = ["fixtures/line_breakpoint_opcodes_fixture/line_breakpoint_opcodes.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/line_breakpoint_opcodes.S)",
 )
 
 cc_test(
-  name = "disabled_line_breakpoint_opcode_test",
+  name = "line_breakpoint_opcodes_test",
   size = "small",
-  args = ["$(rootpath :disabled_line_breakpoint_opcode_fixture)", "disabled_line_breakpoint_opcode", "disabled_line_breakpoint"],
-  data = ["disabled_line_breakpoint_opcode_fixture"],
+  args = ["$(rootpath :line_breakpoint_opcodes_fixture)", "line_breakpoint_opcodes", "line_breakpoint"],
+  data = ["line_breakpoint_opcodes_fixture"],
   deps = ["bif_execution_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
