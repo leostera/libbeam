@@ -4329,6 +4329,23 @@ cc_test(
 )
 
 genrule(
+  name = "debug_line_opcode_fixture",
+  srcs = ["tests/fixtures/debug_line_opcode.S"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/debug_line_opcode_fixture/debug_line_opcode.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/debug_line_opcode.S)",
+)
+
+cc_test(
+  name = "debug_line_opcode_test",
+  size = "small",
+  args = ["$(rootpath :debug_line_opcode_fixture)", "debug_line_opcode", "debug_line"],
+  data = ["debug_line_opcode_fixture"],
+  deps = ["bif_execution_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
   name = "line_breakpoint_opcodes_fixture",
   srcs = ["tests/fixtures/line_breakpoint_opcodes.S"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],

@@ -268,7 +268,7 @@ LbCodeStatus lb_emit(LoaderState *st,BeamOp *op)
          * interpreter; omit the zero-width native patch padding. */
         VERIFY(st->ci==before+1);
         --st->ci; break;
-    case op_on_load: case op_i_debug_line_IIt:
+    case op_on_load:
         return LB_CODE_UNSUPPORTED;
     case op_i_bs_match_string_xfWW: case op_i_bs_match_string_yfWW:
         ALLOC(string_patch(st,st->ci-1,st->codev[st->ci-2]/8+(st->codev[st->ci-2]%8!=0))); break;

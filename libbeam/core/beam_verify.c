@@ -612,6 +612,10 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         switch(op->op) {
         case genop_int_func_start_5:case genop_int_func_end_2:case genop_int_code_end_0:case genop_i_nif_padding_0:case genop_label_1:case genop_line_1:case genop_nif_start_0:
         case genop_on_load_0:break;
+        case genop_debug_line_4:
+            REQUIRE(op->a[0].type==TAG_a && op->a[1].type==TAG_u &&
+                    op->a[2].type==TAG_u && op->a[3].type==TAG_u && op->a[3].val<=MAX_REG);
+            break;
         case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_update_record_5:case genop_return_0:case genop_send_0:
         case genop_loop_rec_2:case genop_loop_rec_end_1:case genop_remove_message_0:
         case genop_wait_1:case genop_wait_timeout_2:case genop_timeout_0:
@@ -696,7 +700,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         op=nodes[index].op; a=op->a;
         p->error.stage=gen_opc[op->op].name; p->error.offset=op->offset;
         switch(op->op) {
-        case genop_int_func_start_5:case genop_label_1:case genop_line_1:case genop_nif_start_0:case genop_on_load_0:break;
+        case genop_int_func_start_5:case genop_label_1:case genop_line_1:case genop_debug_line_4:case genop_nif_start_0:case genop_on_load_0:break;
         case genop_i_nif_padding_0:terminal=1;break;
         case genop_fconv_2:
             REQUIRE(source(st,&f,a[0]) && float_register(a[1])); break;
