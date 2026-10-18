@@ -9,7 +9,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 ## BIFs
 
-- [ ] **must work** — `erlang:ports/0`
 - [ ] **must work** — `erlang:posixtime_to_universaltime/1`
 - [ ] **must work** — `erlang:pre_loaded/0`
 - [ ] **must panic** — `erlang:prepare_loading/2`
