@@ -9,7 +9,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 ## BIFs
 
-- [ ] **must panic** — `erlang:trace/3`
 - [ ] **must panic** — `erlang:trace_info/2`
 - [ ] **must panic** — `erlang:trace_pattern/3`
 - [ ] **must work** — `erlang:trunc/1`
