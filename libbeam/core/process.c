@@ -526,6 +526,9 @@ dispatch:
         if(c_p->yield_requested) { c_p->yield_requested=0; c_p->arity=1; goto context_switch3; }
         Goto(*I);
     }
+    OpCase(continue_exit):
+        /* Owned termination is synchronous: the shared stop path completes
+         * link/monitor notification and process reclamation in one slice. */
     OpCase(normal_exit):
         c_p->status=LB_PROCESS_DONE; c_p->arity=1; goto stop;
     OpCase(i_func_info_IaaI):

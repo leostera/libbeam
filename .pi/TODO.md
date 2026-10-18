@@ -14,7 +14,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 - [ ] `opcode: call_nif_WWW`
 - [ ] `opcode: call_nif_early`
-- [ ] `opcode: continue_exit`
 - [ ] `opcode: finish_create_record`
 - [ ] `opcode: i_create_local_native_record_qdtI`
 - [ ] `opcode: i_create_native_record_jctI`
