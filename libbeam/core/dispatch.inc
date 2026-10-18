@@ -277,7 +277,10 @@ OpCase(i_select_val_bins_yfI):
     Sint fail=jb(packed&BEAM_WIDE_MASK);
     Uint previous_freason=c_p->freason;
     if(is_small(bxor_left) && is_small(bxor_right)) {
-      *destination_ptr=bxor_left^bxor_right; I+=4; Goto(*I);
+      Sint value=signed_val(bxor_left)^signed_val(bxor_right);
+      if(IS_SSMALL(value)) {
+        *destination_ptr=make_small(value); I+=4; Goto(*I);
+      }
     }
     reg[0]=bxor_left; reg[1]=bxor_right;
     SWAPOUT; Eterm result=lb_bif_bxor_2(c_p,reg,I); SWAPIN;

@@ -532,11 +532,11 @@ int lb_transform(LoaderState *st)
     if(st->genop->op==genop_gc_bif2_6 && st->genop->arity==6 &&
        st->genop->a[2].type==TAG_u && (Uint)st->genop->a[2].val<st->beam.imports.count &&
        st->bif_imports[st->genop->a[2].val]==&st->space->engine->bifs[BIF_bxor_2]) {
-        /* Keep XOR on the owned generic BIF path: OTP's small-integer-specific
-         * instruction is not part of this runtime's native dispatch surface. */
+        /* Mirror OTP's gc_bif2 -> i_bxor optimization; the checked dispatch
+         * preserves BIF badarith behavior for non-integer operands. */
         BeamOp *op=st->genop;
-        op->op=genop_bif2_5; op->arity=5;
-        op->a[1]=op->a[2]; op->a[2]=op->a[3]; op->a[3]=op->a[4]; op->a[4]=op->a[5];
+        op->op=genop_i_bxor_4; op->arity=4;
+        op->a[1]=op->a[3]; op->a[2]=op->a[4]; op->a[3]=op->a[5];
         return TE_OK;
     }
     if(st->genop->op==genop_get_map_elements_3) {
