@@ -483,6 +483,8 @@ int lb_transform(LoaderState *st)
         st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
     }
     if(st->genop->op==genop_make_fun3_3) {
+        /* OTP's i_lambda_error is a load-time pseudo-op and never executes.
+         * Reject invalid lambda metadata before emitting any runtime code. */
         BeamOp *op=st->genop;
         if(op->arity<3 || op->a[0].type!=TAG_u || (Uint)op->a[0].val>=st->program->lambda_count ||
            op->a[2].type!=TAG_u || (Uint)op->a[2].val!=st->program->lambdas[op->a[0].val].num_free ||

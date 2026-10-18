@@ -4310,6 +4310,25 @@ cc_test(
 )
 
 genrule(
+  name = "lambda_error_opcode_fixture",
+  srcs = ["tests/fixtures/lambda_error_opcode.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/lambda_error_opcode_fixture/lambda_error_opcode.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/lambda_error_opcode.erl)",
+)
+
+cc_test(
+  name = "lambda_error_opcode_test",
+  size = "small",
+  srcs = ["tests/lambda_error_opcode_test.cpp", "tests/test_process.hpp"],
+  args = ["$(rootpath :lambda_error_opcode_fixture)"],
+  data = ["lambda_error_opcode_fixture"],
+  copts = ["-std=c++17"],
+  deps = ["libbeam", "@googletest//:gtest"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
   name = "line_breakpoint_opcodes_fixture",
   srcs = ["tests/fixtures/line_breakpoint_opcodes.S"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],

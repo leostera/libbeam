@@ -35,7 +35,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 - [ ] `opcode: i_is_record_accessible_fy`
 - [ ] `opcode: i_is_wildcard_record_accessible_fxa`
 - [ ] `opcode: i_is_wildcard_record_accessible_fya`
-- [ ] `opcode: i_lambda_error_t`
 - [ ] `opcode: i_line_breakpoint_cleanup`
 - [ ] `opcode: i_return_to_trace`
 - [ ] `opcode: i_update_native_record_jsdtI`
