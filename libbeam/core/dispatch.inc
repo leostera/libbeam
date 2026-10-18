@@ -11,6 +11,9 @@ OpCase(padding):
 OpCase(system_limit_body):
     c_p->freason=LB_EXC_SYSTEM_LIMIT; goto find_func_info;
 
+OpCase(trace_jump_W):
+    SET_I((const BeamInstr *)(uintptr_t)I[1]); Goto(*I);
+
 OpCase(i_yield):
 {
   x(0)=am_true;

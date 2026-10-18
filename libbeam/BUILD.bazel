@@ -4346,6 +4346,16 @@ cc_test(
   deps = ["core"],
 )
 
+cc_test(
+  name = "trace_jump_opcode_test",
+  size = "small",
+  srcs = ["tests/core_trace_jump_test.c"],
+  args = ["$(rootpath :system_limit_body_opcode_fixture)"],
+  data = ["system_limit_body_opcode_fixture"],
+  copts = ["-std=c11"],
+  deps = ["core"],
+)
+
 genrule(
   name = "debug_line_opcode_fixture",
   srcs = ["tests/fixtures/debug_line_opcode.S"],
