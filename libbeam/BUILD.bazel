@@ -4224,6 +4224,23 @@ cc_test(
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
+genrule(
+  name = "bitstring_get_integer_opcode_fixture",
+  srcs = ["tests/fixtures/bitstring_get_integer_opcode.S"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/bitstring_get_integer_opcode_fixture/bitstring_get_integer_opcode.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/bitstring_get_integer_opcode.S)",
+)
+
+cc_test(
+  name = "bitstring_get_integer_opcode_test",
+  size = "small",
+  args = ["$(rootpath :bitstring_get_integer_opcode_fixture)", "bitstring_get_integer_opcode", "get_integer_8"],
+  data = ["bitstring_get_integer_opcode_fixture"],
+  deps = ["bif_execution_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
 cc_test(
   name = "opcode_profile_exclusions",
   srcs = ["tests/opcode_profile_test.c"],

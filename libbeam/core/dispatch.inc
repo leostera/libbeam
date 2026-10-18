@@ -298,6 +298,32 @@ OpCase(i_select_val_bins_yfI):
 }
 
 {
+  Eterm context; Uint packed;
+  OpCase(i_bs_get_integer_8_xfd): context=xb(I[1]); packed=I[2]; goto i_bs_get_integer_8__execute;
+  OpCase(i_bs_get_integer_8_yfd): context=yb(I[1]); packed=I[2]; goto i_bs_get_integer_8__execute;
+  i_bs_get_integer_8__execute: {
+    Sint fail=fb(packed>>BEAM_WIDE_SHIFT); Eterm destination=db(packed&BEAM_WIDE_MASK);
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) goto malformed_code;
+    ErlSubBits *sb=(ErlSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sb) || sb->start>sb->end) goto malformed_code;
+    if(sb->end-sb->start<8) {
+      if(!fail) goto malformed_code;
+      ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I);
+    }
+    const byte *bytes=erl_sub_bits_get_base(sb)+BYTE_OFFSET(sb->start);
+    Uint bit_offset=sb->start%8,result=0;
+    for(Uint bit=0;bit<8;++bit) {
+      Uint position=bit_offset+bit;
+      result=(result<<1)|((bytes[position/8]>>(7-position%8))&1);
+    }
+    sb->start+=8;
+    Eterm *destination_ptr=REG_TARGET_PTR(destination);
+    *destination_ptr=make_small(result);
+    I+=3; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
   Eterm context; Uint packed; 
   OpCase(i_bs_test_unit_fxt): packed=I[2]; context=xb(packed&BEAM_LOOSE_MASK); goto i_bs_test_unit__execute;
   OpCase(i_bs_test_unit_fyt): packed=I[2]; context=yb(packed&BEAM_LOOSE_MASK); goto i_bs_test_unit__execute;

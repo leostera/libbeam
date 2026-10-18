@@ -28,8 +28,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 - [ ] `opcode: i_bs_get_integer_16_yfd`
 - [ ] `opcode: i_bs_get_integer_32_xfd`
 - [ ] `opcode: i_bs_get_integer_32_yfd`
-- [ ] `opcode: i_bs_get_integer_8_xfd`
-- [ ] `opcode: i_bs_get_integer_8_yfd`
 - [ ] `opcode: i_bs_get_integer_imm_xWtftx`
 - [ ] `opcode: i_bs_get_integer_imm_yWtftx`
 - [ ] `opcode: i_bs_get_integer_small_imm_xWftx`
