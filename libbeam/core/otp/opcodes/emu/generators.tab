@@ -1298,8 +1298,22 @@ gen.bs_match(Fail, Ctx, N, List) {
                 op->a[0].type = TAG_u;
                 op->a[0].val = size;
                 op->a[1] = List[src+5]; /* Dst */
+            } else if (size < SMALL_BITS) {
+                /* Small signed or little-endian fields can be read directly
+                 * from the match context without a packed read accumulator. */
+                $NewBeamOp(S, op);
+                $BeamOpNameArity(op, i_bs_get_integer_small_imm, 5);
+
+                op->a[0] = Ctx;
+                op->a[1].type = TAG_u;
+                op->a[1].val = size;
+                op->a[2] = Fail;
+                op->a[3] = Flags;
+                op->a[4] = List[src+5]; /* Dst */
+
+                read_op = 0;
             } else {
-                /* Little endian, signed, or might not fit in a small. */
+                /* Fields too wide for an immediate small integer. */
                 $NewBeamOp(S, op);
                 $BeamOpNameArity(op, i_bs_get_fixed_integer, 4);
 

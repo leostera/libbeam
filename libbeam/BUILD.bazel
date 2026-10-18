@@ -4320,7 +4320,7 @@ genrule(
 cc_test(
   name = "bitstring_get_binary_all_opcode_test",
   size = "small",
-  args = ["$(rootpath :bitstring_get_binary_all_opcode_fixture)", "bitstring_get_binary_all_opcode", "get_binary_all2"],
+  args = ["$(rootpath :bitstring_get_binary_all_opcode_fixture)", "bitstring_get_binary_all_opcode", "get_binary_all2_and_integer_small_imm"],
   data = ["bitstring_get_binary_all_opcode_fixture"],
   deps = ["bif_execution_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),

@@ -176,6 +176,14 @@ static int bs_match_flags_valid(LoaderState *st,BeamOpArg flags)
     }
     return is_nil(options);
 }
+static int bs_match_flags_nonempty(LoaderState *st,BeamOpArg flags)
+{
+    Eterm options;
+    if(flags.type==TAG_n) return 0;
+    if(flags.type!=TAG_q || flags.val<0 || (Uint)flags.val>=st->program->literal_count ||
+       lb_beam_program_literal(st->program,st->space->atoms,flags.val,&options)!=LB_BEAM_OK) return 0;
+    return !is_nil(options);
+}
 static int bs_match_empty_flags_valid(LoaderState *st,BeamOpArg flags)
 {
     Eterm options;
@@ -1141,8 +1149,11 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                             (Uint)a[pos+3].val<=(Uint)-1/(Uint)a[pos+4].val);
                     Uint bits=(Uint)a[pos+3].val*(Uint)a[pos+4].val;
                     p->error.stage="bs_match integer size admission";
-                    /* Wide fields become bignums after the generator's heap reservation. */
-                    REQUIRE(bits<=65536 && bits<=available);
+                    /* Wide fields become bignums after the generator's heap reservation.
+                     * Small signed/little-endian fields use the fail-capable immediate
+                     * instruction, so they need not have a preceding ensure command. */
+                    REQUIRE(bits<=65536 && (bits<=available ||
+                            (bits<SMALL_BITS && bs_match_flags_nonempty(st,a[pos+2]))));
                     if(a[pos+5].type==a[1].type && a[pos+5].val==a[1].val) {
                         p->error.stage="bs_match integer context-alias admission";
                         REQUIRE(pos+6==op->arity);

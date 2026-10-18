@@ -7558,6 +7558,48 @@ OpCase(i_bs_test_unit8_fx): packed=I[1]; context=xb(packed>>BEAM_WIDE_SHIFT); go
 
 {
   Eterm context,destination; Eterm *destination_ptr; LbSubBits *sub; Uint size,flags;
+  OpCase(i_bs_get_integer_small_imm_xWftx): context=xb(I[1]); goto i_bs_get_integer_small_imm__execute;
+  OpCase(i_bs_get_integer_small_imm_yWftx): context=yb(I[1]);
+  i_bs_get_integer_small_imm__execute: {
+    size=Ib(I[2]); Sint fail=fb(I[3]); Uint packed=I[4];
+    flags=tb(packed&BEAM_LOOSE_MASK);
+    destination=db(packed>>BEAM_LOOSE_SHIFT); destination_ptr=REG_TARGET_PTR(destination);
+    if(size>=SMALL_BITS || (flags&~(1u|BSF_LITTLE|BSF_SIGNED))) goto malformed_code;
+    if(flags&1u) {
+      flags&=~1u;
+#if defined(WORDS_BIGENDIAN)
+      flags&=~BSF_LITTLE;
+#else
+      flags|=BSF_LITTLE;
+#endif
+    }
+    if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    sub=(LbSubBits *)boxed_val(context);
+    if(!lb_is_match_context(sub) || sub->start>sub->end) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    if(size>sub->end-sub->start) {
+      if(!fail) goto malformed_code;
+      ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I);
+    }
+    if(!lb_work_domain_charge(c_p->entry_module->space->domain,lb_work_bulk_units(size))) goto work_failure;
+    Uint value=0; const unsigned char *base=(const unsigned char *)(sub->base_flags&~(Uint)LB_SUB_WRITABLE);
+    for(Uint bit=0;bit<size;++bit) {
+      Uint position=bit;
+      if(flags&BSF_LITTLE) {
+        Uint byte=bit/8,within=bit%8,chunk=size-byte*8;
+        if(chunk>8) chunk=8;
+        position=byte*8+chunk-1-within;
+      } else position=size-1-bit;
+      value|=(Uint)((base[(sub->start+bit)/8]>>(7-((sub->start+bit)&7)))&1)<<position;
+    }
+    Sint integer=(Sint)value;
+    if((flags&BSF_SIGNED) && size && (value&((Uint)1<<(size-1)))) integer-=(Sint)((Uint)1<<size);
+    sub->start+=size; *destination_ptr=make_small(integer);
+    I+=5; ASSERT(VALID_INSTR(*I)); Goto(*I);
+  }
+}
+
+{
+  Eterm context,destination; Eterm *destination_ptr; LbSubBits *sub; Uint size,flags;
   const unsigned char *base; Eterm result; size_t digits,words;
   OpCase(i_bs_get_fixed_integer_xItd): context=xb(I[1]); goto i_bs_get_fixed_integer__execute;
   OpCase(i_bs_get_fixed_integer_yItd): context=yb(I[1]);
