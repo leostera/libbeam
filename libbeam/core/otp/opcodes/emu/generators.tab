@@ -1313,15 +1313,18 @@ gen.bs_match(Fail, Ctx, N, List) {
 
                 read_op = 0;
             } else {
-                /* Fields too wide for an immediate small integer. */
+                /* Larger fields use the fail-capable immediate extractor,
+                 * with Live available for its big-integer heap reservation. */
                 $NewBeamOp(S, op);
-                $BeamOpNameArity(op, i_bs_get_fixed_integer, 4);
+                $BeamOpNameArity(op, i_bs_get_integer_imm, 6);
 
                 op->a[0] = Ctx;
                 op->a[1].type = TAG_u;
-                op->a[1].val = size;    /* Size */
-                op->a[2] = Flags;       /* Flags */
-                op->a[3] = List[src+5]; /* Dst */
+                op->a[1].val = size;
+                op->a[2] = List[src+1]; /* Live */
+                op->a[3] = Fail;
+                op->a[4] = Flags;
+                op->a[5] = List[src+5]; /* Dst */
 
                 read_op = 0;
             }

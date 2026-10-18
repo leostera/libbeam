@@ -1149,10 +1149,9 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                             (Uint)a[pos+3].val<=(Uint)-1/(Uint)a[pos+4].val);
                     Uint bits=(Uint)a[pos+3].val*(Uint)a[pos+4].val;
                     p->error.stage="bs_match integer size admission";
-                    /* Wide fields become bignums after the generator's heap reservation.
-                     * Small signed/little-endian fields use the fail-capable immediate
-                     * instruction, so they need not have a preceding ensure command. */
-                    REQUIRE(bits<=65536 && (bits<=available ||
+                    /* Immediate extractors have an explicit fail edge, so they
+                     * may safely probe beyond a preceding ensure's known minimum. */
+                    REQUIRE(bits<=65536 && (bits<=available || bits>=SMALL_BITS ||
                             (bits<SMALL_BITS && bs_match_flags_nonempty(st,a[pos+2]))));
                     if(a[pos+5].type==a[1].type && a[pos+5].val==a[1].val) {
                         p->error.stage="bs_match integer context-alias admission";

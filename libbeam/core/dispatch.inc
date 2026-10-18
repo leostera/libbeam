@@ -7599,18 +7599,50 @@ OpCase(i_bs_test_unit8_fx): packed=I[1]; context=xb(packed>>BEAM_WIDE_SHIFT); go
 }
 
 {
-  Eterm context,destination; Eterm *destination_ptr; LbSubBits *sub; Uint size,flags;
-  const unsigned char *base; Eterm result; size_t digits,words;
-  OpCase(i_bs_get_fixed_integer_xItd): context=xb(I[1]); goto i_bs_get_fixed_integer__execute;
-  OpCase(i_bs_get_fixed_integer_yItd): context=yb(I[1]);
+  Eterm context,destination; Eterm *destination_ptr; LbSubBits *sub; Uint size,flags,live;
+  const unsigned char *base; Eterm result; size_t digits,words; Sint fail;
+  OpCase(i_bs_get_integer_imm_xWtftx): {
+    Uint packed=I[1]; context=xb(packed&BEAM_LOOSE_MASK); live=tb(packed>>BEAM_LOOSE_SHIFT);
+    size=Ib(I[2]); fail=fb(I[3]); packed=I[4]; flags=tb(packed&BEAM_LOOSE_MASK);
+    destination=db(packed>>BEAM_LOOSE_SHIFT); goto i_bs_get_fixed_integer__execute;
+  }
+  OpCase(i_bs_get_integer_imm_yWtftx): {
+    Uint packed=I[1]; context=yb(packed&BEAM_LOOSE_MASK); live=tb(packed>>BEAM_LOOSE_SHIFT);
+    size=Ib(I[2]); fail=fb(I[3]); packed=I[4]; flags=tb(packed&BEAM_LOOSE_MASK);
+    destination=db(packed>>BEAM_LOOSE_SHIFT); goto i_bs_get_fixed_integer__execute;
+  }
+  OpCase(i_bs_get_fixed_integer_xItd): context=xb(I[1]); live=MAX_REG; fail=0; goto i_bs_get_fixed_integer__decode;
+  OpCase(i_bs_get_fixed_integer_yItd): context=yb(I[1]); live=MAX_REG; fail=0;
+  i_bs_get_fixed_integer__decode:
+    size=Ib(I[2]); flags=tb(I[3]); destination=db(I[4]);
   i_bs_get_fixed_integer__execute: {
-    size=Ib(I[2]); flags=tb(I[3]); destination=db(I[4]); destination_ptr=REG_TARGET_PTR(destination);
+    destination_ptr=REG_TARGET_PTR(destination);
     if((flags&~(1u|BSF_LITTLE|BSF_SIGNED)) || size>65536) goto malformed_code;
+    if(flags&1u) {
+      flags&=~1u;
+#if defined(WORDS_BIGENDIAN)
+      flags&=~BSF_LITTLE;
+#else
+      flags|=BSF_LITTLE;
+#endif
+    }
     if(!is_boxed(context) || *boxed_val(context)!=LB_HEADER_SUB_BITS) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
     sub=(LbSubBits *)boxed_val(context);
-    if(!lb_is_match_context(sub) || sub->start>sub->end || size>sub->end-sub->start) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    if(!lb_is_match_context(sub) || sub->start>sub->end) { c_p->freason=LB_EXC_BADARG; goto find_func_info; }
+    if(size>sub->end-sub->start) {
+      if(fail) { ASSERT(VALID_INSTR(*(I+fail))); I+=fail; Goto(*I); }
+      c_p->freason=LB_EXC_BADARG; goto find_func_info;
+    }
     if(!lb_work_domain_charge(c_p->entry_module->space->domain,lb_work_bulk_units(size))) goto work_failure;
     digits=size?(size-1)/64+1:0; words=digits+1;
+    if(size>=SMALL_BITS && (Uint)(E-HTOP)<words+S_RESERVED) {
+      if(live>=MAX_REG) goto malformed_code;
+      SWAPOUT; c_p->i=I; reg[live]=context;
+      if(!lb_process_collect_live(c_p,words,live+1)) goto memory_failure;
+      FCALLS-=(Sint)c_p->last_gc_cost; context=reg[live]; SWAPIN;
+      sub=(LbSubBits *)boxed_val(context); destination_ptr=REG_TARGET_PTR(destination);
+    }
+    if(size>=SMALL_BITS && c_p->heap_reserved<words) goto malformed_code;
     if(size<SMALL_BITS) {
       Uint value=0; base=(const unsigned char *)(sub->base_flags&~(Uint)LB_SUB_WRITABLE);
       for(Uint bit=0;bit<size;++bit) {

@@ -40,6 +40,8 @@ case op_i_bs_get_binary_all2_xfttd: return 1;
 case op_i_bs_get_binary_all2_yfttd: return 1;
 case op_i_bs_get_integer_small_imm_xWftx: return 1;
 case op_i_bs_get_integer_small_imm_yWftx: return 1;
+case op_i_bs_get_integer_imm_xWtftx: return 1;
+case op_i_bs_get_integer_imm_yWtftx: return 1;
 case op_i_bsr_ssjd: return 1;
 case op_i_bsl_ssjd: return 1;
 case op_i_hibernate: return 1;

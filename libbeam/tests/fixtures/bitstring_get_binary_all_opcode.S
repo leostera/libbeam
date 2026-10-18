@@ -1,7 +1,7 @@
 {module, bitstring_get_binary_all_opcode}.
 {exports, [{entry,1},{identity,1}]}.
 {attributes, []}.
-{labels, 13}.
+{labels, 14}.
 
 {function, entry, 1, 2}.
   {label,1}.
@@ -16,6 +16,14 @@
     {bs_start_match4,{atom,no_fail},2,{x,0},{x,0}}.
     {bs_match,{f,3},{x,0},{commands,[{ensure_at_least,5,1},{integer,2,{literal,[signed]},5,1,{x,1}}]}}.
     {test,is_eq_exact,{f,3},[{x,1},{integer,-3}]}.
+    {move,{literal,<<-5:64>>},{x,0}}.
+    {bs_start_match4,{atom,no_fail},2,{x,0},{x,0}}.
+    {bs_match,{f,3},{x,0},{commands,[{ensure_at_least,64,1},{integer,2,{literal,[signed]},64,1,{x,1}}]}}.
+    {test,is_eq_exact,{f,3},[{x,1},{integer,-5}]}.
+    {move,{literal,<<9223372036854775807:64>>},{x,0}}.
+    {bs_start_match4,{atom,no_fail},2,{x,0},{x,0}}.
+    {bs_match,{f,3},{x,0},{commands,[{ensure_at_least,64,1},{integer,2,{literal,[signed]},64,1,{x,1}}]}}.
+    {test,is_eq_exact,{f,3},[{x,1},{integer,9223372036854775807}]}.
     {allocate,1,1}.
     {move,{atom,nil},{y,0}}.
     {move,{atom,nil},{x,1}}.
@@ -27,6 +35,14 @@
     {bs_start_match4,{atom,no_fail},2,{x,0},{y,0}}.
     {bs_match,{f,6},{y,0},{commands,[{ensure_at_least,5,1},{integer,2,{literal,[little,signed]},5,1,{x,1}}]}}.
     {test,is_eq_exact,{f,6},[{x,1},{integer,-9}]}.
+    {move,{literal,<<-5:64>>},{x,0}}.
+    {bs_start_match4,{atom,no_fail},2,{x,0},{y,0}}.
+    {bs_match,{f,6},{y,0},{commands,[{ensure_at_least,64,1},{integer,2,{literal,[signed]},64,1,{x,1}}]}}.
+    {test,is_eq_exact,{f,6},[{x,1},{integer,-5}]}.
+    {move,{literal,<<9223372036854775807:64>>},{x,0}}.
+    {bs_start_match4,{atom,no_fail},2,{x,0},{y,0}}.
+    {bs_match,{f,6},{y,0},{commands,[{ensure_at_least,64,1},{integer,2,{literal,[signed]},64,1,{x,1}}]}}.
+    {test,is_eq_exact,{f,6},[{x,1},{integer,9223372036854775807}]}.
     {deallocate,1}.
     {move,{atom,nil},{x,1}}.
     {move,{literal,<<5:3,7:3>>},{x,0}}.
@@ -49,6 +65,13 @@
     {move,{atom,unexpected_integer_success},{x,0}}.
     return.
   {label,12}.
+    {move,{atom,nil},{x,1}}.
+    {move,{literal,<<29:3>>},{x,0}}.
+    {bs_start_match4,{atom,no_fail},2,{x,0},{x,0}}.
+    {bs_match,{f,13},{x,0},{commands,[{integer,2,{literal,[signed]},64,1,{x,1}}]}}.
+    {move,{atom,unexpected_wide_integer_success},{x,0}}.
+    return.
+  {label,13}.
     {move,{literal,<<"ok">>},{x,0}}.
     return.
 
