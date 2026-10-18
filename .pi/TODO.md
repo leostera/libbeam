@@ -9,7 +9,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 ## BIFs
 
-- [ ] **must panic** — `erlang:dist_ctrl_put_data/2`
 - [ ] **must work** — `erlang:dt_restore_tag/1`
 - [ ] **must work** — `erlang:dt_spread_tag/1`
 - [ ] **must work** — `erlang:erase/0`
