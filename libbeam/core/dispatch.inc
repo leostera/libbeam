@@ -18,6 +18,7 @@ OpCase(i_is_wildcard_record_accessible_fxa):
 OpCase(i_is_wildcard_record_accessible_fya):
 OpCase(i_get_record_elements_jxI):
 OpCase(i_get_record_elements_jyI):
+    if(!I[1]) goto malformed_code; /* No body failure for this test opcode. */
     I+=fb(I[1]); Goto(*I);
 
 /* No native-record term exists in the admitted term model. OTP's field

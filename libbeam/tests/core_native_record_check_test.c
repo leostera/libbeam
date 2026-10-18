@@ -40,6 +40,14 @@ int main(int argc,char **argv)
         code[2]=op_normal_exit;
         CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
         lb_process_destroy(process);
+        if(checks[i]!=op_i_get_record_elements_jxI && checks[i]!=op_i_get_record_elements_jyI) continue;
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        code=(BeamInstr *)process->i;
+        code[0]=checks[i]; code[1]=0;
+        CHECK(lb_process_run(process,10,10)==LB_PROCESS_INVALID);
+        lb_process_destroy(process);
     }
 
     for(size_t i=0;i<sizeof(field_getters)/sizeof(field_getters[0]);++i) {
