@@ -42,6 +42,20 @@ OpCase(trace_jump_W):
 
 /* Trace metadata is denied in this isolate. These return trampolines still
  * unwind their OTP frames and resume the ordinary continuation. */
+OpCase(i_line_breakpoint_cleanup): {
+    /* OTP restores live X registers from E+1 up to the saved CP, then
+     * returns through that CP to resume the instrumented instruction. */
+    size_t live=0;
+    while(live<MAX_REG && E+1+live<c_p->hend &&
+          !pc_valid(c_p,cp_val(E[1+live]))) {
+        x(live)=E[1+live]; ++live;
+    }
+    if(E+1+live>=c_p->hend || !pc_valid(c_p,cp_val(E[1+live]))) goto malformed_code;
+    SET_I(cp_val(E[1+live]));
+    E+=live+2;
+    Goto(*I);
+}
+
 OpCase(i_return_to_trace):
     if(E+2>=c_p->hend) goto malformed_code;
     E+=2; Goto(op_return);

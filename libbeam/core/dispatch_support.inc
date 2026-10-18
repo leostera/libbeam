@@ -60,6 +60,7 @@ case op_trace_jump_W: return 1;
 case op_i_return_to_trace: return 1;
 case op_return_trace: return 1;
 case op_i_call_trace_return: return 1;
+case op_i_line_breakpoint_cleanup: return 1;
 case op_i_bs_get_integer_small_imm_xWftx: return 1;
 case op_i_bs_get_integer_small_imm_yWftx: return 1;
 case op_i_bs_get_integer_imm_xWtftx: return 1;

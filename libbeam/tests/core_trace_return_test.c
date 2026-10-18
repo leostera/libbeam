@@ -37,6 +37,25 @@ int main(int argc,char **argv)
         lb_process_destroy(process);
     }
 
+    {
+        LbCodeEntry *entry; LbProcess *process;
+        CHECK(lb_instruction_supported(op_i_line_breakpoint_cleanup));
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        Eterm *frame=process->hend-4;
+        frame[0]=(Eterm)lb_host_return; /* Handler's return to cleanup. */
+        frame[1]=make_small(42);       /* Saved live x(0). */
+        frame[2]=(Eterm)lb_host_return; /* Return to interrupted code. */
+        frame[3]=(Eterm)lb_host_return;
+        process->stop=frame;
+        process->reg[0]=NIL;
+        ((BeamInstr *)process->i)[0]=op_i_line_breakpoint_cleanup;
+        CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
+        CHECK(process->reg[0]==make_small(42));
+        lb_process_destroy(process);
+    }
+
     CHECK(lb_code_unload(module)==LB_CODE_OK);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK);
