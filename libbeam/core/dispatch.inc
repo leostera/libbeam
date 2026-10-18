@@ -6936,6 +6936,10 @@ Eterm* orig_htop=HTOP; Eterm* orig_stop=E;
 }
 
 {
+  OpCase(i_wait_error):
+    c_p->freason=LB_EXC_TIMEOUT_VALUE;
+    goto find_func_info;
+
   OpCase(wait_locked_f):
   {
 
