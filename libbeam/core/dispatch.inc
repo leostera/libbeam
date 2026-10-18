@@ -16,6 +16,8 @@ OpCase(i_is_record_accessible_fx):
 OpCase(i_is_record_accessible_fy):
 OpCase(i_is_wildcard_record_accessible_fxa):
 OpCase(i_is_wildcard_record_accessible_fya):
+OpCase(i_get_record_elements_jxI):
+OpCase(i_get_record_elements_jyI):
     SET_I((const BeamInstr *)(uintptr_t)I[1]); Goto(*I);
 
 OpCase(padding):

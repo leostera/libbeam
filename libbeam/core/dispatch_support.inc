@@ -48,6 +48,8 @@ case op_i_is_record_accessible_fx: return 1;
 case op_i_is_record_accessible_fy: return 1;
 case op_i_is_wildcard_record_accessible_fxa: return 1;
 case op_i_is_wildcard_record_accessible_fya: return 1;
+case op_i_get_record_elements_jxI: return 1;
+case op_i_get_record_elements_jyI: return 1;
 case op_padding: return 1;
 case op_system_limit_body: return 1;
 case op_trace_jump_W: return 1;

@@ -22,8 +22,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 - [ ] `opcode: i_generic_breakpoint`
 - [ ] `opcode: i_get_local_record_field_jxaad`
 - [ ] `opcode: i_get_local_record_field_jyaad`
-- [ ] `opcode: i_get_record_elements_jxI`
-- [ ] `opcode: i_get_record_elements_jyI`
 - [ ] `opcode: i_get_record_field_jxcad`
 - [ ] `opcode: i_get_record_field_jycad`
 - [ ] `opcode: i_line_breakpoint_cleanup`
