@@ -450,10 +450,16 @@ int lb_transform(LoaderState *st)
     if(unary->op==genop_i_bif1_4 || unary->op==genop_i_bif1_body_3) return TE_FAIL;
     if(unary->op==genop_gc_bif1_5 && unary->arity==5 && unary->a[2].type==TAG_u &&
        (Uint)unary->a[2].val<st->beam.imports.count &&
-       (st->bif_imports[unary->a[2].val]==&st->space->engine->bifs[BIF_bnot_1] ||
-        st->bif_imports[unary->a[2].val]==&st->space->engine->bifs[BIF_list_to_atom_1])) {
-        /* Keep these operations on the owned BIF path: their instruction intrinsics are not
-         * admitted, while the exact imported binding has runtime semantics. */
+       st->bif_imports[unary->a[2].val]==&st->space->engine->bifs[BIF_bnot_1]) {
+        /* Mirror OTP's gc_bif1 -> i_int_bnot optimization; non-small results
+         * use the native BIF fallback in checked dispatch. */
+        unary->op=genop_i_int_bnot_3; unary->arity=3;
+        unary->a[1]=unary->a[3]; unary->a[2]=unary->a[4];
+        return TE_OK;
+    }
+    if(unary->op==genop_gc_bif1_5 && unary->arity==5 && unary->a[2].type==TAG_u &&
+       (Uint)unary->a[2].val<st->beam.imports.count &&
+       st->bif_imports[unary->a[2].val]==&st->space->engine->bifs[BIF_list_to_atom_1]) {
         BeamOpArg fail=unary->a[0],source=unary->a[3],destination=unary->a[4],bif=unary->a[2];
         if(fail.type==TAG_p) {
             unary->op=genop_i_bif1_body_3; unary->arity=3;

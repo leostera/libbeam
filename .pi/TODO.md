@@ -50,7 +50,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 - [ ] `opcode: i_get_record_elements_jyI`
 - [ ] `opcode: i_get_record_field_jxcad`
 - [ ] `opcode: i_get_record_field_jycad`
-- [ ] `opcode: i_int_bnot_jSd`
 - [ ] `opcode: i_is_native_record_fxaa`
 - [ ] `opcode: i_is_native_record_fyaa`
 - [ ] `opcode: i_is_record_accessible_fx`

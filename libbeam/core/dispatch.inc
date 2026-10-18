@@ -298,6 +298,32 @@ OpCase(i_select_val_bins_yfI):
 }
 
 {
+  Eterm bnot_operand;
+  OpCase(i_int_bnot_jSd): {
+    Eterm packed=I[2],destination=db(packed>>BEAM_LOOSE_SHIFT);
+    bnot_operand=Sb(packed&BEAM_LOOSE_MASK);
+    Eterm *destination_ptr=REG_TARGET_PTR(destination);
+    Sint fail=fb(I[1]);
+    Uint previous_freason=c_p->freason;
+    if(is_small(bnot_operand)) {
+      *destination_ptr=make_small(~signed_val(bnot_operand)); I+=3; Goto(*I);
+    }
+    reg[0]=bnot_operand;
+    SWAPOUT; Eterm result=lb_bif_bnot_1(c_p,reg,I); SWAPIN;
+    FCALLS-=(Sint)c_p->last_native_cost;
+    if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+    if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+    if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+    if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+    if(is_value(result)) {
+      destination_ptr=REG_TARGET_PTR(destination); *destination_ptr=result; I+=3; Goto(*I);
+    }
+    if(fail) { c_p->freason=previous_freason; I+=fail; Goto(*I); }
+    reg[0]=bnot_operand; SWAPOUT; goto find_func_info;
+  }
+}
+
+{
   Eterm shift_left,shift_amount;
   OpCase(i_bsr_ssjd): GetSource(I[1],shift_left); GetSource(I[2],shift_amount); goto shift__execute;
   OpCase(i_bsl_ssjd): GetSource(I[1],shift_left); GetSource(I[2],shift_amount);
