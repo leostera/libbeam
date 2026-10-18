@@ -8,6 +8,9 @@ OpCase(i_disabled_line_breakpoint_t):
 OpCase(padding):
     ++I; Goto(*I);
 
+OpCase(system_limit_body):
+    c_p->freason=LB_EXC_SYSTEM_LIMIT; goto find_func_info;
+
 OpCase(i_yield):
 {
   x(0)=am_true;

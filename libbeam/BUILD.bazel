@@ -4329,6 +4329,24 @@ cc_test(
 )
 
 genrule(
+  name = "system_limit_body_opcode_fixture",
+  srcs = ["tests/fixtures/system_limit_body_opcode.S"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/system_limit_body_opcode_fixture/system_limit_body_opcode.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/system_limit_body_opcode.S)",
+)
+
+cc_test(
+  name = "system_limit_body_opcode_test",
+  size = "small",
+  srcs = ["tests/core_system_limit_body_test.c"],
+  args = ["$(rootpath :system_limit_body_opcode_fixture)"],
+  data = ["system_limit_body_opcode_fixture"],
+  copts = ["-std=c11"],
+  deps = ["core"],
+)
+
+genrule(
   name = "debug_line_opcode_fixture",
   srcs = ["tests/fixtures/debug_line_opcode.S"],
   tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],

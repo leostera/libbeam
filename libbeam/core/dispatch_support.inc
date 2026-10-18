@@ -42,6 +42,7 @@ case op_i_bs_get_binary_imm2_xftWd: return 1;
 case op_i_bs_get_binary_imm2_yftWd: return 1;
 case op_i_disabled_line_breakpoint_t: return 1;
 case op_padding: return 1;
+case op_system_limit_body: return 1;
 case op_i_bs_get_integer_small_imm_xWftx: return 1;
 case op_i_bs_get_integer_small_imm_yWftx: return 1;
 case op_i_bs_get_integer_imm_xWtftx: return 1;
