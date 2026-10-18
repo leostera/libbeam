@@ -9,4 +9,8 @@ identity(Input) -> Input.
 invoke(_F,direct,[A0]) -> erlang:'list_to_existing_atom'(A0);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
 check(F,Mode,V) ->
-    bif_a = invoke(F, Mode, [[98,105,102,95,V+90]]), true.
+    bif_a = invoke(F, Mode, [[98,105,102,95,V+90]]),
+    true = badarg(fun() -> invoke(F,Mode,["unlisted_atom_token"]) end),
+    true.
+badarg(Fun) ->
+    try Fun() of _ -> false catch error:badarg -> true; _:_ -> false end.
