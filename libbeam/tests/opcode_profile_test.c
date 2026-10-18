@@ -31,6 +31,10 @@ int main(void)
     CHECK(lb_instruction_supported(op_i_enabled_line_breakpoint_t));
     CHECK(lb_instruction_supported(op_i_is_native_record_fxaa));
     CHECK(lb_instruction_supported(op_i_is_native_record_fyaa));
+    CHECK(lb_instruction_supported(op_i_is_record_accessible_fx));
+    CHECK(lb_instruction_supported(op_i_is_record_accessible_fy));
+    CHECK(lb_instruction_supported(op_i_is_wildcard_record_accessible_fxa));
+    CHECK(lb_instruction_supported(op_i_is_wildcard_record_accessible_fya));
     CHECK(lb_instruction_supported(op_padding));
     CHECK(lb_instruction_supported(op_system_limit_body));
     CHECK(lb_instruction_supported(op_trace_jump_W));

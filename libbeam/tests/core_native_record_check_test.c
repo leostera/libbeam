@@ -6,7 +6,11 @@
 
 int main(int argc,char **argv)
 {
-    static const BeamInstr checks[]={op_i_is_native_record_fxaa,op_i_is_native_record_fyaa};
+    static const BeamInstr checks[]={
+        op_i_is_native_record_fxaa,op_i_is_native_record_fyaa,
+        op_i_is_record_accessible_fx,op_i_is_record_accessible_fy,
+        op_i_is_wildcard_record_accessible_fxa,op_i_is_wildcard_record_accessible_fya
+    };
     FILE *file; long length; unsigned char *beam;
     LbEngine *engine; LbCodeSpace *space; LbCodeModule *module; LbBeamError error;
     Eterm module_atom,function_atom;
@@ -38,6 +42,6 @@ int main(int argc,char **argv)
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK);
     lb_engine_release(engine);
     free(beam);
-    puts("CORE_NATIVE_RECORD_CHECK_OK no_native_record_representation=true");
+    puts("CORE_NATIVE_RECORD_CHECK_OK no_native_record_representation=true accessibility=false");
     return 0;
 }

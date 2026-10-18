@@ -8,10 +8,14 @@ OpCase(i_disabled_line_breakpoint_t):
 OpCase(i_enabled_line_breakpoint_t):
     I+=2; Goto(*I);
 
-/* Native record terms are not representable in this isolate, so every record
- * identity check follows OTP's failure edge for non-record values. */
+/* Native records and their definitions are not representable in this isolate;
+ * the predicate/accessibility opcodes therefore take their failure edge. */
 OpCase(i_is_native_record_fxaa):
 OpCase(i_is_native_record_fyaa):
+OpCase(i_is_record_accessible_fx):
+OpCase(i_is_record_accessible_fy):
+OpCase(i_is_wildcard_record_accessible_fxa):
+OpCase(i_is_wildcard_record_accessible_fya):
     SET_I((const BeamInstr *)(uintptr_t)I[1]); Goto(*I);
 
 OpCase(padding):
