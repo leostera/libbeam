@@ -12,10 +12,26 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 ## Unadmitted generated instruction forms
 
+Record predicate/field forms previously removed after non-record-only tests are
+listed again: their successful paths require `Recs` definitions and native-record
+terms, which the loader still rejects. Negative-path coverage is not full support.
+
 - [ ] `opcode: call_nif_WWW`
 - [ ] `opcode: call_nif_early`
 - [ ] `opcode: finish_create_record`
 - [ ] `opcode: i_create_local_native_record_qdtI`
 - [ ] `opcode: i_create_native_record_jctI`
 - [ ] `opcode: i_generic_breakpoint`
+- [ ] `opcode: i_get_local_record_field_jxaad`
+- [ ] `opcode: i_get_local_record_field_jyaad`
+- [ ] `opcode: i_get_record_elements_jxI`
+- [ ] `opcode: i_get_record_elements_jyI`
+- [ ] `opcode: i_get_record_field_jxcad`
+- [ ] `opcode: i_get_record_field_jycad`
+- [ ] `opcode: i_is_native_record_fxaa`
+- [ ] `opcode: i_is_native_record_fyaa`
+- [ ] `opcode: i_is_record_accessible_fx`
+- [ ] `opcode: i_is_record_accessible_fy`
+- [ ] `opcode: i_is_wildcard_record_accessible_fxa`
+- [ ] `opcode: i_is_wildcard_record_accessible_fya`
 - [ ] `opcode: i_update_native_record_jsdtI`
