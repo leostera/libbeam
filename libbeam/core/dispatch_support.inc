@@ -76,6 +76,7 @@ case op_put_tuple2_xI: return 1;
 case op_put_tuple2_yI: return 1;
 case op_test_heap_It: return 1;
 case op_test_heap_1_put_list_Iy: return 1;
+case op_call_error_handler: return 1;
 case op_call_light_bif_be: return 1;
 case op_call_light_bif_only_be: return 1;
 case op_i_call_ext_only_e: return 1;

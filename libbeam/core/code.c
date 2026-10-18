@@ -224,8 +224,16 @@ LbCodeStatus lb_code_resolve_imports(LoaderState *st,LbCodeModule *const *batch,
         if(!export && st->space->preloading && entry->module==am_erlang)
             export=lb_export_find(st->space,entry->module,entry->function,(unsigned)entry->arity);
         if(!export) {
-            st->program->error.stage="unresolved import"; st->program->error.offset=i;
-            return LB_CODE_UNRESOLVED;
+            LbMissingImport *missing=lb_palloc(st->program,1,sizeof(*missing));
+            if(!missing) return from_beam(st->program->error.status);
+            memset(missing,0,sizeof(*missing));
+            missing->export.bif_number=-1;
+            missing->export.info.mfa=(LbMFA){entry->module,entry->function,entry->arity};
+            missing->export.owner=module;
+            missing->module=entry->module; missing->function=entry->function;
+            missing->arity=entry->arity; missing->op=op_call_error_handler;
+            missing->export.dispatch.addresses[0]=&missing->op;
+            export=&missing->export;
         }
         if(export->owner && export->owner!=module && export->owner->importers>SIZE_MAX-module->dependency_count)
             return LB_CODE_LIMIT;

@@ -286,7 +286,7 @@ Eterm lb_process_exception_info(const LbProcess *p) { return p && p->status==LB_
 size_t lb_process_collections(const LbProcess *p) { return p?p->collections:0; }
 static int pc_valid_work(LbProcess *p,const BeamInstr *pc,size_t *validation_work)
 {
-    LbCodeModule *m; Uint address=(Uint)pc; size_t i,work=0;
+    LbCodeModule *m; Uint address=(Uint)pc; size_t i,j,work=0;
     if(validation_work) *validation_work=0;
     if(pc==lb_host_return) return 1;
     if(pc==p->entry_module->space->apply_export.dispatch.addresses[0] ||
@@ -301,6 +301,15 @@ static int pc_valid_work(LbProcess *p,const BeamInstr *pc,size_t *validation_wor
             p->pc_module=m;
             if(validation_work) *validation_work=work;
             return 1;
+        }
+        work+=m->import_count;
+        for(j=0;j<m->import_count;++j) {
+            Export *import=m->imports[j];
+            if(import && import->owner==m && import->dispatch.addresses[0]==pc &&
+               *(const BeamInstr *)pc==op_call_error_handler) {
+                if(validation_work) *validation_work=work+j+1;
+                return 1;
+            }
         }
     }
     for(i=0;i<LB_NATIVE_COUNT;++i) {

@@ -1487,6 +1487,15 @@ OpCase(allocate_heap_tIt):
   GotoPF(next_pf);
 }
 
+OpCase(call_error_handler): {
+  LbMissingImport *missing=(LbMissingImport *)((unsigned char *)I-offsetof(LbMissingImport,op));
+  c_p->current=&missing->export.info.mfa;
+  /* This isolate has no error_handler autoloader or executable MFA trace for
+   * absent code, so the fallback is the ordinary guest undef exception. */
+  c_p->freason=LB_EXC_UNDEF&~LB_EXF_SAVETRACE;
+  goto find_func_info;
+}
+
 OpCase(call_light_bif_be):
 OpCase(call_light_bif_only_be):
 {

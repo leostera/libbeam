@@ -44,6 +44,10 @@ typedef struct LbExport {
     LbCodeModule *owner;
     struct LbExport *next;
 } Export;
+typedef struct {
+    Export export;
+    BeamInstr module, function, arity, op;
+} LbMissingImport;
 typedef struct { Eterm module, function; Uint arity; } BeamFile_ImportEntry;
 typedef struct { size_t pos; Sint offset; unsigned packed; } LabelPatch;
 typedef struct { size_t value, count, capacity; int looprec_targeted; LabelPatch *patches; } Label;
