@@ -9,4 +9,9 @@ identity(Input) -> Input.
 invoke(_F,direct,[A0]) -> erlang:'ref_to_list'(A0);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
 check(F,Mode,V) ->
-    R = make_ref(), erlang:list_to_ref(invoke(F, Mode, [R])) =:= R.
+    R = make_ref(),
+    true = erlang:list_to_ref(invoke(F,Mode,[R])) =:= R,
+    true = badarg(fun() -> invoke(F,Mode,[not_a_reference]) end),
+    true.
+badarg(Fun) ->
+    try Fun() of _ -> false catch error:badarg -> true; _:_ -> false end.
