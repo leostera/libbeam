@@ -4258,6 +4258,23 @@ cc_test(
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
+genrule(
+  name = "nif_start_opcode_fixture",
+  srcs = ["tests/fixtures/nif_start_opcode.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/nif_start_opcode_fixture/nif_start_opcode.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/nif_start_opcode.erl)",
+)
+
+cc_test(
+  name = "nif_start_opcode_test",
+  size = "small",
+  args = ["$(rootpath :nif_start_opcode_fixture)", "nif_start_opcode", "nif_start"],
+  data = ["nif_start_opcode_fixture"],
+  deps = ["bif_execution_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
 cc_test(
   name = "opcode_profile_exclusions",
   srcs = ["tests/opcode_profile_test.c"],

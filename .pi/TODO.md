@@ -53,7 +53,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 - [ ] `opcode: i_nif_padding`
 - [ ] `opcode: i_return_to_trace`
 - [ ] `opcode: i_update_native_record_jsdtI`
-- [ ] `opcode: nif_start`
 - [ ] `opcode: padding`
 - [ ] `opcode: return_trace`
 - [ ] `opcode: system_limit_body`
