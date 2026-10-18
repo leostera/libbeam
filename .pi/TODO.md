@@ -16,7 +16,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 - [ ] `opcode: call_nif_early`
 - [ ] `opcode: continue_exit`
 - [ ] `opcode: finish_create_record`
-- [ ] `opcode: i_call_trace_return`
 - [ ] `opcode: i_create_local_native_record_qdtI`
 - [ ] `opcode: i_create_native_record_jctI`
 - [ ] `opcode: i_debug_breakpoint`
@@ -35,6 +34,4 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 - [ ] `opcode: i_is_wildcard_record_accessible_fxa`
 - [ ] `opcode: i_is_wildcard_record_accessible_fya`
 - [ ] `opcode: i_line_breakpoint_cleanup`
-- [ ] `opcode: i_return_to_trace`
 - [ ] `opcode: i_update_native_record_jsdtI`
-- [ ] `opcode: return_trace`

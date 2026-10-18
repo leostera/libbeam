@@ -31,6 +31,9 @@ int main(void)
     CHECK(lb_instruction_supported(op_padding));
     CHECK(lb_instruction_supported(op_system_limit_body));
     CHECK(lb_instruction_supported(op_trace_jump_W));
+    CHECK(lb_instruction_supported(op_i_return_to_trace));
+    CHECK(lb_instruction_supported(op_return_trace));
+    CHECK(lb_instruction_supported(op_i_call_trace_return));
     CHECK(lb_instruction_supported(op_i_bs_get_integer_small_imm_xWftx));
     CHECK(lb_instruction_supported(op_i_bs_get_integer_small_imm_yWftx));
     CHECK(lb_instruction_supported(op_i_bs_get_integer_imm_xWtftx));

@@ -14,6 +14,17 @@ OpCase(system_limit_body):
 OpCase(trace_jump_W):
     SET_I((const BeamInstr *)(uintptr_t)I[1]); Goto(*I);
 
+/* Trace metadata is denied in this isolate. These return trampolines still
+ * unwind their OTP frames and resume the ordinary continuation. */
+OpCase(i_return_to_trace):
+    if(E+2>=c_p->hend) goto malformed_code;
+    E+=2; Goto(op_return);
+
+OpCase(return_trace):
+OpCase(i_call_trace_return):
+    if(E+4>=c_p->hend) goto malformed_code;
+    E+=4; Goto(op_return);
+
 OpCase(i_yield):
 {
   x(0)=am_true;
