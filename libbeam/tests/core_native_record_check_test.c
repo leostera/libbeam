@@ -2,6 +2,7 @@
 // Copyright 2026 Leandro Ostera <leandro@osteria.io>
 #include "process_internal.h"
 #include "term_compare.h"
+#include "native_record.h"
 #include <stdio.h>
 #define CHECK(condition) do { if(!(condition)) { fprintf(stderr,"CHECK %s:%d: %s\n",__FILE__,__LINE__,#condition); exit(1); } } while(0)
 
@@ -81,19 +82,22 @@ int main(int argc,char **argv)
         CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
         CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
         lb_code_entry_release(entry);
-        CHECK(lb_heap_reserve(process,8,0));
-        Eterm *def=process->htop; process->htop+=5;
-        def[0]=make_arityval(4); def[1]=module_atom; def[2]=module_atom;
-        def[3]=am_true; def[4]=module_atom;
+        CHECK(lb_heap_reserve(process,10,0));
+        Eterm *def=process->htop; process->htop+=7;
+        def[0]=make_arityval(6); def[1]=NIL; def[2]=make_small(0);
+        def[3]=module_atom; def[4]=module_atom;
+        def[5]=am_true; def[6]=module_atom;
         Eterm *record=process->htop; process->htop+=3;
         record[0]=make_record_header(1); record[1]=make_tuple(def); record[2]=make_small(42);
         process->reg[0]=make_boxed(record);
         CHECK(is_record(process->reg[0]));
-        CHECK(lb_flat_size(space->domain,process->reg[0],&words) && words==8);
+        CHECK(lb_flat_size(space->domain,process->reg[0],&words) && words==10);
         CHECK(lb_process_collect_live(process,0,1));
         record=record_val(process->reg[0]);
         CHECK(is_record(process->reg[0]) && is_tuple(record[1]));
-        CHECK(tuple_val(record[1])[4]==module_atom && record[2]==make_small(42));
+        CHECK(lb_record_term_field_count(process->reg[0])==1 &&
+              lb_record_term_definition(process->reg[0])->keys[0]==module_atom &&
+              record[2]==make_small(42));
         CHECK(lb_heap_reserve(process,words,1));
         Eterm *top=process->htop;
         Eterm copied=lb_copy_flat(process->reg[0],&top,&process->off_heap);
