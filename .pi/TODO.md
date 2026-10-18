@@ -9,7 +9,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 ## BIFs
 
-- [ ] **must work** — `erlang:make_fun/3`
 - [ ] **must work** — `erlang:match_spec_test/3`
 - [ ] **must work** — `erlang:md5/1`
 - [ ] **must work** — `erlang:md5_final/1`
