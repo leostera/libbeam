@@ -4275,6 +4275,23 @@ cc_test(
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
 )
 
+genrule(
+  name = "call_light_bif_opcode_fixture",
+  srcs = ["tests/fixtures/call_light_bif_opcode.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/call_light_bif_opcode_fixture/call_light_bif_opcode.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/call_light_bif_opcode.erl)",
+)
+
+cc_test(
+  name = "call_light_bif_opcode_test",
+  size = "small",
+  args = ["$(rootpath :call_light_bif_opcode_fixture)", "call_light_bif_opcode", "call_light_bif"],
+  data = ["call_light_bif_opcode_fixture"],
+  deps = ["bif_execution_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
 cc_test(
   name = "opcode_profile_exclusions",
   srcs = ["tests/opcode_profile_test.c"],

@@ -1487,6 +1487,20 @@ OpCase(allocate_heap_tIt):
   GotoPF(next_pf);
 }
 
+OpCase(call_light_bif_be):
+OpCase(call_light_bif_only_be):
+{
+  ASSERT(VALID_INSTR(*(I+3)));
+  *E=(BeamInstr)(I+3);
+  Export *ep=(Export *)I[2];
+  SET_I(ep->dispatch.addresses[0]);
+  CHECK_ARGS(I);
+  BeamInstr dis_next=*I;
+  if(FCALLS<=0) goto context_switch;
+  FCALLS--;
+  Goto(dis_next);
+}
+
 OpCase(i_call_ext_e):
 {
   ASSERT(VALID_INSTR(*(I+2)));

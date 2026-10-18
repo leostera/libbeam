@@ -13,8 +13,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 ## Unadmitted generated instruction forms
 
 - [ ] `opcode: call_error_handler`
-- [ ] `opcode: call_light_bif_be`
-- [ ] `opcode: call_light_bif_only_be`
 - [ ] `opcode: call_nif_WWW`
 - [ ] `opcode: call_nif_early`
 - [ ] `opcode: continue_exit`
