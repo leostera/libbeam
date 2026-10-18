@@ -9,7 +9,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 ## BIFs
 
-- [ ] **must work** — `erlang:is_builtin/3`
 - [ ] **must work** — `erlang:is_float/1`
 - [ ] **must work** — `erlang:is_integer/3`
 - [ ] **must work** — `erlang:is_map/1`
