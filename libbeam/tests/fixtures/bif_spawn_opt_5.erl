@@ -9,5 +9,7 @@ identity(Input) -> Input.
 invoke(_F,direct,[A0,A1,A2,A3,A4]) -> erlang:'spawn_opt'(A0,A1,A2,A3,A4);
 invoke(F,_DynamicMode,Args) -> erlang:apply(erlang,F,Args).
 check(F,Mode,V) ->
-    {P,R} = invoke(F, Mode, [node(),?MODULE,child,[self()],[monitor]]), receive done -> receive {'DOWN',R,process,P,normal} -> true after 1000 -> false end after 1000 -> false end.
+    {P,R} = invoke(F,Mode,[node(),?MODULE,child,[self()],[monitor]]),
+    true = is_pid(P), true = is_reference(R),
+    receive done -> receive {'DOWN',R,process,P,normal} -> true after 1000 -> false end after 1000 -> false end.
 child(Parent) -> Parent ! done.
