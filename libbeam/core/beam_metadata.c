@@ -6,6 +6,53 @@
 #include "beam_program_internal.h"
 #define REQUIRE(x) do { if (!(x)) return lb_pfail(p,LB_BEAM_BAD_FORMAT); } while (0)
 static int64_t signed64(const unsigned char *s) { Uint v=0; unsigned i; for(i=0;i<8;++i) v=(v<<8)|s[i]; return (int64_t)v; }
+static int record_atom(LbBeamProgram *p,LbTaggedNumber value,LbBeamBytes *name)
+{
+    const LbBeamImageInfo *info=lb_beam_image_info(p->image);
+    return value.tag==TAG_a && !value.size && value.word>0 &&
+        (Uint)value.word<=info->atom_count &&
+        lb_beam_image_atom(p->image,(uint32_t)value.word,name)==LB_BEAM_OK;
+}
+static int record_definitions(LbBeamProgram *p,LbBeamReader *r)
+{
+    size_t i,j,total=0;
+    unsigned opcode;
+    LbTaggedNumber name,exported,list,key,value;
+    LbBeamBytes atom;
+    if(p->record_count) {
+        p->records=lb_palloc(p,p->record_count,sizeof(*p->records));
+        if(!p->records) return 0;
+    }
+    for(i=0;i<p->record_count;++i) {
+        LbRecordDefinition *def=&p->records[i];
+        REQUIRE(lb_reader_u8(r,&opcode) && opcode==genop_call_last_3);
+        REQUIRE(lb_reader_tagged(r,&name) && record_atom(p,name,&atom));
+        def->name=(uint32_t)name.word;
+        REQUIRE(lb_reader_tagged(r,&exported) && record_atom(p,exported,&atom));
+        if(atom.size==4 && !memcmp(atom.data,"true",4)) def->exported=1;
+        else REQUIRE(atom.size==5 && !memcmp(atom.data,"false",5));
+        REQUIRE(lb_reader_tagged(r,&list) && list.tag==TAG_z && list.word==1 && !list.size);
+        REQUIRE(lb_reader_tagged(r,&list) && list.tag==TAG_u && !list.size &&
+                list.word>=0 && (Uint)list.word<=2*(p->record_field_count-total) &&
+                !(list.word&1) && (Uint)list.word/2<=(r->size-r->pos)/2);
+        def->field_count=(size_t)list.word/2; total+=def->field_count;
+        if(def->field_count) {
+            def->fields=lb_palloc(p,def->field_count,sizeof(*def->fields));
+            if(!def->fields) return 0;
+        }
+        for(j=0;j<def->field_count;++j) {
+            REQUIRE(lb_reader_tagged(r,&key) && record_atom(p,key,&atom));
+            def->fields[j].key=(uint32_t)key.word;
+            REQUIRE(lb_reader_tagged(r,&value) && !value.size);
+            if(value.tag==TAG_a) REQUIRE(record_atom(p,value,&atom));
+            else REQUIRE(value.tag==TAG_n || value.tag==TAG_i || value.tag==TAG_u ||
+                         (value.tag==TAG_q && value.word>=0 && (Uint)value.word<p->literal_count));
+            def->fields[j].default_value=(LbBeamArg){value.tag,value.word};
+        }
+    }
+    REQUIRE(total==p->record_field_count && r->pos==r->size);
+    return 1;
+}
 int lb_pmetadata(LbBeamProgram *p)
 {
     LbBeamBytes chunk;
@@ -21,6 +68,7 @@ int lb_pmetadata(LbBeamProgram *p)
                 lb_reader_u32(&r,&count) && lb_reader_u32(&r,&fields));
         REQUIRE(count<=(r.size-r.pos)/4 && fields<=(r.size-r.pos)/2);
         p->record_count=count; p->record_field_count=fields;
+        if(!record_definitions(p,&r)) return 0;
     }
     p->error.stage="types";
     p->type_fallback=1; p->type_count=1;

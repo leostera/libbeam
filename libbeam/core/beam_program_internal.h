@@ -29,6 +29,8 @@ typedef struct LbExternalFunPatch {
     Eterm module, function, arity;
 } LbExternalFunPatch;
 typedef struct LbOpBlock { struct LbOpBlock *next; size_t capacity; LbBeamOp ops[]; } LbOpBlock;
+typedef struct { uint32_t key; LbBeamArg default_value; } LbRecordField;
+typedef struct { uint32_t name; int exported; size_t field_count; LbRecordField *fields; } LbRecordDefinition;
 struct LbBeamProgram {
     LbAllocDomain *domain;
     LbAtomTable *atoms;
@@ -57,6 +59,7 @@ struct LbBeamProgram {
     /* Versioned Recs metadata remains non-executable until definitions and
      * instance terms have owned representations. */
     size_t record_count,record_field_count;
+    LbRecordDefinition *records;
     LbBeamType *types;
     size_t type_count;
     int type_fallback;
