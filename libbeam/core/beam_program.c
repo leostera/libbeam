@@ -178,6 +178,7 @@ static LbBeamStatus begin(LbAllocDomain *domain,LbAtomTable *atoms,const void *b
         for(op=p->ops;op;op=op->next) for(i=0;i<op->arity;++i)
             if(op->a[i].type==TAG_a) op->a[i].val=(Sint)p->file_atoms[op->a[i].val];
         for(i=0;i<p->lambda_count;++i) p->lambdas[i].function=p->file_atoms[p->lambdas[i].function];
+        lb_pbind_records(p);
         if(!lb_pvalidate_maps(p,NULL)) goto fail;
     }
     *out=p;
@@ -214,6 +215,7 @@ LbBeamStatus lb_program_decode_staged(LbBeamProgram *p)
     for(op=p->ops;op;op=op->next) for(i=0;i<op->arity;++i)
         if(op->a[i].type==TAG_a) op->a[i].val=(Sint)p->file_atoms[op->a[i].val];
     for(i=0;i<p->lambda_count;++i) p->lambdas[i].function=p->file_atoms[p->lambdas[i].function];
+    lb_pbind_records(p);
     if(!lb_pvalidate_maps(p,NULL)) return p->error.status;
     p->atom_lookup=NULL;
     return LB_BEAM_OK;

@@ -13,6 +13,25 @@ static int record_atom(LbBeamProgram *p,LbTaggedNumber value,LbBeamBytes *name)
         (Uint)value.word<=info->atom_count &&
         lb_beam_image_atom(p->image,(uint32_t)value.word,name)==LB_BEAM_OK;
 }
+void lb_pbind_records(LbBeamProgram *p)
+{
+    for(size_t i=0;i<p->record_count;++i) {
+        LbRecordDefinition *def=&p->records[i];
+        def->name=p->file_atoms[def->name];
+        for(size_t j=0;j<def->field_count;++j) {
+            LbRecordField *field=&def->fields[j];
+            LbBeamArg *value=&field->default_value;
+            field->key=p->file_atoms[field->key];
+            switch(value->type) {
+            case TAG_a: value->val=(Sint)p->file_atoms[value->val]; break;
+            case TAG_n: value->val=NIL; break;
+            case TAG_i: value->val=make_small(value->val); break;
+            case TAG_q: value->val=(Sint)p->literals[value->val]; break;
+            default: break; /* TAG_u denotes an uninitialized field. */
+            }
+        }
+    }
+}
 static int record_definitions(LbBeamProgram *p,LbBeamReader *r)
 {
     size_t i,j,total=0;

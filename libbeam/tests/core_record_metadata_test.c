@@ -21,13 +21,19 @@ int main(int argc,char **argv)
     CHECK(lb_beam_program_prepare(engine->domain,space->atoms,beam,(size_t)length,&program,&error)==LB_BEAM_OK);
     CHECK(program->record_count==1 && program->record_field_count==2);
     CHECK(program->records && !program->records[0].exported && program->records[0].field_count==2);
+    CHECK(is_atom(program->records[0].name) && is_atom(program->records[0].fields[0].key));
+    CHECK(is_atom(program->records[0].fields[1].key));
+    CHECK(is_atom((Eterm)program->records[0].fields[0].default_value.val));
+    CHECK(is_atom((Eterm)program->records[0].fields[1].default_value.val));
     LbBeamBytes name;
-    CHECK(lb_beam_image_atom(program->image,program->records[0].name,&name)==LB_BEAM_OK);
-    CHECK(name.size==5 && !memcmp(name.data,"thing",5));
-    CHECK(lb_beam_image_atom(program->image,program->records[0].fields[0].key,&name)==LB_BEAM_OK);
-    CHECK(name.size==5 && !memcmp(name.data,"first",5));
-    CHECK(lb_beam_image_atom(program->image,program->records[0].fields[1].key,&name)==LB_BEAM_OK);
-    CHECK(name.size==6 && !memcmp(name.data,"second",6));
+    for(size_t i=1;i<=lb_beam_image_info(program->image)->atom_count;++i) {
+        CHECK(lb_beam_image_atom(program->image,(uint32_t)i,&name)==LB_BEAM_OK);
+        if(name.size==5 && !memcmp(name.data,"thing",5)) CHECK(program->records[0].name==program->file_atoms[i]);
+        if(name.size==5 && !memcmp(name.data,"first",5)) CHECK(program->records[0].fields[0].key==program->file_atoms[i]);
+        if(name.size==6 && !memcmp(name.data,"second",6)) CHECK(program->records[0].fields[1].key==program->file_atoms[i]);
+        if(name.size==3 && !memcmp(name.data,"one",3)) CHECK((Eterm)program->records[0].fields[0].default_value.val==program->file_atoms[i]);
+        if(name.size==3 && !memcmp(name.data,"two",3)) CHECK((Eterm)program->records[0].fields[1].default_value.val==program->file_atoms[i]);
+    }
     lb_beam_program_destroy(program);
     unsigned char version=beam[recs+3]; beam[recs+3]=1;
     CHECK(lb_beam_program_prepare(engine->domain,space->atoms,beam,(size_t)length,&program,&error)==LB_BEAM_BAD_FORMAT);

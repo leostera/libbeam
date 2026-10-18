@@ -29,8 +29,8 @@ typedef struct LbExternalFunPatch {
     Eterm module, function, arity;
 } LbExternalFunPatch;
 typedef struct LbOpBlock { struct LbOpBlock *next; size_t capacity; LbBeamOp ops[]; } LbOpBlock;
-typedef struct { uint32_t key; LbBeamArg default_value; } LbRecordField;
-typedef struct { uint32_t name; int exported; size_t field_count; LbRecordField *fields; } LbRecordDefinition;
+typedef struct { Eterm key; LbBeamArg default_value; } LbRecordField;
+typedef struct { Eterm name; int exported; size_t field_count; LbRecordField *fields; } LbRecordDefinition;
 struct LbBeamProgram {
     LbAllocDomain *domain;
     LbAtomTable *atoms;
@@ -83,6 +83,7 @@ int lb_pliterals(LbBeamProgram *);
 int lb_pvalidate_maps(LbBeamProgram *,LbProcess *meter);
 int lb_pmodule_info(LbBeamProgram *);
 int lb_pmetadata(LbBeamProgram *);
+void lb_pbind_records(LbBeamProgram *);
 int lb_pdecode(LbBeamProgram *);
 int lb_pinteger(LbBeamProgram *, const unsigned char *, size_t, int, LbEtfStorage, Eterm *);
 /* Decode one versioned ETF value; reader.pos reports consumption, leaving any
