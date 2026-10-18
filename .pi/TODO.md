@@ -9,7 +9,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 ## BIFs
 
-- [ ] **must work** — `erlang:system_time/1`
 - [ ] **must work** — `erlang:term_to_binary/1`
 - [ ] **must work** — `erlang:term_to_binary/2`
 - [ ] **must work** — `erlang:time_offset/0`
