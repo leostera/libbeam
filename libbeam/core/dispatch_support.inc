@@ -25,6 +25,7 @@ case op_i_jump_on_val_zero_yfI: return 1;
 case op_i_band_xcjd: return 1;
 case op_i_band_ssjd: return 1;
 case op_i_bor_jssd: return 1;
+case op_i_bxor_jssd: return 1;
 case op_i_bsr_ssjd: return 1;
 case op_i_bsl_ssjd: return 1;
 case op_i_hibernate: return 1;

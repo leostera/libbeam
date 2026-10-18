@@ -269,6 +269,32 @@ OpCase(i_select_val_bins_yfI):
 }
 
 {
+  Eterm bxor_left,bxor_right;
+  OpCase(i_bxor_jssd): {
+    Eterm packed=I[1],destination=db(packed>>BEAM_WIDE_SHIFT);
+    GetSource(I[2],bxor_left); GetSource(I[3],bxor_right);
+    Eterm *destination_ptr=REG_TARGET_PTR(destination);
+    Sint fail=jb(packed&BEAM_WIDE_MASK);
+    Uint previous_freason=c_p->freason;
+    if(is_small(bxor_left) && is_small(bxor_right)) {
+      *destination_ptr=bxor_left^bxor_right; I+=4; Goto(*I);
+    }
+    reg[0]=bxor_left; reg[1]=bxor_right;
+    SWAPOUT; Eterm result=lb_bif_bxor_2(c_p,reg,I); SWAPIN;
+    FCALLS-=(Sint)c_p->last_native_cost;
+    if(c_p->status==LB_PROCESS_WORK_LIMIT) goto work_failure;
+    if(c_p->status==LB_PROCESS_LIMIT) goto resource_limit;
+    if(c_p->status==LB_PROCESS_NO_MEMORY) goto memory_failure;
+    if(c_p->status==LB_PROCESS_REFUSED) goto execution_refused;
+    if(is_value(result)) {
+      destination_ptr=REG_TARGET_PTR(destination); *destination_ptr=result; I+=4; Goto(*I);
+    }
+    if(fail) { c_p->freason=previous_freason; I+=fail; Goto(*I); }
+    reg[0]=bxor_left; reg[1]=bxor_right; SWAPOUT; goto find_func_info;
+  }
+}
+
+{
   Eterm shift_left,shift_amount;
   OpCase(i_bsr_ssjd): GetSource(I[1],shift_left); GetSource(I[2],shift_amount); goto shift__execute;
   OpCase(i_bsl_ssjd): GetSource(I[1],shift_left); GetSource(I[2],shift_amount);
