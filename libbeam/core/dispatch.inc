@@ -2,6 +2,9 @@
  * Copyright Ericsson AB 1996-2026. All Rights Reserved.
  * Owned interpreter code adapted from OTP beam_makeops output.
  */
+OpCase(i_disabled_line_breakpoint_t):
+    I+=2; Goto(*I);
+
 OpCase(i_yield):
 {
   x(0)=am_true;

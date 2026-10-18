@@ -27,6 +27,7 @@ int main(void)
     CHECK(lb_instruction_supported(op_i_bs_get_binary_all2_yfttd));
     CHECK(lb_instruction_supported(op_i_bs_get_binary_imm2_xftWd));
     CHECK(lb_instruction_supported(op_i_bs_get_binary_imm2_yftWd));
+    CHECK(lb_instruction_supported(op_i_disabled_line_breakpoint_t));
     CHECK(lb_instruction_supported(op_i_bs_get_integer_small_imm_xWftx));
     CHECK(lb_instruction_supported(op_i_bs_get_integer_small_imm_yWftx));
     CHECK(lb_instruction_supported(op_i_bs_get_integer_imm_xWtftx));
