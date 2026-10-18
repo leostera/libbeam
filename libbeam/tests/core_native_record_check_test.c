@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Leandro Ostera <leandro@osteria.io>
 #include "process_internal.h"
+#include "term_compare.h"
 #include <stdio.h>
 #define CHECK(condition) do { if(!(condition)) { fprintf(stderr,"CHECK %s:%d: %s\n",__FILE__,__LINE__,#condition); exit(1); } } while(0)
 
@@ -72,6 +73,34 @@ int main(int argc,char **argv)
         lb_process_destroy(process);
     }
 
+    /* A native record's definition and values are GC children, not raw
+     * payload. Prove both collector forwarding and message-style flat copy. */
+    {
+        LbCodeEntry *entry; LbProcess *process;
+        size_t words; int equal;
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        CHECK(lb_heap_reserve(process,8,0));
+        Eterm *def=process->htop; process->htop+=5;
+        def[0]=make_arityval(4); def[1]=module_atom; def[2]=module_atom;
+        def[3]=am_true; def[4]=module_atom;
+        Eterm *record=process->htop; process->htop+=3;
+        record[0]=make_record_header(1); record[1]=make_tuple(def); record[2]=make_small(42);
+        process->reg[0]=make_boxed(record);
+        CHECK(is_record(process->reg[0]));
+        CHECK(lb_flat_size(space->domain,process->reg[0],&words) && words==8);
+        CHECK(lb_process_collect_live(process,0,1));
+        record=record_val(process->reg[0]);
+        CHECK(is_record(process->reg[0]) && is_tuple(record[1]));
+        CHECK(tuple_val(record[1])[4]==module_atom && record[2]==make_small(42));
+        CHECK(lb_heap_reserve(process,words,1));
+        Eterm *top=process->htop;
+        Eterm copied=lb_copy_flat(process->reg[0],&top,&process->off_heap);
+        CHECK(!is_non_value(copied) && is_record(copied)); process->htop=top;
+        CHECK(lb_term_equal(space->domain,process->reg[0],copied,&equal)==LB_ALLOC_OK && equal);
+        lb_process_destroy(process);
+    }
     CHECK(lb_code_unload(module)==LB_CODE_OK);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK);

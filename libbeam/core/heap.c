@@ -20,6 +20,7 @@ static size_t boxed_words(const Eterm *pointer)
     ASSERT(is_header(header));
     switch(header&_HEADER_SUBTAG_MASK) {
     case ARITYVAL_SUBTAG:return arity?arity+1:2; /* owned empty-tuple read-ahead */
+    case RECORD_SUBTAG:return arity+1; /* definition pointer and field values */
     case POS_BIG_SUBTAG:case NEG_BIG_SUBTAG:case FLOAT_SUBTAG:case HEAP_BITS_SUBTAG:return arity+1;
     case BIN_REF_SUBTAG:ASSERT(header==LB_HEADER_BIN_REF); return LB_BIN_REF_WORDS;
     case SUB_BITS_SUBTAG:ASSERT(header==LB_HEADER_SUB_BITS); return LB_SUB_BITS_WORDS;
@@ -104,6 +105,7 @@ int lb_process_collect_live(LbProcess *p,size_t need,size_t live)
         Eterm value=*scan;
         if(is_header(value)) {
             if(is_arity_value(value)) scan+=(value>>_HEADER_ARITY_OFFS)?1:2;
+            else if((value&_HEADER_SUBTAG_MASK)==RECORD_SUBTAG) ++scan;
             else if((value&_HEADER_SUBTAG_MASK)==MAP_SUBTAG) { (void)lb_map_object_words(scan); scan+=lb_map_object_child_offset(scan); }
             else if((value&_TAG_HEADER_MASK)==FUN_SUBTAG) {
                 const LbFun *fun=lb_fun(make_boxed(scan));
@@ -167,6 +169,7 @@ int lb_process_has_other_reference(const LbProcess *p,Eterm value,const Eterm *e
         if(!is_header(*scan)) { if(*scan++==value) return 1; continue; }
         switch(*scan&_HEADER_SUBTAG_MASK) {
         case ARITYVAL_SUBTAG:scan+=arityval(*scan)?1:2; break;
+        case RECORD_SUBTAG:++scan; break; /* trace definition and values */
         case SUB_BITS_SUBTAG:
             if(((const LbSubBits *)scan)->orig==value) return 1;
             scan+=boxed_words(scan); break;
@@ -196,7 +199,9 @@ int lb_flat_size(LbAllocDomain *domain,Eterm term,size_t *out)
         if(is_list(value)) { children=list_val(value); n=words=2; }
         else if(is_boxed(value)) {
             Eterm *p=boxed_val(value); words=boxed_words(p);
-            if(is_arity_value(*p)) { n=(size_t)(*p>>_HEADER_ARITY_OFFS); children=p+1; }
+            if(is_arity_value(*p) || (*p&_HEADER_SUBTAG_MASK)==RECORD_SUBTAG) {
+                n=(size_t)(*p>>_HEADER_ARITY_OFFS); children=p+1;
+            }
             else if((*p&_HEADER_SUBTAG_MASK)==MAP_SUBTAG) {
                 n=lb_map_object_child_count(p); children=p+lb_map_object_child_offset(p);
             }
@@ -243,6 +248,7 @@ Eterm lb_copy_flat(Eterm value,Eterm **top,LbOffHeap *offheap)
     while(scan<*top) {
         if(is_header(*scan)) {
             if(is_arity_value(*scan)) scan+=(*scan>>_HEADER_ARITY_OFFS)?1:2;
+            else if((*scan&_HEADER_SUBTAG_MASK)==RECORD_SUBTAG) ++scan;
             else if((*scan&_HEADER_SUBTAG_MASK)==MAP_SUBTAG) { (void)lb_map_object_words(scan); scan+=lb_map_object_child_offset(scan); }
             else if((*scan&_TAG_HEADER_MASK)==FUN_SUBTAG) { (void)lb_fun(make_boxed(scan)); scan+=LB_FUN_WORDS; }
             else scan+=boxed_words(scan); /* SubBits and BinRef already paired */

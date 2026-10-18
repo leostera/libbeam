@@ -112,10 +112,10 @@ tailrecur_ne:
         break;
     case TAG_PRIMARY_BOXED:
         switch(*boxed_val(a)&_TAG_HEADER_MASK) {
-        case ARITYVAL_SUBTAG:
-            aa=tuple_val(a);
+        case ARITYVAL_SUBTAG:case RECORD_SUBTAG:
+            aa=boxed_val(a);
             if(!is_boxed(b) || *boxed_val(b)!=*aa) goto not_equal;
-            bb=tuple_val(b); sz=(Sint)arityval(*aa);
+            bb=boxed_val(b); sz=(Sint)(*aa>>_HEADER_ARITY_OFFS);
             if(!sz) goto pop_next;
             ++aa; ++bb; goto term_array;
         case FUN_SUBTAG: {
