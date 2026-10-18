@@ -68,7 +68,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 - [ ] `opcode: i_wait_error`
 - [ ] `opcode: i_wait_error_locked`
 - [ ] `opcode: nif_start`
-- [ ] `opcode: normal_exit`
 - [ ] `opcode: padding`
 - [ ] `opcode: return_trace`
 - [ ] `opcode: system_limit_body`
