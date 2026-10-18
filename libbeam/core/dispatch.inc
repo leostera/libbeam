@@ -1550,6 +1550,12 @@ OpCase(allocate_heap_tIt):
   GotoPF(next_pf);
 }
 
+OpCase(i_debug_breakpoint):
+    /* OTP calls the breakpoint error handler. This isolate has no debugger
+     * handler; as with a missing import, the fallback is guest undef. */
+    c_p->freason=LB_EXC_UNDEF&~LB_EXF_SAVETRACE;
+    goto find_func_info;
+
 OpCase(call_error_handler): {
   LbMissingImport *missing=(LbMissingImport *)((unsigned char *)I-offsetof(LbMissingImport,op));
   c_p->current=&missing->export.info.mfa;

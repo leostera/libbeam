@@ -29,6 +29,16 @@ int main(int argc,char **argv)
     CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
 
     lb_process_destroy(process);
+
+    CHECK(lb_instruction_supported(op_i_debug_breakpoint));
+    CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+    CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+    lb_code_entry_release(entry);
+    ((BeamInstr *)process->i)[0]=op_i_debug_breakpoint;
+    CHECK(lb_process_run(process,10,10)==LB_PROCESS_EXCEPTION);
+    CHECK(lb_process_exception(process)==am_undef);
+    lb_process_destroy(process);
+
     CHECK(lb_code_unload(module)==LB_CODE_OK);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK);

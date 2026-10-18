@@ -48,6 +48,7 @@ int main(void)
     CHECK(lb_instruction_supported(op_return_trace));
     CHECK(lb_instruction_supported(op_i_call_trace_return));
     CHECK(lb_instruction_supported(op_i_line_breakpoint_cleanup));
+    CHECK(lb_instruction_supported(op_i_debug_breakpoint));
     CHECK(lb_instruction_supported(op_i_bs_get_integer_small_imm_xWftx));
     CHECK(lb_instruction_supported(op_i_bs_get_integer_small_imm_yWftx));
     CHECK(lb_instruction_supported(op_i_bs_get_integer_imm_xWtftx));
