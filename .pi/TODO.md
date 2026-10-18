@@ -9,7 +9,6 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 
 ## BIFs
 
-- [ ] **must panic** — `erlang:delete_module/1`
 - [ ] **must work** — `erlang:demonitor/1`
 - [ ] **must panic** — `erlang:disconnect_node/1`
 - [ ] **must panic** — `erlang:display/1`
