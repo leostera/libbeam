@@ -26,13 +26,21 @@ int main(int argc,char **argv)
     CHECK(is_atom((Eterm)program->records[0].fields[0].default_value.val));
     CHECK(is_atom((Eterm)program->records[0].fields[1].default_value.val));
     LbBeamBytes name;
+    Eterm first=0,second=0,one=0,two=0,thing=0;
     for(size_t i=1;i<=lb_beam_image_info(program->image)->atom_count;++i) {
         CHECK(lb_beam_image_atom(program->image,(uint32_t)i,&name)==LB_BEAM_OK);
-        if(name.size==5 && !memcmp(name.data,"thing",5)) CHECK(program->records[0].name==program->file_atoms[i]);
-        if(name.size==5 && !memcmp(name.data,"first",5)) CHECK(program->records[0].fields[0].key==program->file_atoms[i]);
-        if(name.size==6 && !memcmp(name.data,"second",6)) CHECK(program->records[0].fields[1].key==program->file_atoms[i]);
-        if(name.size==3 && !memcmp(name.data,"one",3)) CHECK((Eterm)program->records[0].fields[0].default_value.val==program->file_atoms[i]);
-        if(name.size==3 && !memcmp(name.data,"two",3)) CHECK((Eterm)program->records[0].fields[1].default_value.val==program->file_atoms[i]);
+        if(name.size==5 && !memcmp(name.data,"thing",5)) thing=program->file_atoms[i];
+        if(name.size==5 && !memcmp(name.data,"first",5)) first=program->file_atoms[i];
+        if(name.size==6 && !memcmp(name.data,"second",6)) second=program->file_atoms[i];
+        if(name.size==3 && !memcmp(name.data,"one",3)) one=program->file_atoms[i];
+        if(name.size==3 && !memcmp(name.data,"two",3)) two=program->file_atoms[i];
+    }
+    CHECK(first && second && one && two && thing && program->records[0].name==thing);
+    CHECK(program->records[0].fields[0].key<program->records[0].fields[1].key);
+    for(size_t i=0;i<2;++i) {
+        const LbRecordField *field=&program->records[0].fields[i];
+        CHECK((field->key==first && (Eterm)field->default_value.val==one) ||
+              (field->key==second && (Eterm)field->default_value.val==two));
     }
     lb_beam_program_destroy(program);
     unsigned char version=beam[recs+3]; beam[recs+3]=1;

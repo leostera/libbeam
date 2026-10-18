@@ -4,6 +4,7 @@
  * Adapted from beam_file.c and beam_types.c. No debug/service singleton roots.
  */
 #include "beam_program_internal.h"
+#include <stdlib.h>
 #define REQUIRE(x) do { if (!(x)) return lb_pfail(p,LB_BEAM_BAD_FORMAT); } while (0)
 static int64_t signed64(const unsigned char *s) { Uint v=0; unsigned i; for(i=0;i<8;++i) v=(v<<8)|s[i]; return (int64_t)v; }
 static int record_atom(LbBeamProgram *p,LbTaggedNumber value,LbBeamBytes *name)
@@ -12,6 +13,11 @@ static int record_atom(LbBeamProgram *p,LbTaggedNumber value,LbBeamBytes *name)
     return value.tag==TAG_a && !value.size && value.word>0 &&
         (Uint)value.word<=info->atom_count &&
         lb_beam_image_atom(p->image,(uint32_t)value.word,name)==LB_BEAM_OK;
+}
+static int record_field_order(const void *left,const void *right)
+{
+    const LbRecordField *a=left,*b=right;
+    return (a->key>b->key)-(a->key<b->key);
 }
 void lb_pbind_records(LbBeamProgram *p)
 {
@@ -30,6 +36,9 @@ void lb_pbind_records(LbBeamProgram *p)
             default: break; /* TAG_u denotes an uninitialized field. */
             }
         }
+        /* OTP stores native field values in atom-index order, independently
+         * of their declaration order in the Recs chunk. */
+        qsort(def->fields,def->field_count,sizeof(*def->fields),record_field_order);
     }
 }
 static int record_definitions(LbBeamProgram *p,LbBeamReader *r)
