@@ -34,11 +34,17 @@ int main(int argc,char **argv) {
         auto first=take(engine.create_isolate()),peer=take(engine.create_isolate());
         std::vector<ByteView> reverse={view(beta),view(alpha)};
         std::vector<ByteView> forward={view(alpha),view(beta)};
+        auto unresolved=take(engine.create_isolate());
+        CHECK(!unresolved.load_modules({view(alpha)}));
+        {
+            auto call=take(unresolved.start("batch_alpha","entry",view(request)));
+            auto result=call.wait_until(deadline());
+            CHECK(std::holds_alternative<Error>(result) &&
+                  std::get<Error>(result).code==ErrorCode::exception);
+        }
+        reclaim(unresolved);
         auto missing=take(engine.create_isolate());
         auto before_failure=take(missing.resource_usage());
-        CHECK(missing.load_modules({view(alpha)}).has_value());
-        auto after_failure=take(missing.resource_usage());
-        CHECK(before_failure.memory_current==after_failure.memory_current);
         auto unsupported_error=missing.load_modules({view(alpha),view(beta),view(unsupported)});
         CHECK(unsupported_error && unsupported_error->code==ErrorCode::unsupported);
         auto after_unsupported=take(missing.resource_usage());

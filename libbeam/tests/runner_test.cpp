@@ -42,14 +42,14 @@ TEST(Runner, MissingDependencyIsNotLazyLoaded) {
     EXPECT_NE(result.output.find("success=false reclaimed=true engine_shutdown=true"), std::string::npos) << result.output;
 }
 
-TEST(Runner, MissingDependencyReportsExactOwnedMfaAndLocation) {
+TEST(Runner, MissingDependencyRaisesGuestExceptionAfterAdmission) {
     const auto result = run(runfile("libbeam/run_beam"), {
-        "--entry", "first_slice", "identity", "--call", "dependency",
-        "--isolate", fixture("code_peer"),
+        "--entry", "batch_alpha", "entry", "--call", "dependency",
+        "--isolate", fixture("batch_alpha"),
     });
     EXPECT_TRUE(result.exited(1)) << result.output;
-    EXPECT_NE(result.output.find("stage=unresolved import, import_index="), std::string::npos) << result.output;
-    EXPECT_NE(result.output.find("mfa=\"first_slice\":\"literal\"/0"), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("admitted=true"), std::string::npos) << result.output;
+    EXPECT_NE(result.output.find("error=guest exception"), std::string::npos) << result.output;
 }
 
 TEST(Runner, UnusedOnLoadRefusesWholeModuleBeforeAnyCallResult) {

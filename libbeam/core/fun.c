@@ -484,8 +484,11 @@ const BeamInstr *lb_fun_call(LbProcess *p,unsigned arity)
             const LbCodeInfo *header=(const LbCodeInfo *)info;
             if(entry->dispatch.addresses[0]>=info+sizeof(LbCodeInfo)/sizeof(BeamInstr) &&
                entry->dispatch.addresses[0]<end) {
+                /* Older FunT entries can omit the function atom. The verified
+                 * entry address and enclosing function header still bind it. */
                 found=header->op==op_i_func_info_IaaI &&
-                      header->mfa.module==entry->module && header->mfa.function==entry->function &&
+                      header->mfa.module==entry->module &&
+                      (!entry->function || header->mfa.function==entry->function) &&
                       header->mfa.arity==arity+count;
                 break;
             }

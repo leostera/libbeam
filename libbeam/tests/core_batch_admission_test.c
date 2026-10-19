@@ -54,10 +54,6 @@ static void run_named_zero_arity(LbCodeSpace *space,const char *name)
     lb_process_destroy(process);
 }
 static void run_zero_arity(LbCodeSpace *space) { run_named_zero_arity(space,"batch_alpha"); }
-static void expect_name(const unsigned char *actual,size_t actual_size,const char *expected)
-{
-    CHECK(actual_size==strlen(expected) && !memcmp(actual,expected,actual_size));
-}
 static void failures(LbEngine *engine,Memory *memory,const unsigned char *alpha,size_t alpha_size,
                      const unsigned char *beta,size_t beta_size,const unsigned char *unsupported,size_t unsupported_size)
 {
@@ -69,10 +65,13 @@ static void failures(LbEngine *engine,Memory *memory,const unsigned char *alpha,
     size_t live,bytes,atoms; LbCodeStatus status;
     CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
     live=memory->live; bytes=memory->bytes; atoms=lb_atoms_count(space->atoms);
-    status=lb_code_load_batch(space,&missing,1,&error,&report);
-    CHECK(status==LB_CODE_UNRESOLVED && !space->modules && report.has_import && report.has_module_index && report.module_index==0);
-    expect_name(report.module,report.module_size,"batch_beta");
-    expect_name(report.function,report.function_size,"beta");
+    /* A missing dependency now loads with an owned guest undef trampoline.
+     * Test that admission independently without weakening rollback checks. */
+    LbCodeSpace *late=NULL;
+    CHECK(lb_code_space_create(engine,&late)==LB_CODE_OK);
+    status=lb_code_load_batch(late,&missing,1,&error,&report);
+    CHECK(status==LB_CODE_OK && late->modules && !late->modules->next);
+    CHECK(lb_code_unload_all(late)==LB_CODE_OK && lb_code_space_destroy(late)==LB_CODE_OK);
     CHECK(memory->live==live && memory->bytes==bytes && lb_atoms_count(space->atoms)==atoms);
     status=lb_code_load_batch(space,duplicate,2,&error,&report);
     CHECK(status==LB_CODE_EXISTS && !space->modules && report.has_module_index && report.module_index==1);

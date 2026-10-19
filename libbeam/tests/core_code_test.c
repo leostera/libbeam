@@ -196,13 +196,18 @@ static void linked_test(const char *first_path,const char *peer_path)
 {
     Memory m={0}; LbSystemAllocator callbacks={&m,allocate,release}; LbEngine *engine=NULL;
     LbCodeSpace *space=NULL; LbCodeModule *first=NULL,*peer=NULL; LbBeamError error;
-    size_t first_size,peer_size,i,count,live,bytes,atoms;
+    size_t first_size,peer_size,i,count,live,bytes;
     unsigned char *first_bytes=read_image(first_path,&first_size),*peer_bytes=read_image(peer_path,&peer_size);
     LbProcess *p; LbProcessStatus status; Eterm result,arg;
     CHECK(lb_engine_create(&callbacks,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
-    live=m.live; bytes=m.bytes; atoms=lb_atoms_count(lb_code_space_atoms(space));
-    CHECK(lb_code_load(space,peer_bytes,peer_size,&peer,&error)==LB_CODE_UNRESOLVED && peer==NULL);
-    CHECK(m.live==live && m.bytes==bytes && lb_atoms_count(lb_code_space_atoms(space))==atoms);
+    /* An unresolved import is an executable guest undef, not a load error. */
+    CHECK(lb_code_load(space,peer_bytes,peer_size,&peer,&error)==LB_CODE_OK && peer);
+    p=start(space,peer,"forward",NULL,0);
+    Eterm undef;
+    CHECK(lb_atoms_find(lb_code_space_atoms(space),"undef",5,&undef)==LB_ATOM_OK);
+    run(p,LB_PROCESS_EXCEPTION); CHECK(lb_process_exception(p)==undef);
+    lb_process_destroy(p);
+    CHECK(lb_code_unload(peer)==LB_CODE_OK); peer=NULL;
     CHECK(lb_code_load(space,first_bytes,first_size,&first,&error)==LB_CODE_OK);
     { LbCodeStatus s=lb_code_load(space,peer_bytes,peer_size,&peer,&error);
       if(s!=LB_CODE_OK) fprintf(stderr,"peer load=%d stage=%s offset=%zu\n",s,error.stage,error.offset);

@@ -122,7 +122,8 @@ static void fun_consumers(LbCodeSpace *space,LbCodeModule *module,LbCodeModule *
     lb_code_entry_release(compare);
     LbCodeEntry *callee=entry(space,target_module,"captured_pair",2);
     LbFunEntry callable={.dispatch={.addresses={callee->entry->dispatch.addresses[0]}},
-        .module=target_module->name,.arity=1,.owner=target_module};
+        .module=target_module->name,.function=callee->entry->info.mfa.function,
+        .arity=1,.owner=target_module};
     lb_code_entry_release(callee); /* only the closure/process lease may pin target code */
     for(size_t badarity=0;badarity<2;++badarity) {
         LbCodeEntry *invoke=entry(space,module,badarity?"invoke0":"invoke",badarity?1:2);

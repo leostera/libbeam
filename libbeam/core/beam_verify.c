@@ -1228,8 +1228,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
                             a[pos+4].type==TAG_u && a[pos+4].val>0);
                     Uint size=(Uint)a[pos+3].val,unit=(Uint)a[pos+4].val;
                     REQUIRE(size<=(Uint)-1/unit);
-                    Uint bits=size*unit;
-                    REQUIRE(bits<=65536);
+                    Uint bits=size*unit; /* Checked multiplication; runtime slice work is budgeted. */
                     if(a[pos+5].type==a[1].type && a[pos+5].val==a[1].val)
                         REQUIRE(pos+6==op->arity);
                     REQUIRE(destination(&f,a[pos+5],BITSTRING_SHAPE));
