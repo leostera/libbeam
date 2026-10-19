@@ -70,6 +70,15 @@ int main(int argc,char **argv)
     hash=lb_bif_phash2_1(process,surviving,NULL);
     CHECK(is_small(hash) && signed_val(hash)==125246533);
     lb_process_destroy(process);
+    CHECK(lb_code_entry_acquire(space,module,function,1,&entry)==LB_CODE_OK);
+    CHECK(lb_process_create(entry,args,1,256,&process)==LB_PROCESS_READY);
+    lb_code_entry_release(entry);
+    do { status=lb_process_run(process,1000,1000); } while(status==LB_PROCESS_YIELDED);
+    CHECK(status==LB_PROCESS_EXCEPTION && lb_process_exception(process)==am_badrecord);
+    Eterm reason=lb_process_exception_value(process);
+    CHECK(is_tuple(reason) && arityval(*tuple_val(reason))==2 &&
+          tuple_val(reason)[1]==am_badrecord && is_tuple(tuple_val(reason)[2]));
+    lb_process_destroy(process);
     CHECK(lb_code_unload(external)==LB_CODE_OK);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK); lb_engine_release(engine);
