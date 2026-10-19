@@ -58,6 +58,7 @@ struct LbProcess {
     const LbMFA *current;
     LbMFA local_mfa; /* owned copy of a private function's native word header */
     const BeamInstr *i;
+    const BeamInstr *record_retry_pc; /* owned module PC during one ensure-loaded retry */
     Eterm reg[MAX_REG];
     double float_regs[MAX_REG]; /* BEAM fr registers, preserved across cooperative yields */
     Eterm *heap, *htop, *stop, *hend;

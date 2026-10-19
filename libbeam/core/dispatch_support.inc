@@ -58,6 +58,7 @@ case op_i_get_record_field_jxcad: return 1;
 case op_i_get_record_field_jycad: return 1;
 case op_i_create_local_native_record_qdtI: return 1;
 case op_i_create_native_record_jctI: return 1;
+case op_finish_create_record: return 1;
 case op_i_update_native_record_jsdtI: return 1;
 case op_padding: return 1;
 case op_system_limit_body: return 1;

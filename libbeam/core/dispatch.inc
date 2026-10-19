@@ -1687,6 +1687,28 @@ OpCase(i_create_native_record_jctI): {
                 definition=&program->records[i]; break;
             }
     }
+    if(!loaded && !c_p->record_retry_pc && c_p->pc_module->space->record_resolver) {
+        LbCodeSpace *space=c_p->pc_module->space;
+        LbCodeInput input;
+        LbCodeStatus status=LB_CODE_NOT_FOUND;
+        c_p->record_retry_pc=I;
+        SWAPOUT;
+        input=space->record_resolver(space->record_resolver_context,target_module);
+        if(input.data && input.size && input.size<=LB_CODE_BATCH_BYTES_LIMIT) {
+            LbCodeModule *resolved=NULL;
+            LbBeamError error;
+            status=lb_code_load(space,input.data,input.size,&resolved,&error);
+            if(status==LB_CODE_OK && resolved->name!=target_module) {
+                lb_code_unload(resolved);
+                status=LB_CODE_NOT_FOUND;
+            }
+        }
+        SWAPIN;
+        if(status==LB_CODE_NO_MEMORY) { c_p->record_retry_pc=NULL; goto memory_failure; }
+        if(status==LB_CODE_LIMIT) { c_p->record_retry_pc=NULL; goto resource_limit; }
+        Goto(op_finish_create_record);
+    }
+    c_p->record_retry_pc=NULL;
     if(!definition) {
         c_p->fvalue=id; c_p->freason=LB_EXC_BADRECORD;
         if(fail) { I+=fb(fail); Goto(*I); }
@@ -1702,6 +1724,15 @@ OpCase(i_create_native_record_jctI): {
     x(MAX_REG-1)=result;
     I+=4+size; Goto(*I);
 }
+
+OpCase(finish_create_record):
+    /* The continuation is entered only after one host-supplied load attempt.
+     * I still identifies the original create instruction and its operands. */
+    if(!c_p->record_retry_pc || c_p->record_retry_pc!=I ||
+       !c_p->pc_module || I<c_p->pc_module->words ||
+       I>=c_p->pc_module->words+c_p->pc_module->word_count ||
+       *I!=op_i_create_native_record_jctI) goto malformed_code;
+    Goto(op_i_create_native_record_jctI);
 
 OpCase(call_nif_WWW):
 OpCase(call_nif_early): {

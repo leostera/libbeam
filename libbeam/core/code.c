@@ -102,6 +102,13 @@ LbCodeStatus lb_code_space_create_in_domain(LbEngine *engine,LbAllocDomain *doma
 }
 LbCodeStatus lb_code_space_create(LbEngine *engine,LbCodeSpace **out)
 { return lb_code_space_create_in_domain(engine,engine?engine->domain:NULL,out); }
+LbCodeStatus lb_code_space_set_record_resolver(LbCodeSpace *space,LbRecordModuleResolver resolver,void *context)
+{
+    if(!space || space->loading) return LB_CODE_INVALID;
+    space->record_resolver=resolver;
+    space->record_resolver_context=context;
+    return LB_CODE_OK;
+}
 LbCodeStatus lb_code_space_destroy(LbCodeSpace *space)
 {
     LbAllocDomain *domain;

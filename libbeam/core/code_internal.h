@@ -74,6 +74,8 @@ struct LbCodeSpace {
     LbRegistry *registry; /* removed on logical process exit, never a moving root */
     struct LbAlias *aliases; /* stable namespace-owned capability handles */
     LbCodeModule *modules;
+    LbRecordModuleResolver record_resolver;
+    void *record_resolver_context;
     Export *exports;
     Export natives[LB_NATIVE_COUNT];
     BifEntry lists_reverse_bif;
