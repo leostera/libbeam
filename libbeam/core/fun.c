@@ -479,8 +479,15 @@ const BeamInstr *lb_fun_call(LbProcess *p,unsigned arity)
         for(size_t i=0;i<lb_code_module_function_count(entry->owner);++i) {
             if(!lb_work_domain_charge(p->entry_module->space->domain,1)) { p->status=LB_PROCESS_WORK_LIMIT; return NULL; }
             const BeamInstr *info=(const BeamInstr *)entry->owner->words[i]; ++p->last_native_cost;
-            if(info+sizeof(LbCodeInfo)/sizeof(BeamInstr)==entry->dispatch.addresses[0]) {
-                found=info[sizeof(LbCodeInfo)/sizeof(BeamInstr)-1]==arity+count; break;
+            const BeamInstr *end=i+1<lb_code_module_function_count(entry->owner)?
+                (const BeamInstr *)entry->owner->words[i+1]:entry->owner->words+entry->owner->word_count;
+            const LbCodeInfo *header=(const LbCodeInfo *)info;
+            if(entry->dispatch.addresses[0]>=info+sizeof(LbCodeInfo)/sizeof(BeamInstr) &&
+               entry->dispatch.addresses[0]<end) {
+                found=header->op==op_i_func_info_IaaI &&
+                      header->mfa.module==entry->module && header->mfa.function==entry->function &&
+                      header->mfa.arity==arity+count;
+                break;
             }
         }
         if(!found) { p->status=LB_PROCESS_INVALID; return NULL; }

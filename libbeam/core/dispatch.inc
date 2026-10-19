@@ -1776,8 +1776,8 @@ OpCase(call_error_handler): {
 OpCase(call_light_bif_be):
 OpCase(call_light_bif_only_be):
 {
-  ASSERT(VALID_INSTR(*(I+3)));
-  *E=(BeamInstr)(I+3);
+  /* With no BIF tracing, a tail call uses the existing caller CP. OTP's
+   * deallocate_return0 continuation is only for a traced dummy frame. */
   Export *ep=(Export *)I[2];
   SET_I(ep->dispatch.addresses[0]);
   CHECK_ARGS(I);

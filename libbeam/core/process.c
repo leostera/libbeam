@@ -104,7 +104,9 @@ static int private_mfa(const LbCodeModule *module,const BeamInstr *pc,LbMFA *mfa
     for(size_t i=0;i<lb_code_module_function_count(module);++i) {
         if(!lb_work_domain_charge(module->space->domain,1)) return 0;
         const BeamInstr *info=(const BeamInstr *)module->words[i];
-        if(info+sizeof(LbCodeInfo)/sizeof(BeamInstr)!=pc) continue;
+        const BeamInstr *end=i+1<lb_code_module_function_count(module)?
+            (const BeamInstr *)module->words[i+1]:module->words+module->word_count;
+        if(pc<info+sizeof(LbCodeInfo)/sizeof(BeamInstr) || pc>=end) continue;
         memcpy(mfa,info+offsetof(LbCodeInfo,mfa)/sizeof(BeamInstr),sizeof(*mfa)); return 1;
     }
     return 0;
