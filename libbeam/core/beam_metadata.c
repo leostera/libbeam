@@ -17,7 +17,8 @@ static int record_atom(LbBeamProgram *p,LbTaggedNumber value,LbBeamBytes *name)
 static int record_field_order(const void *left,const void *right)
 {
     const LbRecordField *a=left,*b=right;
-    return (a->key>b->key)-(a->key<b->key);
+    if(a->key!=b->key) return (a->key>b->key)-(a->key<b->key);
+    return (a->declaration_order>b->declaration_order)-(a->declaration_order<b->declaration_order);
 }
 void lb_pbind_records(LbBeamProgram *p)
 {
@@ -71,6 +72,7 @@ static int record_definitions(LbBeamProgram *p,LbBeamReader *r)
         for(j=0;j<def->field_count;++j) {
             REQUIRE(lb_reader_tagged(r,&key) && record_atom(p,key,&atom));
             def->fields[j].key=(uint32_t)key.word;
+            def->fields[j].declaration_order=j;
             REQUIRE(lb_reader_tagged(r,&value) && !value.size);
             if(value.tag==TAG_a) REQUIRE(record_atom(p,value,&atom));
             else REQUIRE(value.tag==TAG_n || value.tag==TAG_i || value.tag==TAG_u ||

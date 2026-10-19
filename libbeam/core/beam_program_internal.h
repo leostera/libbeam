@@ -29,7 +29,7 @@ typedef struct LbExternalFunPatch {
     Eterm module, function, arity;
 } LbExternalFunPatch;
 typedef struct LbOpBlock { struct LbOpBlock *next; size_t capacity; LbBeamOp ops[]; } LbOpBlock;
-typedef struct { Eterm key; LbBeamArg default_value; } LbRecordField;
+typedef struct { Eterm key; LbBeamArg default_value; size_t declaration_order; } LbRecordField;
 typedef struct { Eterm name; int exported; size_t field_count; LbRecordField *fields; } LbRecordDefinition;
 struct LbBeamProgram {
     LbAllocDomain *domain;

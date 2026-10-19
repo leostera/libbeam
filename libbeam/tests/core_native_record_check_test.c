@@ -82,27 +82,50 @@ int main(int argc,char **argv)
         CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
         CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
         lb_code_entry_release(entry);
-        CHECK(lb_heap_reserve(process,10,0));
-        Eterm *def=process->htop; process->htop+=7;
-        def[0]=make_arityval(6); def[1]=NIL; def[2]=make_small(0);
-        def[3]=module_atom; def[4]=module_atom;
-        def[5]=am_true; def[6]=module_atom;
-        Eterm *record=process->htop; process->htop+=3;
-        record[0]=make_record_header(1); record[1]=make_tuple(def); record[2]=make_small(42);
-        process->reg[0]=make_boxed(record);
-        CHECK(is_record(process->reg[0]));
-        CHECK(lb_flat_size(space->domain,process->reg[0],&words) && words==10);
+        LbRecordField field={module_atom,{TAG_a,(Sint)am_true},0};
+        LbRecordDefinition definition={module_atom,1,1,&field};
+        BeamInstr updates[]={module_atom,make_loader_x_reg(0)};
+        process->reg[0]=make_small(42);
+        Eterm created=lb_record_create(process,&definition,module_atom,1,2,updates);
+        CHECK(is_record(created));
+        process->reg[0]=created;
+        Eterm *record=record_val(created);
+        CHECK(lb_flat_size(space->domain,process->reg[0],&words) && words==12);
         CHECK(lb_process_collect_live(process,0,1));
         record=record_val(process->reg[0]);
         CHECK(is_record(process->reg[0]) && is_tuple(record[1]));
         CHECK(lb_record_term_field_count(process->reg[0])==1 &&
               lb_record_term_definition(process->reg[0])->keys[0]==module_atom &&
+              is_small(lb_record_term_definition(process->reg[0])->hash) &&
+              tuple_val(lb_record_term_definition(process->reg[0])->field_order)[1]==make_small(0) &&
               record[2]==make_small(42));
         CHECK(lb_heap_reserve(process,words,1));
         Eterm *top=process->htop;
         Eterm copied=lb_copy_flat(process->reg[0],&top,&process->off_heap);
         CHECK(!is_non_value(copied) && is_record(copied)); process->htop=top;
         CHECK(lb_term_equal(space->domain,process->reg[0],copied,&equal)==LB_ALLOC_OK && equal);
+        Eterm lo=module_atom<am_true?module_atom:am_true;
+        Eterm hi=module_atom<am_true?am_true:module_atom;
+        LbRecordField reversed[]={
+            {lo,{TAG_a,(Sint)am_false},1},
+            {hi,{TAG_a,(Sint)am_true},0},
+        };
+        LbRecordDefinition two={module_atom,1,2,reversed};
+        Eterm another=lb_record_create(process,&two,module_atom,1,0,NULL);
+        CHECK(is_record(another) && lb_record_term_field_count(another)==2);
+        const LbRecordTermDefinition *two_def=lb_record_term_definition(another);
+        Eterm *field_order=tuple_val(two_def->field_order);
+        CHECK(field_order[1]==make_small(1) && field_order[2]==make_small(0));
+        CHECK(two_def->keys[0]==lo && two_def->keys[1]==hi);
+        Eterm hash_tuple[]={make_arityval(5),module_atom,module_atom,am_true,hi,lo};
+        Eterm hash_args[]={make_tuple(hash_tuple),make_small(UINT64_C(1)<<32)};
+        CHECK(two_def->hash==lb_bif_phash2_2(process,hash_args,NULL));
+        BeamInstr wrong[]={am_false,make_small(7)};
+        CHECK(is_non_value(lb_record_create(process,&definition,module_atom,1,2,wrong)) &&
+              process->freason==LB_EXC_BADFIELD && process->fvalue==am_false);
+        field.default_value=(LbBeamArg){TAG_u,0};
+        CHECK(is_non_value(lb_record_create(process,&definition,module_atom,1,0,NULL)) &&
+              process->freason==LB_EXC_NOVALUE && process->fvalue==module_atom);
         lb_process_destroy(process);
     }
     CHECK(lb_code_unload(module)==LB_CODE_OK);
