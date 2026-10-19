@@ -74,6 +74,32 @@ int main(int argc,char **argv)
         lb_process_destroy(process);
     }
 
+    for(size_t i=0;i<2;++i) {
+        LbCodeEntry *entry; LbProcess *process;
+        Eterm low=module_atom<am_true?module_atom:am_true;
+        Eterm high=module_atom<am_true?am_true:module_atom;
+        LbRecordField fields[]={
+            {low,{TAG_a,(Sint)am_false},0},
+            {high,{TAG_a,(Sint)am_true},1}
+        };
+        LbRecordDefinition definition={.name=module_atom,.exported=1,.field_count=2,.fields=fields};
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        Eterm record=lb_record_create(process,&definition,module_atom,1,0,NULL);
+        CHECK(is_record(record)); process->reg[0]=record;
+        if(i) { CHECK(process->stop>process->htop+S_RESERVED); *--process->stop=record; }
+        BeamInstr *code=(BeamInstr *)process->i;
+        code[0]=i?op_i_get_record_elements_jyI:op_i_get_record_elements_jxI;
+        code[1]=7; code[2]=((BeamInstr)4<<BEAM_WIDE_SHIFT);
+        code[3]=low; code[4]=make_loader_x_reg(1);
+        code[5]=high; code[6]=make_loader_x_reg(2);
+        code[7]=op_normal_exit;
+        CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
+        CHECK(process->reg[1]==am_false && process->reg[2]==am_true);
+        lb_process_destroy(process);
+    }
+
     /* A native record's definition and values are GC children, not raw
      * payload. Prove both collector forwarding and message-style flat copy. */
     {

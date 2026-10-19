@@ -634,7 +634,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif1_5:case genop_gc_bif2_6:
         case genop_bs_match_3:case genop_bs_match_string_4:case genop_bs_get_utf8_5:case genop_bs_skip_utf8_4:case genop_bs_get_float2_7:case genop_bs_get_utf16_5:case genop_bs_skip_utf16_4:case genop_bs_get_utf32_5:case genop_bs_skip_utf32_4:case genop_bs_skip_bits2_5:case genop_bs_get_binary2_7:case genop_bs_get_integer2_7:case genop_bs_start_match3_4:case genop_bs_start_match4_4:case genop_bs_get_position_3:case genop_bs_set_position_2:case genop_bs_get_tail_3:case genop_gc_bif3_7:case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_bif3_6:case genop_make_fun3_3:
         case genop_new_map_3:case genop_put_map_assoc_5:case genop_put_map_exact_5:
-        case genop_get_map_elements_3:case genop_has_map_fields_3:case genop_get_record_field_5:
+        case genop_get_map_elements_3:case genop_has_map_fields_3:case genop_get_record_field_5:case genop_get_record_elements_3:case genop_get_record_elements_id_4:
         case genop_fconv_2:case genop_fmove_2:case genop_fload_2:case genop_fstore_2:case genop_fadd_4:case genop_fsub_4:case genop_i_fsub_3:case genop_fnegate_3:case genop_fmul_4:case genop_i_fmul_3:case genop_fdiv_4:case genop_i_fdiv_3:
         case genop_badmatch_1:case genop_badrecord_1:case genop_case_end_1:case genop_if_end_0:case genop_raw_raise_0:case genop_catch_2:case genop_try_2:case genop_raise_2:case genop_try_end_1:case genop_catch_end_1:
         case genop_try_case_1:case genop_try_case_end_1:case genop_build_stacktrace_0:break;
@@ -642,7 +642,8 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         }
         if(op->op!=genop_select_val_3 && op->op!=genop_bs_match_3 && op->op!=genop_put_tuple2_2 && op->op!=genop_update_record_5 && op->op!=genop_put_record_6 && op->op!=genop_init_yregs_1 && op->op!=genop_select_tuple_arity_3 && op->op!=genop_bs_create_bin_6 && op->op!=genop_make_fun3_3 &&
            op->op!=genop_new_map_3 && op->op!=genop_put_map_assoc_5 && op->op!=genop_put_map_exact_5 &&
-           op->op!=genop_get_map_elements_3 && op->op!=genop_has_map_fields_3)
+           op->op!=genop_get_map_elements_3 && op->op!=genop_has_map_fields_3 &&
+           op->op!=genop_get_record_elements_3 && op->op!=genop_get_record_elements_id_4)
             REQUIRE(op->arity==(unsigned)gen_opc[op->op].arity);
         if(op->op==genop_nif_start_0) {
             /* Native entry metadata, not permission to install or call a NIF. */
@@ -988,6 +989,22 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             }
             REQUIRE(destination(&f,a[4],0));
             break;
+        case genop_get_record_elements_3:
+        case genop_get_record_elements_id_4: {
+            size_t base=op->op==genop_get_record_elements_id_4?4:3;
+            REQUIRE(op->arity>=base && label(st,a[0]));
+            if(base==4) REQUIRE(a[1].type==TAG_a || a[1].type==TAG_q);
+            REQUIRE(source(st,&f,a[base-2]) && a[base-1].type==TAG_u &&
+                    a[base-1].val>0 && !(a[base-1].val&1) &&
+                    (Uint)a[base-1].val<=2*LB_FLATMAP_MAX_SIZE &&
+                    op->arity==base+(Uint)a[base-1].val);
+            for(r=base;r<op->arity;r+=2)
+                REQUIRE(a[r].type==TAG_a && destination(&f,a[r+1],0));
+            alternate=labels[a[0].val];
+            REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+            failed=f; failure=&failed;
+            break;
+        }
         case genop_get_map_elements_3: {
             size_t size;
             REQUIRE(label(st,a[0]) && source(st,&f,a[1]));

@@ -19,5 +19,3 @@ but raise a guest `notsup` error instead of dereferencing host pointers.
 
 - [ ] `opcode: finish_create_record`
 - [ ] `opcode: i_create_native_record_jctI`
-- [ ] `opcode: i_get_record_elements_jxI`
-- [ ] `opcode: i_get_record_elements_jyI`
