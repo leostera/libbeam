@@ -1703,6 +1703,20 @@ OpCase(i_create_native_record_jctI): {
     I+=4+size; Goto(*I);
 }
 
+OpCase(call_nif_WWW):
+OpCase(call_nif_early): {
+    /* These instructions are only installed at function entry by OTP's NIF
+     * patcher. No NIF can be registered in this isolate. Never dereference
+     * the three host-function/module words in a patched call_nif stub. */
+    if(!c_p->pc_module || I<c_p->pc_module->words+5 ||
+       I>=c_p->pc_module->words+c_p->pc_module->word_count ||
+       (*I==op_call_nif_WWW &&
+        (size_t)(c_p->pc_module->words+c_p->pc_module->word_count-I)<4) ||
+       ((const LbCodeInfo *)(I-5))->op!=op_i_func_info_IaaI) goto malformed_code;
+    c_p->freason=LB_EXC_NOTSUP; c_p->fvalue=am_notsup;
+    goto find_func_info;
+}
+
 OpCase(i_generic_breakpoint): {
     if(c_p->pc_module==NULL || I<c_p->pc_module->words+5 ||
        I>=c_p->pc_module->words+c_p->pc_module->word_count) goto malformed_code;

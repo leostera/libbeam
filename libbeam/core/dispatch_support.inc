@@ -68,6 +68,8 @@ case op_i_call_trace_return: return 1;
 case op_i_line_breakpoint_cleanup: return 1;
 case op_i_debug_breakpoint: return 1;
 case op_i_generic_breakpoint: return 1;
+case op_call_nif_WWW: return 1;
+case op_call_nif_early: return 1;
 case op_i_bs_get_integer_small_imm_xWftx: return 1;
 case op_i_bs_get_integer_small_imm_yWftx: return 1;
 case op_i_bs_get_integer_imm_xWtftx: return 1;

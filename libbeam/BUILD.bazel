@@ -4438,6 +4438,16 @@ genrule(
 )
 
 cc_test(
+  name = "nif_opcode_guest_refusal_test",
+  size = "small",
+  srcs = ["tests/core_nif_opcode_test.c"],
+  args = ["$(rootpath :native_record_check_fixture)"],
+  data = ["native_record_check_fixture"],
+  copts = ["-std=c11"],
+  deps = ["core"],
+)
+
+cc_test(
   name = "native_record_check_opcodes_test",
   size = "small",
   srcs = ["tests/core_native_record_check_test.c"],

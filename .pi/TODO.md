@@ -13,10 +13,10 @@ The BIF set comes from libbeam/core/otp/bif-batch-request.txt (188 requested MFA
 ## Unadmitted generated instruction forms
 
 The remaining native-record forms still need complete error/continuation semantics;
-negative-only paths do not count as support.
+negative-only paths do not count as support. In this isolate no native NIF can be
+installed: `call_nif_WWW` and `call_nif_early` are recognized at function entry
+but raise a guest `notsup` error instead of dereferencing host pointers.
 
-- [ ] `opcode: call_nif_WWW`
-- [ ] `opcode: call_nif_early`
 - [ ] `opcode: finish_create_record`
 - [ ] `opcode: i_create_native_record_jctI`
 - [ ] `opcode: i_get_record_elements_jxI`
