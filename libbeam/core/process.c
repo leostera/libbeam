@@ -6,6 +6,7 @@
  * continuation return, and native BIF call/epilogue. No scheduler/TLS singleton.
  */
 #include "process_internal.h"
+#include "native_record.h"
 #include "exit_signal.h"
 #include "apply.h"
 #include "binary_match.h"

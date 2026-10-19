@@ -8,29 +8,100 @@ OpCase(i_disabled_line_breakpoint_t):
 OpCase(i_enabled_line_breakpoint_t):
     I+=2; Goto(*I);
 
-/* Native records and their definitions are not representable in this isolate;
- * the predicate/accessibility opcodes therefore take their failure edge. */
-OpCase(i_is_native_record_fxaa):
-OpCase(i_is_native_record_fyaa):
+OpCase(is_any_native_record_fx):
+    if(!is_record(xb(I[2]))) { I+=fb(I[1]); Goto(*I); }
+    I+=3; Goto(*I);
+OpCase(is_any_native_record_fy):
+    if(!is_record(yb(I[2]))) { I+=fb(I[1]); Goto(*I); }
+    I+=3; Goto(*I);
+OpCase(i_is_native_record_fxaa): {
+    Uint fail=I[1]&BEAM_WIDE_MASK;
+    Eterm source=xb(I[1]>>BEAM_WIDE_SHIFT);
+    LbRecordTermDefinition *definition=lb_record_term_definition(source);
+    if(!definition || definition->module!=I[2] || definition->name!=I[3]) {
+        I+=fb(fail); Goto(*I);
+    }
+    I+=4; Goto(*I);
+}
+OpCase(i_is_native_record_fyaa): {
+    Uint fail=I[1]&BEAM_WIDE_MASK;
+    Eterm source=yb(I[1]>>BEAM_WIDE_SHIFT);
+    LbRecordTermDefinition *definition=lb_record_term_definition(source);
+    if(!definition || definition->module!=I[2] || definition->name!=I[3]) {
+        I+=fb(fail); Goto(*I);
+    }
+    I+=4; Goto(*I);
+}
 OpCase(i_is_record_accessible_fx):
-OpCase(i_is_record_accessible_fy):
+OpCase(i_is_record_accessible_fy): {
+    Uint fail=I[1]&BEAM_WIDE_MASK,source_offset=I[1]>>BEAM_WIDE_SHIFT;
+    Eterm source=*I==op_i_is_record_accessible_fx?xb(source_offset):yb(source_offset);
+    LbRecordTermDefinition *definition=lb_record_term_definition(source);
+    if(!definition || definition->is_exported!=am_true) {
+        I+=fb(fail); Goto(*I);
+    }
+    I+=2; Goto(*I);
+}
 OpCase(i_is_wildcard_record_accessible_fxa):
-OpCase(i_is_wildcard_record_accessible_fya):
+OpCase(i_is_wildcard_record_accessible_fya): {
+    Uint fail=I[1]&BEAM_WIDE_MASK,source_offset=I[1]>>BEAM_WIDE_SHIFT;
+    Eterm source=*I==op_i_is_wildcard_record_accessible_fxa?xb(source_offset):yb(source_offset);
+    LbRecordTermDefinition *definition=lb_record_term_definition(source);
+    if(!definition || (definition->is_exported!=am_true && definition->module!=I[2])) {
+        I+=fb(fail); Goto(*I);
+    }
+    I+=3; Goto(*I);
+}
 OpCase(i_get_record_elements_jxI):
-OpCase(i_get_record_elements_jyI):
-    if(!I[1]) goto malformed_code; /* No body failure for this test opcode. */
-    I+=fb(I[1]); Goto(*I);
+OpCase(i_get_record_elements_jyI): {
+    Uint size=I[2]>>BEAM_WIDE_SHIFT,source_offset=I[2]&BEAM_WIDE_MASK;
+    Eterm source=*I==op_i_get_record_elements_jxI?xb(source_offset):yb(source_offset);
+    LbRecordTermInstance *instance=lb_record_instance(source);
+    LbRecordTermDefinition *definition=lb_record_term_definition(source);
+    if(!instance || !definition || !size || size%2 ||
+       size>2*lb_record_term_field_count(source)) {
+        if(!I[1]) goto malformed_code;
+        I+=fb(I[1]); Goto(*I);
+    }
+    size_t next=0;
+    for(size_t i=0;i<lb_record_term_field_count(source) && next<size;i++) {
+        if(I[3+next]!=definition->keys[i]) continue;
+        Eterm destination=I[4+next];
+        if(loader_tag(destination)==LOADER_X_REG) x(loader_x_reg_index(destination))=instance->values[i];
+        else if(loader_tag(destination)==LOADER_Y_REG) y(loader_y_reg_index(destination))=instance->values[i];
+        else goto malformed_code;
+        next+=2;
+    }
+    if(next<size) {
+        if(!I[1]) goto malformed_code;
+        I+=fb(I[1]); Goto(*I);
+    }
+    I+=3+size; Goto(*I);
+}
 
-/* No native-record term exists in the admitted term model. OTP's field
- * accessor reports badrecord outside guards and takes Fail inside guards. */
+/* Local and external field forms share the same checked read and error path. */
 OpCase(i_get_local_record_field_jxaad):
-OpCase(i_get_record_field_jxcad):
-    if(I[1]) { I+=fb(I[1]); Goto(*I); }
-    c_p->fvalue=xb(I[2]); c_p->freason=LB_EXC_BADRECORD; goto find_func_info;
 OpCase(i_get_local_record_field_jyaad):
-OpCase(i_get_record_field_jycad):
-    if(I[1]) { I+=fb(I[1]); Goto(*I); }
-    c_p->fvalue=yb(I[2]); c_p->freason=LB_EXC_BADRECORD; goto find_func_info;
+OpCase(i_get_record_field_jxcad):
+OpCase(i_get_record_field_jycad): {
+    BeamInstr opcode=*I;
+    Uint packed=I[2],source_offset=packed&BEAM_LOOSE_MASK;
+    Uint destination_offset=packed>>BEAM_LOOSE_SHIFT;
+    int local=opcode==op_i_get_local_record_field_jxaad ||
+              opcode==op_i_get_local_record_field_jyaad;
+    Eterm source=(opcode==op_i_get_local_record_field_jxaad ||
+                  opcode==op_i_get_record_field_jxcad)?xb(source_offset):yb(source_offset);
+    SWAPOUT;
+    Eterm value=lb_record_get_field(c_p,source,I[3],I[4],local);
+    SWAPIN;
+    if(is_non_value(value)) {
+        if(I[1]) { I+=fb(I[1]); Goto(*I); }
+        goto find_func_info;
+    }
+    if(destination_offset&1) yb(destination_offset&~(Uint)1)=value;
+    else xb(destination_offset)=value;
+    I+=5; Goto(*I);
+}
 
 OpCase(padding):
     ++I; Goto(*I);
@@ -1549,6 +1620,87 @@ OpCase(allocate_heap_tIt):
   I += 3;
   ASSERT(VALID_INSTR(next_pf));
   GotoPF(next_pf);
+}
+
+OpCase(i_create_local_native_record_qdtI): {
+    Uint live=I[2]>>BEAM_LOOSE_SHIFT,dst=I[2]&BEAM_LOOSE_MASK;
+    Uint size=I[3];
+    if(!is_list(I[1]) || !is_tuple(CAR(list_val(I[1]))) ||
+       arityval(*tuple_val(CAR(list_val(I[1]))))<5 ||
+       !c_p->pc_module || !c_p->pc_module->program ||
+       size%2 || size>2*LB_FLATMAP_MAX_SIZE || live>MAX_REG ||
+       (dst&~(Uint)1)>=MAX_REG*sizeof(Eterm)) goto malformed_code;
+    Eterm name=tuple_val(CAR(list_val(I[1])))[4];
+    const LbRecordDefinition *definition=NULL;
+    LbBeamProgram *program=c_p->pc_module->program;
+    for(size_t i=0;i<program->record_count;++i)
+        if(program->records[i].name==name) { definition=&program->records[i]; break; }
+    if(!definition) {
+        c_p->freason=LB_EXC_BADRECORD; c_p->fvalue=name; goto find_func_info;
+    }
+    SWAPOUT;
+    Eterm result=lb_record_create(c_p,definition,c_p->pc_module->name,live,size,I+4);
+    SWAPIN;
+    if(is_non_value(result)) goto find_func_info;
+    if(dst&1) yb(dst&~(Uint)1)=result;
+    else xb(dst)=result;
+    I+=4+size; Goto(*I);
+}
+
+OpCase(i_update_native_record_jsdtI): {
+    Uint fail=I[1]&BEAM_WIDE_MASK;
+    Uint dst=I[1]>>BEAM_WIDE_SHIFT;
+    Uint live=I[3]&BEAM_WIDE_MASK,size=I[3]>>BEAM_WIDE_SHIFT;
+    Eterm original;
+    if(!size || size%2 || size>2*LB_FLATMAP_MAX_SIZE || live>=MAX_REG ||
+       (dst&~(Uint)1)>=MAX_REG*sizeof(Eterm)) goto malformed_code;
+    GetSource(I[2],original);
+    SWAPOUT;
+    Eterm result=lb_record_update(c_p,original,live,size,I+4);
+    SWAPIN;
+    if(is_non_value(result)) {
+        if(fail) { I+=fb(fail); Goto(*I); }
+        goto find_func_info;
+    }
+    if(dst&1) yb(dst&~(Uint)1)=result;
+    else xb(dst)=result;
+    I+=4+size; Goto(*I);
+}
+
+OpCase(i_create_native_record_jctI): {
+    Uint fail=I[1];
+    Eterm id=I[2];
+    Uint live=I[3]&BEAM_WIDE_MASK,size=I[3]>>BEAM_WIDE_SHIFT;
+    const LbRecordDefinition *definition=NULL;
+    if(!is_tuple(id) || arityval(*tuple_val(id))!=2 ||
+       !is_atom(tuple_val(id)[1]) || !is_atom(tuple_val(id)[2]) ||
+       size%2 || size>2*LB_FLATMAP_MAX_SIZE || live>MAX_REG ||
+       !c_p->pc_module) goto malformed_code;
+    Eterm target_module=tuple_val(id)[1],target_name=tuple_val(id)[2];
+    LbCodeModule *loaded=NULL;
+    for(LbCodeModule *candidate=c_p->pc_module->space->modules;candidate;candidate=candidate->next)
+        if(candidate->published && candidate->name==target_module) { loaded=candidate; break; }
+    if(loaded && loaded->program) {
+        LbBeamProgram *program=loaded->program;
+        for(size_t i=0;i<program->record_count;++i)
+            if(program->records[i].name==target_name && program->records[i].exported) {
+                definition=&program->records[i]; break;
+            }
+    }
+    if(!definition) {
+        c_p->fvalue=id; c_p->freason=LB_EXC_BADRECORD;
+        if(fail) { I+=fb(fail); Goto(*I); }
+        goto find_func_info;
+    }
+    SWAPOUT;
+    Eterm result=lb_record_create(c_p,definition,target_module,live,size,I+4);
+    SWAPIN;
+    if(is_non_value(result)) {
+        if(fail) { I+=fb(fail); Goto(*I); }
+        goto find_func_info;
+    }
+    x(MAX_REG-1)=result;
+    I+=4+size; Goto(*I);
 }
 
 OpCase(i_generic_breakpoint): {

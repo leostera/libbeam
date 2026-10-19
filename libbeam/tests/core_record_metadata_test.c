@@ -43,6 +43,16 @@ int main(int argc,char **argv)
               (field->key==second && (Eterm)field->default_value.val==two));
     }
     lb_beam_program_destroy(program);
+    LbCodeModule *module;
+    CHECK(lb_code_load(space,beam,(size_t)length,&module,&error)==LB_CODE_OK);
+    size_t local_creates=0,external_creates=0,updates=0;
+    for(size_t i=0;i<module->word_count;++i) {
+        local_creates+=module->words[i]==op_i_create_local_native_record_qdtI;
+        external_creates+=module->words[i]==op_i_create_native_record_jctI;
+        updates+=module->words[i]==op_i_update_native_record_jsdtI;
+    }
+    CHECK(local_creates && !external_creates && updates);
+    CHECK(lb_code_unload(module)==LB_CODE_OK);
     unsigned char version=beam[recs+3]; beam[recs+3]=1;
     CHECK(lb_beam_program_prepare(engine->domain,space->atoms,beam,(size_t)length,&program,&error)==LB_BEAM_BAD_FORMAT);
     CHECK(!program); beam[recs+3]=version;

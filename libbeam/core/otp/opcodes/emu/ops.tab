@@ -1630,9 +1630,8 @@ i_update_record_in_place_done
 %unused gen.get_local_record_elements
 %unused gen.update_local_record
 
-# Native-record construction and external decoding are not admitted. Within this
-# runtime profile the predicate is therefore always false.
-is_any_native_record Fail=f _Src => jump Fail
+# Native-record terms now have an owned heap representation.
+is_any_native_record f xy
 
 is_native_record Fail Src Mod Name =>
     i_is_native_record Fail Src Mod Name

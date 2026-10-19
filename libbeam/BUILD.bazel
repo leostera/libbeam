@@ -366,10 +366,10 @@ genrule(
 )
 
 cc_test(
-  name = "a_executable_refusal",
+  name = "a_executable_admission",
   size = "medium",
   timeout = "moderate",
-  args = ["--reject", "$(rootpath :probe_a_fixture)"],
+  args = ["--admit", "$(rootpath :probe_a_fixture)"],
   data = ["probe_a_fixture"],
   deps = ["core_code_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
@@ -713,10 +713,10 @@ genrule(
 )
 
 cc_test(
-  name = "b_executable_refusal",
+  name = "b_executable_admission",
   size = "medium",
   timeout = "moderate",
-  args = ["--reject", "$(rootpath :probe_b_fixture)"],
+  args = ["--admit", "$(rootpath :probe_b_fixture)"],
   data = ["probe_b_fixture"],
   deps = ["core_code_test_main"],
   linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
@@ -4338,6 +4338,41 @@ cc_test(
   deps = ["core"],
 )
 
+cc_test(
+  name = "native_record_opcode_test",
+  size = "small",
+  args = ["$(rootpath :native_record_opcode_fixture)", "native_record_opcode", "entry"],
+  data = ["native_record_opcode_fixture"],
+  deps = ["bif_execution_test_main"],
+  linkstatic = select({"@platforms//os:windows": True, "//conditions:default": False}),
+)
+
+genrule(
+  name = "native_record_public_fixture",
+  srcs = ["tests/fixtures/native_record_public.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/native_record_public_fixture/native_record_public.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/native_record_public.erl)",
+)
+
+genrule(
+  name = "native_record_external_fixture",
+  srcs = ["tests/fixtures/native_record_external.erl"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/native_record_external_fixture/native_record_external.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/native_record_external.erl)",
+)
+
+cc_test(
+  name = "native_record_external_test",
+  size = "small",
+  srcs = ["tests/core_native_record_external_test.c"],
+  args = ["$(rootpath :native_record_public_fixture)", "$(rootpath :native_record_external_fixture)"],
+  data = ["native_record_public_fixture", "native_record_external_fixture"],
+  copts = ["-std=c11"],
+  deps = ["core"],
+)
+
 genrule(
   name = "native_record_opcode_fixture",
   srcs = ["tests/fixtures/native_record_opcode.erl"],
@@ -4394,12 +4429,20 @@ cc_test(
   deps = ["core"],
 )
 
+genrule(
+  name = "native_record_check_fixture",
+  srcs = ["tests/fixtures/native_record_check_opcode.S"],
+  tools = ["@libbeam_host//:otp", "@libbeam_host//:otp/bin/erlc"],
+  outs = ["fixtures/native_record_check_fixture/native_record_check_opcode.beam"],
+  cmd = "ERL_FLAGS='+S 1:1 +SDcpu 1:1 +SDio 1 +A 0' $(location @libbeam_host//:otp/bin/erlc) +deterministic -o $(@D) $(location tests/fixtures/native_record_check_opcode.S)",
+)
+
 cc_test(
   name = "native_record_check_opcodes_test",
   size = "small",
   srcs = ["tests/core_native_record_check_test.c"],
-  args = ["$(rootpath :system_limit_body_opcode_fixture)"],
-  data = ["system_limit_body_opcode_fixture"],
+  args = ["$(rootpath :native_record_check_fixture)"],
+  data = ["native_record_check_fixture"],
   copts = ["-std=c11"],
   deps = ["core"],
 )

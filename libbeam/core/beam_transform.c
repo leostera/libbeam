@@ -307,6 +307,109 @@ static int transform_get_binary2(LoaderState *st,BeamOp *source)
     target->a[3]=a[3]; target->a[4]=a[4]; target->a[5]=a[6];
     target->next=source->next; st->genop=target; lb_load_free_op(st,source); return TE_OK;
 }
+static int local_record_literal(LoaderState *st,LbRecordDefinition *record,Sint *index)
+{
+    LbBeamProgram *p=st->program;
+    size_t n=record->field_count;
+    if(record->has_literal) { *index=record->literal_index; return 1; }
+    Eterm *definition=lb_palloc(p,6+n,sizeof(Eterm));
+    Eterm *order=lb_palloc(p,n?1+n:2,sizeof(Eterm));
+    Eterm *defaults=lb_palloc(p,n?1+n:2,sizeof(Eterm));
+    Eterm *cons=lb_palloc(p,2,sizeof(Eterm));
+    if(!definition || !order || !defaults || !cons) return 0;
+    definition[0]=make_arityval(5+n);
+    order[0]=defaults[0]=make_arityval_unchecked(n);
+    if(!n) order[1]=defaults[1]=NIL;
+    definition[1]=make_tuple(order)|TAG_LITERAL_PTR;
+    definition[2]=make_small(0); /* runtime creates the canonical hash */
+    definition[3]=st->module; definition[4]=record->name;
+    definition[5]=record->exported?am_true:am_false;
+    for(size_t i=0;i<n;++i) {
+        LbRecordField *field=&record->fields[i];
+        definition[6+i]=field->key;
+        order[1+field->declaration_order]=make_small(i);
+        defaults[1+i]=field->default_value.type==TAG_u?NIL:(Eterm)field->default_value.val;
+    }
+    cons[0]=make_tuple(definition)|TAG_LITERAL_PTR;
+    cons[1]=make_tuple(defaults)|TAG_LITERAL_PTR;
+    if(!lb_pdynamic(p,make_list(cons)|TAG_LITERAL_PTR,index)) return 0;
+    record->literal_index=*index; record->has_literal=1;
+    return 1;
+}
+static int transform_put_record(LoaderState *st,BeamOp *source)
+{
+    BeamOpArg *a=source->a;
+    BeamOp *target;
+    size_t size;
+    if(source->arity<6 || a[0].type!=TAG_p || a[0].val!=0 ||
+       (a[1].type!=TAG_a && a[1].type!=TAG_q) ||
+       (a[2].type!=TAG_n && a[2].type!=TAG_x && a[2].type!=TAG_y) ||
+       (a[3].type!=TAG_x && a[3].type!=TAG_y) ||
+       a[4].type!=TAG_u || a[5].type!=TAG_u || a[5].val<0 ||
+       (Uint)a[5].val>2*LB_FLATMAP_MAX_SIZE || (a[5].val&1) ||
+       source->arity!=6+(Uint)a[5].val) {
+        st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+    }
+    size=(size_t)a[5].val;
+    for(size_t i=0;i<size;i+=2)
+        if(a[6+i].type!=TAG_a || !segment_value_valid(st,a[7+i])) {
+            st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+        }
+    if(!lb_load_map_key_sort(st,a[5],a+6)) return TE_FAIL;
+    target=lb_load_new_op(st); if(!target) return TE_NO_MEMORY;
+    target->offset=source->offset;
+    if(a[2].type==TAG_n && a[1].type==TAG_a) {
+        LbRecordDefinition *definition=NULL;
+        Sint literal;
+        for(size_t i=0;i<st->program->record_count;++i)
+            if(st->program->records[i].name==(Eterm)a[1].val) {
+                definition=&st->program->records[i]; break;
+            }
+        if(!definition) { st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT; }
+        if(!local_record_literal(st,definition,&literal)) return TE_NO_MEMORY;
+        target->op=genop_i_create_local_native_record_4;
+        target->arity=4+size;
+        if(target->arity>8) {
+            target->a=lb_palloc(st->program,target->arity,sizeof(*target->a));
+            if(!target->a) return TE_NO_MEMORY;
+        }
+        target->a[0]=(BeamOpArg){TAG_q,literal}; target->a[1]=a[3];
+        target->a[2]=a[4]; target->a[3]=a[5];
+        for(size_t i=0;i<size;++i) target->a[4+i]=a[6+i];
+        target->next=source->next;
+    } else if(a[2].type==TAG_n) {
+        Eterm id=beam_load_get_term(st,a[1]);
+        if(!is_tuple(id) || arityval(*tuple_val(id))!=2 ||
+           !is_atom(tuple_val(id)[1]) || !is_atom(tuple_val(id)[2])) {
+            st->status=LB_CODE_FORMAT; return TE_BAD_FORMAT;
+        }
+        target->op=genop_i_create_native_record_4;
+        target->arity=4+size;
+        if(target->arity>8) {
+            target->a=lb_palloc(st->program,target->arity,sizeof(*target->a));
+            if(!target->a) return TE_NO_MEMORY;
+        }
+        target->a[0]=a[0]; target->a[1]=a[1];
+        target->a[2]=a[4]; target->a[3]=a[5];
+        for(size_t i=0;i<size;++i) target->a[4+i]=a[6+i];
+        BeamOp *move=lb_load_new_op(st); if(!move) return TE_NO_MEMORY;
+        move->op=genop_move_2; move->arity=2; move->offset=source->offset;
+        move->a[0]=(BeamOpArg){TAG_x,MAX_REG-1}; move->a[1]=a[3];
+        move->next=source->next; target->next=move;
+    } else {
+        target->op=genop_i_update_native_record_5;
+        target->arity=5+size;
+        if(target->arity>8) {
+            target->a=lb_palloc(st->program,target->arity,sizeof(*target->a));
+            if(!target->a) return TE_NO_MEMORY;
+        }
+        target->a[0]=a[0]; target->a[1]=a[2]; target->a[2]=a[3];
+        target->a[3]=a[4]; target->a[4]=a[5];
+        for(size_t i=0;i<size;++i) target->a[5+i]=a[6+i];
+        target->next=source->next;
+    }
+    st->genop=target; lb_load_free_op(st,source); return TE_OK;
+}
 static int transform_update_record(LoaderState *st,BeamOp *source)
 {
     BeamOpArg *a=source->a; BeamOp *first,*previous; size_t count;
@@ -444,6 +547,7 @@ int lb_transform(LoaderState *st)
         unary->a[0]=context; unary->a[1]=fail; unary->a[2]=destination;
         return TE_OK;
     }
+    if(unary->op==genop_put_record_6) return transform_put_record(st,unary);
     if(unary->op==genop_update_record_5) return transform_update_record(st,unary);
     if(unary->op==genop_bs_get_binary2_7) return transform_get_binary2(st,unary);
     if(unary->op==genop_bs_get_integer2_7) return transform_get_integer2(st,unary);

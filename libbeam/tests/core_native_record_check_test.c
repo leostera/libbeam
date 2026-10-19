@@ -27,7 +27,7 @@ int main(int argc,char **argv)
     CHECK(lb_engine_create(NULL,&engine)==LB_ENGINE_OK);
     CHECK(lb_code_space_create(engine,&space)==LB_CODE_OK);
     CHECK(lb_code_load(space,beam,(size_t)length,&module,&error)==LB_CODE_OK);
-    CHECK(lb_atoms_find(space->atoms,"system_limit_body_opcode",24,&module_atom)==LB_ATOM_OK);
+    CHECK(lb_atoms_find(space->atoms,"native_record_check_opcode",26,&module_atom)==LB_ATOM_OK);
     CHECK(lb_atoms_find(space->atoms,"entry",5,&function_atom)==LB_ATOM_OK);
 
     for(size_t i=0;i<sizeof(checks)/sizeof(checks[0]);++i) {
@@ -38,7 +38,7 @@ int main(int argc,char **argv)
         lb_code_entry_release(entry);
         BeamInstr *code=(BeamInstr *)process->i;
         code[0]=checks[i];
-        code[1]=2; /* Relative failure edge inside the fixture's code range. */
+        code[1]=2; /* Packed predicates use a zero-offset source and failure edge. */
         code[2]=op_normal_exit;
         CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
         lb_process_destroy(process);
@@ -83,7 +83,7 @@ int main(int argc,char **argv)
         CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
         lb_code_entry_release(entry);
         LbRecordField field={module_atom,{TAG_a,(Sint)am_true},0};
-        LbRecordDefinition definition={module_atom,1,1,&field};
+        LbRecordDefinition definition={.name=module_atom,.exported=1,.field_count=1,.fields=&field};
         BeamInstr updates[]={module_atom,make_loader_x_reg(0)};
         process->reg[0]=make_small(42);
         Eterm created=lb_record_create(process,&definition,module_atom,1,2,updates);
@@ -110,7 +110,7 @@ int main(int argc,char **argv)
             {lo,{TAG_a,(Sint)am_false},1},
             {hi,{TAG_a,(Sint)am_true},0},
         };
-        LbRecordDefinition two={module_atom,1,2,reversed};
+        LbRecordDefinition two={.name=module_atom,.exported=1,.field_count=2,.fields=reversed};
         Eterm another=lb_record_create(process,&two,module_atom,1,0,NULL);
         CHECK(is_record(another) && lb_record_term_field_count(another)==2);
         const LbRecordTermDefinition *two_def=lb_record_term_definition(another);
@@ -120,14 +120,125 @@ int main(int argc,char **argv)
         Eterm hash_tuple[]={make_arityval(5),module_atom,module_atom,am_true,hi,lo};
         Eterm hash_args[]={make_tuple(hash_tuple),make_small(UINT64_C(1)<<32)};
         CHECK(two_def->hash==lb_bif_phash2_2(process,hash_args,NULL));
+        BeamInstr update[]={module_atom,make_small(99)};
+        Eterm updated=lb_record_update(process,process->reg[0],1,2,update);
+        CHECK(is_record(updated) && lb_record_instance(updated)->values[0]==make_small(99));
+        CHECK(lb_record_instance(process->reg[0])->values[0]==make_small(42));
         BeamInstr wrong[]={am_false,make_small(7)};
+        CHECK(is_non_value(lb_record_update(process,process->reg[0],1,2,wrong)) &&
+              process->freason==LB_EXC_BADFIELD && tuple_val(process->fvalue)[2]==am_false);
         CHECK(is_non_value(lb_record_create(process,&definition,module_atom,1,2,wrong)) &&
-              process->freason==LB_EXC_BADFIELD && process->fvalue==am_false);
+              process->freason==LB_EXC_BADFIELD && is_tuple(process->fvalue));
+        CHECK(tuple_val(process->fvalue)[2]==am_false &&
+              tuple_val(tuple_val(process->fvalue)[1])[1]==module_atom);
         field.default_value=(LbBeamArg){TAG_u,0};
         CHECK(is_non_value(lb_record_create(process,&definition,module_atom,1,0,NULL)) &&
-              process->freason==LB_EXC_NOVALUE && process->fvalue==module_atom);
+              process->freason==LB_EXC_NOVALUE && is_tuple(process->fvalue));
+        CHECK(tuple_val(process->fvalue)[2]==module_atom);
+        Eterm *literal=malloc(3*sizeof(Eterm)); CHECK(literal);
+        literal[0]=make_arityval(2); literal[1]=am_true; literal[2]=make_small(42);
+        field.default_value=(LbBeamArg){TAG_q,(Sint)(make_tuple(literal)|TAG_LITERAL_PTR)};
+        Eterm owned=lb_record_create(process,&definition,module_atom,1,0,NULL);
+        CHECK(is_record(owned)); process->reg[0]=owned;
+        free(literal);
+        CHECK(is_tuple(lb_record_instance(owned)->values[0]) &&
+              !is_literal_ptr(lb_record_instance(owned)->values[0]));
+        CHECK(lb_process_collect_live(process,0,1));
+        CHECK(tuple_val(lb_record_instance(process->reg[0])->values[0])[2]==make_small(42));
         lb_process_destroy(process);
     }
+    for(size_t i=0;i<2;++i) {
+        LbCodeEntry *entry; LbProcess *process;
+        LbRecordField field={module_atom,{TAG_a,(Sint)am_true},0};
+        LbRecordDefinition definition={.name=module_atom,.exported=0,.field_count=1,.fields=&field};
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        Eterm record=lb_record_create(process,&definition,module_atom,0,0,NULL);
+        CHECK(is_record(record)); process->reg[0]=record;
+        if(i&1) { CHECK(process->stop>process->htop+S_RESERVED); *--process->stop=record; }
+        BeamInstr *code=(BeamInstr *)process->i;
+        code[0]=checks[i]; code[1]=2; code[2]=module_atom;
+        code[3]=module_atom; code[4]=op_normal_exit;
+        CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
+        lb_process_destroy(process);
+    }
+
+    for(size_t i=2;i<6;++i) {
+        LbCodeEntry *entry; LbProcess *process;
+        LbRecordField field={module_atom,{TAG_a,(Sint)am_true},0};
+        LbRecordDefinition definition={.name=module_atom,.exported=i<4,.field_count=1,.fields=&field};
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        Eterm record=lb_record_create(process,&definition,module_atom,0,0,NULL);
+        CHECK(is_record(record)); process->reg[0]=record;
+        if(i&1) { CHECK(process->stop>process->htop+S_RESERVED); *--process->stop=record; }
+        BeamInstr *code=(BeamInstr *)process->i;
+        code[0]=checks[i]; code[1]=2; code[2]=module_atom;
+        if(i>=4) code[3]=op_normal_exit;
+        else code[2]=op_normal_exit;
+        LbProcessStatus status=lb_process_run(process,10,10);
+        CHECK(status==LB_PROCESS_DONE);
+        lb_process_destroy(process);
+    }
+
+    for(size_t i=6;i<8;++i) for(int found=0;found<2;++found) {
+        LbCodeEntry *entry; LbProcess *process;
+        LbRecordField field={module_atom,{TAG_a,(Sint)am_true},0};
+        LbRecordDefinition definition={.name=module_atom,.exported=0,.field_count=1,.fields=&field};
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        Eterm record=lb_record_create(process,&definition,module_atom,0,0,NULL);
+        CHECK(is_record(record)); process->reg[0]=record;
+        if(i&1) { CHECK(process->stop>process->htop+S_RESERVED); *--process->stop=record; }
+        BeamInstr *code=(BeamInstr *)process->i;
+        code[0]=checks[i]; code[1]=5;
+        code[2]=(2ULL<<BEAM_WIDE_SHIFT); /* one key/destination pair, src offset 0 */
+        code[3]=found?module_atom:am_false;
+        code[4]=make_loader_x_reg(1); code[5]=op_normal_exit;
+        CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
+        CHECK(process->reg[1]==(found?am_true:NIL));
+        lb_process_destroy(process);
+    }
+
+    for(size_t i=0;i<4;++i) {
+        LbCodeEntry *entry; LbProcess *process;
+        LbRecordField field={module_atom,{TAG_a,(Sint)am_true},0};
+        LbRecordDefinition definition={.name=module_atom,.exported=1,.field_count=1,.fields=&field};
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        Eterm record=lb_record_create(process,&definition,module_atom,0,0,NULL);
+        CHECK(is_record(record)); process->reg[0]=record;
+        if(i&1) { CHECK(process->stop>process->htop+S_RESERVED); *--process->stop=record; }
+        BeamInstr *code=(BeamInstr *)process->i;
+        code[0]=field_getters[i]; code[1]=0; code[2]=0;
+        code[3]=i<2?module_atom:am_Underscore;
+        code[4]=module_atom; code[5]=op_normal_exit;
+        CHECK(lb_process_run(process,10,10)==LB_PROCESS_DONE);
+        CHECK(process->reg[0]==am_true);
+        lb_process_destroy(process);
+    }
+
+    {
+        LbCodeEntry *entry; LbProcess *process;
+        LbRecordField field={module_atom,{TAG_a,(Sint)am_true},0};
+        LbRecordDefinition definition={.name=module_atom,.exported=0,.field_count=1,.fields=&field};
+        CHECK(lb_code_entry_acquire(space,module_atom,function_atom,0,&entry)==LB_CODE_OK);
+        CHECK(lb_process_create(entry,NULL,0,64,&process)==LB_PROCESS_READY);
+        lb_code_entry_release(entry);
+        Eterm record=lb_record_create(process,&definition,module_atom,0,0,NULL);
+        CHECK(is_record(record)); process->reg[0]=record;
+        BeamInstr *code=(BeamInstr *)process->i;
+        code[0]=op_i_get_local_record_field_jxaad; code[1]=0; code[2]=0;
+        code[3]=module_atom; code[4]=am_false; code[5]=op_normal_exit;
+        CHECK(lb_process_run(process,10,10)==LB_PROCESS_EXCEPTION);
+        CHECK(lb_process_exception(process)==am_badfield);
+        lb_process_destroy(process);
+    }
+
     CHECK(lb_code_unload(module)==LB_CODE_OK);
     CHECK(lb_code_space_destroy(space)==LB_CODE_OK);
     CHECK(lb_engine_shutdown(engine)==LB_ENGINE_OK);

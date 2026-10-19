@@ -6,6 +6,7 @@
  * guest effect occurs while scratch borrows terms; every prefix is releasable.
  */
 #include "process_internal.h"
+#include "native_record.h"
 #include "big.h"
 #include "binary.h"
 #include "flatmap.h"
@@ -176,6 +177,13 @@ static int hash_term(HashStack *s,Eterm input,uint32_t *out)
             Eterm *tuple=tuple_val(term); size_t count=arityval(tuple[0]);
             hash=hash_words(hash,(uint32_t)count,0,9);
             for(size_t i=count;i;i--) if(!push_term(s,tuple[i])) return 0;
+        } else if(is_record(term)) {
+            const LbRecordTermDefinition *def=lb_record_term_definition(term);
+            const LbRecordTermInstance *record=lb_record_instance(term);
+            size_t count=lb_record_term_field_count(term);
+            if(!def || !is_small(def->hash)) { p->status=LB_PROCESS_REFUSED; return 0; }
+            hash=hash_words(hash,(uint32_t)count,(uint32_t)signed_val(def->hash),23);
+            for(size_t i=count;i;i--) if(!push_term(s,record->values[i-1])) return 0;
         } else if(lb_is_big(term)) {
             Eterm *big=boxed_val(term); uint32_t constant=(big[0]&_TAG_HEADER_MASK)==NEG_BIG_SUBTAG?10:11;
             for(size_t i=1;i<=lb_big_size(term);++i) {

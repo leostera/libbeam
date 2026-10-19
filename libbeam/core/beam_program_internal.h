@@ -30,7 +30,7 @@ typedef struct LbExternalFunPatch {
 } LbExternalFunPatch;
 typedef struct LbOpBlock { struct LbOpBlock *next; size_t capacity; LbBeamOp ops[]; } LbOpBlock;
 typedef struct { Eterm key; LbBeamArg default_value; size_t declaration_order; } LbRecordField;
-typedef struct { Eterm name; int exported; size_t field_count; LbRecordField *fields; } LbRecordDefinition;
+typedef struct { Eterm name; int exported; size_t field_count; LbRecordField *fields; int has_literal; Sint literal_index; } LbRecordDefinition;
 struct LbBeamProgram {
     LbAllocDomain *domain;
     LbAtomTable *atoms;

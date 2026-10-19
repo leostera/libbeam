@@ -616,7 +616,7 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             REQUIRE(op->a[0].type==TAG_a && op->a[1].type==TAG_u &&
                     op->a[2].type==TAG_u && op->a[3].type==TAG_u && op->a[3].val<=MAX_REG);
             break;
-        case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_update_record_5:case genop_return_0:case genop_send_0:
+        case genop_move_2:case genop_swap_2:case genop_test_heap_2:case genop_put_tuple2_2:case genop_update_record_5:case genop_put_record_6:case genop_return_0:case genop_send_0:
         case genop_loop_rec_2:case genop_loop_rec_end_1:case genop_remove_message_0:
         case genop_wait_1:case genop_wait_timeout_2:case genop_timeout_0:
         case genop_recv_marker_reserve_1:case genop_recv_marker_bind_2:
@@ -629,18 +629,18 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_jump_1:case genop_is_lt_3:case genop_is_ge_3:case genop_is_eq_3:case genop_is_ne_3:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_binary_2:case genop_is_list_2:case genop_is_integer_2:case genop_is_map_2:case genop_is_function_2:case genop_is_function2_3:
         case genop_is_float_2:case genop_is_number_2:case genop_is_port_2:case genop_is_boolean_2:case genop_is_bitstr_2:
-        case genop_is_tuple_2:case genop_is_any_native_record_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:case genop_select_val_3:
+        case genop_is_tuple_2:case genop_is_any_native_record_2:case genop_is_native_record_4:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_select_tuple_arity_3:case genop_select_val_3:
         case genop_is_nonempty_list_2:case genop_get_tuple_element_3:case genop_set_tuple_element_3:case genop_get_list_3:
         case genop_get_hd_2:case genop_get_tl_2:case genop_put_list_3:case genop_gc_bif1_5:case genop_gc_bif2_6:
         case genop_bs_match_3:case genop_bs_match_string_4:case genop_bs_get_utf8_5:case genop_bs_skip_utf8_4:case genop_bs_get_float2_7:case genop_bs_get_utf16_5:case genop_bs_skip_utf16_4:case genop_bs_get_utf32_5:case genop_bs_skip_utf32_4:case genop_bs_skip_bits2_5:case genop_bs_get_binary2_7:case genop_bs_get_integer2_7:case genop_bs_start_match3_4:case genop_bs_start_match4_4:case genop_bs_get_position_3:case genop_bs_set_position_2:case genop_bs_get_tail_3:case genop_gc_bif3_7:case genop_bs_create_bin_6:case genop_bs_init_writable_0:case genop_bif0_2:case genop_bif1_4:case genop_bif2_5:case genop_bif3_6:case genop_make_fun3_3:
         case genop_new_map_3:case genop_put_map_assoc_5:case genop_put_map_exact_5:
-        case genop_get_map_elements_3:case genop_has_map_fields_3:
+        case genop_get_map_elements_3:case genop_has_map_fields_3:case genop_get_record_field_5:
         case genop_fconv_2:case genop_fmove_2:case genop_fload_2:case genop_fstore_2:case genop_fadd_4:case genop_fsub_4:case genop_i_fsub_3:case genop_fnegate_3:case genop_fmul_4:case genop_i_fmul_3:case genop_fdiv_4:case genop_i_fdiv_3:
         case genop_badmatch_1:case genop_badrecord_1:case genop_case_end_1:case genop_if_end_0:case genop_raw_raise_0:case genop_catch_2:case genop_try_2:case genop_raise_2:case genop_try_end_1:case genop_catch_end_1:
         case genop_try_case_1:case genop_try_case_end_1:case genop_build_stacktrace_0:break;
         default:p->error.stage=gen_opc[op->op].name; return LB_CODE_UNSUPPORTED;
         }
-        if(op->op!=genop_select_val_3 && op->op!=genop_bs_match_3 && op->op!=genop_put_tuple2_2 && op->op!=genop_update_record_5 && op->op!=genop_init_yregs_1 && op->op!=genop_select_tuple_arity_3 && op->op!=genop_bs_create_bin_6 && op->op!=genop_make_fun3_3 &&
+        if(op->op!=genop_select_val_3 && op->op!=genop_bs_match_3 && op->op!=genop_put_tuple2_2 && op->op!=genop_update_record_5 && op->op!=genop_put_record_6 && op->op!=genop_init_yregs_1 && op->op!=genop_select_tuple_arity_3 && op->op!=genop_bs_create_bin_6 && op->op!=genop_make_fun3_3 &&
            op->op!=genop_new_map_3 && op->op!=genop_put_map_assoc_5 && op->op!=genop_put_map_exact_5 &&
            op->op!=genop_get_map_elements_3 && op->op!=genop_has_map_fields_3)
             REQUIRE(op->arity==(unsigned)gen_opc[op->op].arity);
@@ -766,6 +766,21 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             REQUIRE(f.heap>=(Uint)a[1].val+1);
             for(r=2;r<op->arity;++r) REQUIRE(root_source(st,&f,a[r]));
             REQUIRE(destination(&f,a[0],TUPLE_SHAPE|(uint32_t)a[1].val)); f.heap-=(Uint)a[1].val+1; break;
+        case genop_put_record_6: {
+            REQUIRE(op->arity>=6 && a[0].type==TAG_p && !a[0].val &&
+                    (a[1].type==TAG_a || a[1].type==TAG_q) &&
+                    (a[2].type==TAG_n || source(st,&f,a[2])) &&
+                    a[4].type==TAG_u && a[4].val>=0 && (Uint)a[4].val<MAX_REG &&
+                    a[5].type==TAG_u && a[5].val>=0 &&
+                    !(a[5].val&1) && (Uint)a[5].val<=2*LB_FLATMAP_MAX_SIZE &&
+                    op->arity==6+(Uint)a[5].val);
+            for(r=6;r<op->arity;r+=2) {
+                REQUIRE(a[r].type==TAG_a && root_source(st,&f,a[r+1]));
+                if(a[r+1].type==TAG_x) REQUIRE((Uint)a[r+1].val<(Uint)a[4].val);
+            }
+            REQUIRE(destination(&f,a[3],0));
+            break;
+        }
         case genop_update_record_5: {
             Uint size,count,destination_register; uint32_t old_destination_shape;
             p->error.stage="update_record header admission";
@@ -962,6 +977,17 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
             }
             REQUIRE(destination(&f,a[2],MAP_SHAPE)); f.heap=0; break;
         }
+        case genop_get_record_field_5:
+            REQUIRE(((a[0].type==TAG_p && !a[0].val) || label(st,a[0])) &&
+                    source(st,&f,a[1]) && (a[2].type==TAG_a || a[2].type==TAG_q) &&
+                    a[3].type==TAG_a);
+            if(a[0].type==TAG_f) {
+                alternate=labels[a[0].val];
+                REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
+                failed=f; failure=&failed;
+            }
+            REQUIRE(destination(&f,a[4],0));
+            break;
         case genop_get_map_elements_3: {
             size_t size;
             REQUIRE(label(st,a[0]) && source(st,&f,a[1]));
@@ -1446,11 +1472,12 @@ static LbCodeStatus verify_flow(LoaderState *st,Analysis *w)
         case genop_is_lt_3:case genop_is_ge_3:case genop_is_eq_3:case genop_is_ne_3:case genop_is_eq_exact_3:case genop_is_ne_exact_3:case genop_is_nil_2:case genop_is_pid_2:case genop_is_reference_2:case genop_is_atom_2:
         case genop_is_binary_2:case genop_is_list_2:case genop_is_integer_2:case genop_is_map_2:case genop_is_function_2:case genop_is_function2_3:
         case genop_is_float_2:case genop_is_number_2:case genop_is_port_2:case genop_is_boolean_2:case genop_is_bitstr_2:
-        case genop_is_tuple_2:case genop_is_any_native_record_2:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_is_nonempty_list_2:
+        case genop_is_tuple_2:case genop_is_any_native_record_2:case genop_is_native_record_4:case genop_test_arity_3:case genop_is_tagged_tuple_4:case genop_is_nonempty_list_2:
             if(op->op==genop_is_eq_exact_3) {
                 p->error.stage="is_eq_exact failure target"; REQUIRE(label(st,a[0]));
                 p->error.stage="is_eq_exact first operand"; REQUIRE(source(st,&f,a[1]));
             } else REQUIRE(label(st,a[0]) && source(st,&f,a[1]));
+            if(op->op==genop_is_native_record_4) REQUIRE(a[2].type==TAG_a && a[3].type==TAG_a);
             alternate=labels[a[0].val];
             REQUIRE(alternate<n && nodes[alternate].function==nodes[index].function);
             if((op->op==genop_is_integer_2 || op->op==genop_is_list_2 || op->op==genop_is_binary_2 ||

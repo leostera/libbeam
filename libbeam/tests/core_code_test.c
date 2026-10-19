@@ -301,6 +301,18 @@ static void many_test(const char *path)
     CHECK(!m.live && !m.bytes); free(data);
     printf("CORE_CODE_GROWTH_OK functions=130 words=%zu failure_prefixes=%zu\n",words,calls);
 }
+static void admit_test(const char *path)
+{
+    Memory m={0}; LbSystemAllocator cb={&m,allocate,release};
+    LbEngine *engine=NULL; LbCodeSpace *space=NULL; LbCodeModule *module=NULL;
+    LbBeamError error; size_t size; unsigned char *data=read_image(path,&size);
+    CHECK(lb_engine_create(&cb,&engine)==LB_ENGINE_OK && lb_code_space_create(engine,&space)==LB_CODE_OK);
+    CHECK(lb_code_load(space,data,size,&module,&error)==LB_CODE_OK && module);
+    CHECK(lb_code_unload(module)==LB_CODE_OK && lb_code_space_destroy(space)==LB_CODE_OK);
+    lb_engine_release(engine); free(data);
+    CHECK(!m.live && !m.bytes);
+    puts("CORE_CODE_ADMISSION_OK module_unload=true");
+}
 static void reject_test(const char *path)
 {
     Memory m={0}; LbSystemAllocator cb={&m,allocate,release}; LbEngine *engine=NULL;
@@ -344,6 +356,7 @@ int main(int argc,char **argv)
     component_test();
     if(argc==3 && !strcmp(argv[1],"--many")) { many_test(argv[2]); return 0; }
     if(argc==3 && !strcmp(argv[1],"--reject")) { reject_test(argv[2]); return 0; }
+    if(argc==3 && !strcmp(argv[1],"--admit")) { admit_test(argv[2]); return 0; }
     if(argc>=2) file_test(argv[1]);
     if(argc==3) linked_test(argv[1],argv[2]);
     CHECK(argc>=1 && argc<=3); return 0;

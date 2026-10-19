@@ -134,8 +134,7 @@ static LbCodeStatus setup(LoaderState *st)
     void *memory;
     /* Records and executable debug instrumentation are not opaque executable
      * capabilities. Ordinary Dbgi/Line/Meta remain passive retained metadata. */
-    if((lb_beam_image_chunk(p->image,LB_BEAM_ID('R','e','c','s'),&chunk)==LB_BEAM_OK && chunk.size) ||
-       (lb_beam_image_chunk(p->image,LB_BEAM_ID('D','b','g','B'),&chunk)==LB_BEAM_OK && chunk.size)) return LB_CODE_UNSUPPORTED;
+    if(lb_beam_image_chunk(p->image,LB_BEAM_ID('D','b','g','B'),&chunk)==LB_BEAM_OK && chunk.size) return LB_CODE_UNSUPPORTED;
     st->module=module->name=p->file_atoms[1];
     if(module->name==am_erlang && !st->space->preloading) return LB_CODE_EXISTS; /* protected native catalog/wrappers */
     module->attributes=p->attributes; module->compile=p->compile;

@@ -34,4 +34,7 @@ static inline LbRecordTermDefinition *lb_record_term_definition(Eterm term)
  * resolved only after a possible GC has refreshed the process registers. */
 Eterm lb_record_create(LbProcess *,const LbRecordDefinition *,Eterm module,
                        size_t live,size_t update_words,const BeamInstr *updates);
+Eterm lb_record_update(LbProcess *,Eterm source,size_t live,
+                       size_t update_words,const BeamInstr *updates);
+Eterm lb_record_get_field(LbProcess *,Eterm source,Eterm id,Eterm key,int local);
 #endif
