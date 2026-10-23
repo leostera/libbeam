@@ -22,17 +22,37 @@ limitations under the License.
 
 # libbeam
 
-Embed a bounded BEAM execution engine in a C++ host: share one immutable `Engine`,
-create isolated `Isolate`s, load verified BEAM module groups, and exchange bounded
-binary requests and responses. Each Isolate owns its module namespace, process and
-application state, atoms, accounting, and reclamation lifecycle. The runtime is a
-selected BEAM profile—not a full OTP node—and grants no ambient filesystem,
-network, port, distribution, host-control, or native-library authority.
+**Fast, resource-limited BEAM isolates for embedded Erlang workloads.** Scale a C++
+host across independent Erlang worlds without booting a full BEAM VM for each one.
+A shared immutable `Engine` creates `Isolate`s with private module namespaces,
+process and application state, atoms, accounting, and reclamation lifecycle. Load
+verified BEAM module groups and exchange bounded binary requests and responses.
 
-libbeam is built additively from selected BEAM components, rather than by
-stripping a whole OTP runtime down. The C core and thin C++ interface provide an
-experimental embedding surface; this is not a full OTP node or a security
-boundary for untrusted workloads.
+## Startup at a glance
+
+| Startup operation | Median | p95 |
+| --- | ---: | ---: |
+| Fresh Erlang VM boot | 159 ms | 181–198 ms |
+| libbeam Isolate creation | 188 µs | 274–284 µs |
+
+**About 850× lower median startup latency** in this preliminary local comparison.
+Measured in two runs of 30 samples on an Apple M4 Pro / macOS 26.6.2, using an
+optimized libbeam build and OTP 29. Startup only; no application or module workload
+was included. Treat these as indicative measurements, not a cross-machine guarantee.
+
+## Finite resource budgets
+
+Isolates have configurable finite resource limits. Defaults are **256 MiB** of
+accounted memory and **10 million invocation work units**; work units estimate
+runtime effort and are not a wall-clock CPU-time guarantee. Request and response
+payloads are bounded as well. This gives hosts explicit controls over embedded BEAM
+workloads while keeping each Isolate's state and reclamation lifecycle independent.
+
+libbeam is built additively from selected BEAM components, rather than by stripping
+a whole OTP runtime down. It implements a selected BEAM profile—not a full OTP node—and
+grants no ambient filesystem, network, port, distribution, host-control, or
+native-library authority. The C core and thin C++ interface provide an experimental
+embedding surface, not a security boundary for untrusted workloads.
 
 ## Layout
 
@@ -69,9 +89,9 @@ The OTP baseline is upstream commit `cca4e72510a97cfca6427602d3da8a22d5ff7a33`
 (`30.0-rc0`), imported directly from `https://github.com/erlang/otp.git`. The only
 initial libbeam-specific source change separated ordinary OTP startup phases in
 `beam/erts/emulator/beam/erl_init.c`. Subsequent direct emulator edits add experimental
-returning startup, not complete engine lifecycle or isolates.
-This repository retains its own earlier snapshot history, without importing upstream
-Git history or maintaining a separate patch series.
+returning-startup mechanics; the current Engine and Isolate runtime lives in `libbeam/`,
+not in a full OTP node lifecycle. This repository retains its own earlier snapshot
+history, without importing upstream Git history or maintaining a separate patch series.
 
 OTP licenses, attribution and bundled third-party notices remain under
 [`beam/LICENSE.txt`](beam/LICENSE.txt), [`beam/LICENSES/`](beam/LICENSES/) and the
