@@ -28,17 +28,18 @@ A shared immutable `Engine` creates `Isolate`s with private module namespaces,
 process and application state, atoms, accounting, and reclamation lifecycle. Load
 verified BEAM module groups and exchange bounded binary requests and responses.
 
-## Startup at a glance
+## libbeam Isolates start about 850× faster
 
 | Startup operation | Median | p95 |
 | --- | ---: | ---: |
+| **libbeam Isolate creation** | **188 µs** | **274–284 µs** |
 | Fresh Erlang VM boot | 159 ms | 181–198 ms |
-| libbeam Isolate creation | 188 µs | 274–284 µs |
 
-**About 850× lower median startup latency** in this preliminary local comparison.
-Measured in two runs of 30 samples on an Apple M4 Pro / macOS 26.6.2, using an
-optimized libbeam build and OTP 29. Startup only; no application or module workload
-was included. Treat these as indicative measurements, not a cross-machine guarantee.
+In this preliminary local comparison, libbeam's median Isolate startup was about
+**850× faster** than booting a fresh Erlang VM. Measured in two runs of 30 samples on
+an Apple M4 Pro / macOS 26.6.2, using an optimized libbeam build and OTP 29. Startup
+only; no application or module workload was included. Treat these as indicative
+measurements, not a cross-machine guarantee.
 
 ## Finite resource budgets
 
